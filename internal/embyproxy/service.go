@@ -596,7 +596,18 @@ func (s *Service) proxyRequest(w http.ResponseWriter, r *http.Request, cfg Confi
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, target, r.Body)
+	var body io.Reader
+	if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
+		data, readErr := io.ReadAll(r.Body)
+		if readErr != nil {
+			http.Error(w, readErr.Error(), http.StatusBadRequest)
+			return
+		}
+		if len(data) > 0 {
+			body = bytes.NewReader(data)
+		}
+	}
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, target, body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return

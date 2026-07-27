@@ -2,7 +2,7 @@ version: "2.1"
 
 services:
   litepan:
-    image: ponphil/litepan:v0.4.0-beta
+    image: ponphil/litepan:v0.4.1-beta
     container_name: litepan
     restart: unless-stopped
     ports:
