@@ -1,0 +1,805 @@
+<script setup lang="ts">
+import { computed, nextTick, onMounted, onUnmounted, ref, toRef, watch } from "vue";
+import type { FileItem } from "@/api/types";
+import type { FileRowOperation, SortKey, SortOrder } from "@/types/file-browser";
+import { formatSize, formatTime } from "@/utils/format";
+import type { DeleteFileHooks } from "@/composables/useFileActions";
+import { useFileTableInline } from "@/composables/useFileTableInline";
+import FileIcon from "./FileIcon.vue";
+import FileTableHeader from "./FileTableHeader.vue";
+import FileGridSortMenu from "./FileGridSortMenu.vue";
+import FileContextMenu from "./FileContextMenu.vue";
+import SvgIcon from "@/components/icons/SvgIcon.vue";
+import type { ContextMenuItem } from "@/composables/useFileTableInline";
+
+const props = defineProps<{
+  files: FileItem[];
+  view: "list" | "grid";
+  loading: boolean;
+  isAdmin: boolean;
+  selectedIds: string[];
+  sortKey: SortKey;
+  sortOrder: SortOrder;
+  sortClass: (key: SortKey) => SortOrder | "";
+  createFolderRequest: number;
+  rowOperations?: Record<string, FileRowOperation>;
+  renameFile: (file: FileItem, newName: string) => Promise<boolean>;
+  createFolder: (name: string) => Promise<boolean>;
+  deleteFile: (file: FileItem, hooks?: DeleteFileHooks) => Promise<boolean>;
+  downloadFile: (file: FileItem) => void;
+  moveFile: (file: FileItem) => void;
+  copyFile: (file: FileItem) => void;
+  nameAlignFile: (file: FileItem) => void;
+}>();
+
+const INITIAL_LIST_RENDER_COUNT = 200;
+const LIST_RENDER_CHUNK_SIZE = 150;
+
+const emit = defineEmits<{
+  open: [file: FileItem];
+  "update:selectedIds": [ids: string[]];
+  "sort-by": [key: SortKey];
+  "set-sort": [payload: { key: SortKey; order: SortOrder }];
+  "generate-current-directory-strm": [];
+}>();
+
+const inline = useFileTableInline({
+  files: toRef(props, "files"),
+  isAdmin: toRef(props, "isAdmin"),
+  loading: toRef(props, "loading"),
+  createFolderRequest: toRef(props, "createFolderRequest"),
+  externalRowOps: toRef(props, "rowOperations"),
+  renameFile: (file, name) => props.renameFile(file, name),
+  createFolder: (name) => props.createFolder(name),
+  deleteFile: (file, hooks) => props.deleteFile(file, hooks),
+  downloadFile: (file) => props.downloadFile(file),
+  moveFile: (file) => props.moveFile(file),
+  copyFile: (file) => props.copyFile(file),
+  nameAlignFile: (file) => props.nameAlignFile(file),
+});
+
+const {
+  renameDraft,
+  renameComposing,
+  inlineCreatingFolder,
+  createFolderDraft,
+  createFolderSaving,
+  createFolderComposing,
+  createFolderPendingName,
+  contextMenu,
+  contextMenuItems,
+  emptyColSpan,
+  emptyStateText,
+  showEmptyRow,
+  isInlineRenaming,
+  isInlineProcessing,
+  getRowOperationText,
+  openContextMenu,
+  cancelInlineRename,
+  submitInlineRename,
+  cancelInlineCreateFolder,
+  submitInlineCreateFolder,
+  handleContextAction,
+  closeContextMenu,
+} = inline;
+
+function bindRenameInput(el: unknown) {
+  inline.renameInputRef.value = el as HTMLInputElement | null;
+}
+
+function bindCreateFolderInput(el: unknown) {
+  inline.createFolderInputRef.value = el as HTMLInputElement | null;
+}
+
+const selectedSet = computed(() => new Set(props.selectedIds));
+const selectAll = computed(
+  () => props.files.length > 0 && props.selectedIds.length === props.files.length,
+);
+const selectedCount = computed(() => props.selectedIds.length);
+const listVisibleCount = ref(INITIAL_LIST_RENDER_COUNT);
+const listLoadMoreSentinel = ref<HTMLTableRowElement | null>(null);
+let listLoadMoreObserver: IntersectionObserver | null = null;
+
+const visibleListFiles = computed(() =>
+  props.view === "list" ? props.files.slice(0, listVisibleCount.value) : props.files,
+);
+const hasMoreListFiles = computed(
+  () => props.view === "list" && visibleListFiles.value.length < props.files.length,
+);
+const headerContextMenu = ref({
+  open: false,
+  x: 0,
+  y: 0,
+});
+const headerContextMenuItems = computed<ContextMenuItem[]>(() =>
+  props.isAdmin ? [{ action: "generate-current-directory-strm", label: "生成当前目录 STRM" }] : [],
+);
+
+function fileKey(f: FileItem) {
+  return f.id || f.name;
+}
+
+function closeDirectoryContextMenu() {
+  headerContextMenu.value.open = false;
+}
+
+function openDirectoryContextMenu(event: MouseEvent) {
+  if (!props.isAdmin) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.closest(".file-row, .file-card, .inline-create-row")) return;
+  const items = headerContextMenuItems.value;
+  if (!items.length) return;
+  closeContextMenu();
+  const menuWidth = 188;
+  const menuHeight = items.length * 38 + 14;
+  headerContextMenu.value = {
+    open: true,
+    x: Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8)),
+    y: Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8)),
+  };
+}
+
+function handleHeaderContextAction(action: string) {
+  closeDirectoryContextMenu();
+  if (action === "generate-current-directory-strm") {
+    emit("generate-current-directory-strm");
+  }
+}
+
+function expandVisibleListFiles() {
+  listVisibleCount.value = Math.min(
+    props.files.length,
+    listVisibleCount.value + LIST_RENDER_CHUNK_SIZE,
+  );
+}
+
+function resetVisibleListFiles() {
+  listVisibleCount.value = INITIAL_LIST_RENDER_COUNT;
+}
+
+function disconnectListLoadMoreObserver() {
+  listLoadMoreObserver?.disconnect();
+  listLoadMoreObserver = null;
+}
+
+function bindListLoadMoreSentinel(el: unknown) {
+  listLoadMoreSentinel.value = el instanceof HTMLTableRowElement ? el : null;
+  void nextTick(updateListLoadMoreObserver);
+}
+
+async function updateListLoadMoreObserver() {
+  disconnectListLoadMoreObserver();
+  if (!hasMoreListFiles.value || !listLoadMoreSentinel.value) return;
+  if (typeof window === "undefined" || typeof window.IntersectionObserver === "undefined") {
+    listVisibleCount.value = props.files.length;
+    return;
+  }
+  listLoadMoreObserver = new window.IntersectionObserver(
+    (entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      expandVisibleListFiles();
+      void nextTick(updateListLoadMoreObserver);
+    },
+    {
+      root: null,
+      rootMargin: "240px 0px",
+      threshold: 0,
+    },
+  );
+  listLoadMoreObserver.observe(listLoadMoreSentinel.value);
+}
+
+function toggleSelection(id: string, checked: boolean) {
+  const next = new Set(props.selectedIds);
+  if (checked) next.add(id);
+  else next.delete(id);
+  emit("update:selectedIds", Array.from(next));
+}
+
+function toggleSelectAll(checked: boolean) {
+  emit("update:selectedIds", checked ? props.files.map(fileKey) : []);
+}
+
+function onRowClick(event: MouseEvent, file: FileItem) {
+  if (!props.isAdmin) {
+    emit("open", file);
+    return;
+  }
+  const target = event.target as HTMLElement | null;
+  if (target?.closest('input[type="checkbox"]')) return;
+  if (target?.closest(".file-name")) {
+    emit("open", file);
+    return;
+  }
+  if (target?.closest(".inline-rename-wrap")) return;
+  const row = event.currentTarget as HTMLElement | null;
+  if (!row) return;
+  const clickX = event.clientX - row.getBoundingClientRect().left;
+  if (clickX > 70) return;
+  toggleSelection(fileKey(file), !selectedSet.value.has(fileKey(file)));
+}
+
+watch(
+  [() => props.files, () => props.view, () => props.sortKey, () => props.sortOrder],
+  async () => {
+    resetVisibleListFiles();
+    await nextTick();
+    void updateListLoadMoreObserver();
+  },
+);
+
+watch(hasMoreListFiles, async () => {
+  await nextTick();
+  void updateListLoadMoreObserver();
+});
+
+onMounted(() => {
+  void nextTick(updateListLoadMoreObserver);
+  document.addEventListener("keydown", handleHeaderMenuKeydown);
+  window.addEventListener("resize", closeDirectoryContextMenu);
+  window.addEventListener("scroll", closeDirectoryContextMenu, true);
+});
+
+onUnmounted(() => {
+  disconnectListLoadMoreObserver();
+  document.removeEventListener("keydown", handleHeaderMenuKeydown);
+  window.removeEventListener("resize", closeDirectoryContextMenu);
+  window.removeEventListener("scroll", closeDirectoryContextMenu, true);
+});
+
+function handleHeaderMenuKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") closeDirectoryContextMenu();
+}
+</script>
+
+<template>
+  <div
+    class="file-list"
+    :class="`view-${view}`"
+    @contextmenu.prevent="openDirectoryContextMenu($event)"
+  >
+    <table v-if="view === 'list'" class="file-table">
+      <FileTableHeader
+        :is-admin="isAdmin"
+        :selected-count="selectedCount"
+        :select-all="selectAll"
+        :files-count="files.length"
+        :sort-class="sortClass"
+        @toggle-select-all="toggleSelectAll"
+        @sort-by="emit('sort-by', $event)"
+      />
+      <tbody>
+        <tr v-if="inlineCreatingFolder" class="inline-create-row">
+          <td v-if="isAdmin" class="checkbox-col" />
+          <td class="name-col">
+            <div
+              v-if="createFolderSaving"
+              class="file-name inline-create-processing"
+              @click.stop
+              @contextmenu.stop
+            >
+              <span class="file-icon-wrap"><SvgIcon name="folder" :size="18" /></span>
+              <span class="file-label" :title="createFolderPendingName">{{
+                createFolderPendingName
+              }}</span>
+              <span class="inline-delete-status">
+                <span class="inline-rename-spinner" aria-label="正在创建" />
+                创建中
+              </span>
+            </div>
+            <div v-else class="inline-rename-wrap inline-create-wrap" @click.stop @contextmenu.stop>
+              <span class="file-icon-wrap"><SvgIcon name="folder" :size="18" /></span>
+              <input
+                :ref="bindCreateFolderInput"
+                v-model="createFolderDraft"
+                class="inline-rename-input"
+                placeholder="输入文件夹名称"
+                maxlength="100"
+                @compositionstart="createFolderComposing = true"
+                @compositionend="createFolderComposing = false"
+                @keydown.enter="!createFolderComposing && submitInlineCreateFolder()"
+                @keydown.esc.prevent="cancelInlineCreateFolder()"
+                @blur="submitInlineCreateFolder()"
+              />
+              <button
+                type="button"
+                class="folder-inline-btn confirm"
+                title="确认"
+                @mousedown.prevent
+                @click="submitInlineCreateFolder()"
+              >
+                ✓
+              </button>
+              <button
+                type="button"
+                class="folder-inline-btn cancel"
+                title="取消"
+                @mousedown.prevent
+                @click="cancelInlineCreateFolder()"
+              >
+                ×
+              </button>
+            </div>
+          </td>
+          <td class="size-col">-</td>
+          <td class="time-col">-</td>
+        </tr>
+
+        <tr v-if="showEmptyRow">
+          <td :colspan="emptyColSpan" class="state state--empty-cell">{{ emptyStateText }}</td>
+        </tr>
+
+        <tr
+          v-for="(f, index) in visibleListFiles"
+          v-if="!showEmptyRow"
+          :key="fileKey(f)"
+          class="file-row"
+          :class="{ processing: isInlineProcessing(f) }"
+          @click="onRowClick($event, f)"
+          @contextmenu.prevent.stop="openContextMenu($event, f)"
+        >
+          <td v-if="isAdmin" class="checkbox-col" @click.stop>
+            <input
+              :id="`file-checkbox-${index}`"
+              type="checkbox"
+              :checked="selectedSet.has(fileKey(f))"
+              @change="toggleSelection(fileKey(f), ($event.target as HTMLInputElement).checked)"
+            />
+          </td>
+          <td class="name-col">
+            <div
+              v-if="isInlineRenaming(f)"
+              class="inline-rename-wrap"
+              @click.stop
+              @contextmenu.stop
+            >
+              <span class="file-icon-wrap"><FileIcon :file="f" :size="18" /></span>
+              <input
+                :ref="bindRenameInput"
+                v-model="renameDraft"
+                class="inline-rename-input"
+                @compositionstart="renameComposing = true"
+                @compositionend="renameComposing = false"
+                @keydown.enter="!renameComposing && submitInlineRename()"
+                @keydown.esc.prevent="cancelInlineRename()"
+                @blur="submitInlineRename()"
+              />
+              <button
+                type="button"
+                class="folder-inline-btn confirm"
+                title="确认"
+                @mousedown.prevent
+                @click="submitInlineRename()"
+              >
+                ✓
+              </button>
+              <button
+                type="button"
+                class="folder-inline-btn cancel"
+                title="取消"
+                @mousedown.prevent
+                @click="cancelInlineRename()"
+              >
+                ×
+              </button>
+            </div>
+            <div v-else class="file-name" @click.stop="emit('open', f)">
+              <span class="file-icon-wrap"><FileIcon :file="f" :size="18" /></span>
+              <span class="file-text">
+                <span class="file-label" :title="f.name">{{ f.name }}</span>
+                <span class="file-mobile-meta">
+                  {{ formatTime(f.mod_time) }}<template v-if="!f.is_dir"> · {{ formatSize(f.size, f.is_dir) }}</template>
+                </span>
+              </span>
+              <span v-if="isInlineProcessing(f)" class="inline-delete-status">
+                <span class="inline-rename-spinner" :aria-label="getRowOperationText(f)" />
+                {{ getRowOperationText(f) }}
+              </span>
+            </div>
+          </td>
+          <td class="size-col">{{ formatSize(f.size, f.is_dir) }}</td>
+          <td class="time-col">{{ formatTime(f.mod_time) }}</td>
+        </tr>
+        <tr
+          v-if="hasMoreListFiles && !showEmptyRow"
+          :ref="bindListLoadMoreSentinel"
+          aria-hidden="true"
+          class="file-list__load-more-row"
+        >
+          <td :colspan="emptyColSpan" class="file-list__load-more-sentinel" />
+        </tr>
+      </tbody>
+    </table>
+
+    <div v-else class="file-grid-wrapper">
+      <div class="file-grid-toolbar">
+        <div class="file-grid-toolbar-left">
+          <label v-if="isAdmin" class="grid-select-all">
+            <input
+              type="checkbox"
+              :checked="selectAll"
+              :disabled="files.length === 0"
+              @change="toggleSelectAll(($event.target as HTMLInputElement).checked)"
+            />
+            <span>{{ selectedCount > 0 ? `已选中 ${selectedCount} 项` : "全选" }}</span>
+          </label>
+          <span v-else class="grid-count">共 {{ files.length }} 项</span>
+        </div>
+        <FileGridSortMenu
+          :sort-key="sortKey"
+          :sort-order="sortOrder"
+          @set-sort="emit('set-sort', $event)"
+        />
+      </div>
+
+      <div v-if="showEmptyRow && !inlineCreatingFolder" class="grid-state">
+        <template v-if="!loading">
+          <SvgIcon name="folder" :size="40" />
+        </template>
+        <p>{{ emptyStateText }}</p>
+      </div>
+
+      <div v-else class="file-grid">
+        <article v-if="inlineCreatingFolder" class="file-card file-card-inline-create">
+          <div
+            v-if="createFolderSaving"
+            class="file-card-main inline-create-processing"
+            @click.stop
+            @contextmenu.stop
+          >
+            <span class="file-card-icon"><SvgIcon name="folder" :size="40" /></span>
+            <span class="file-card-name" :title="createFolderPendingName">{{
+              createFolderPendingName
+            }}</span>
+            <span class="inline-delete-status">
+              <span class="inline-rename-spinner" aria-label="正在创建" />
+              创建中
+            </span>
+          </div>
+          <div v-else class="file-card-main file-card-rename" @click.stop @contextmenu.stop>
+            <span class="file-card-icon"><SvgIcon name="folder" :size="40" /></span>
+            <div class="inline-rename-wrap inline-create-wrap">
+              <input
+                :ref="bindCreateFolderInput"
+                v-model="createFolderDraft"
+                class="inline-rename-input grid-rename-input"
+                placeholder="输入文件夹名称"
+                maxlength="100"
+                @compositionstart="createFolderComposing = true"
+                @compositionend="createFolderComposing = false"
+                @keydown.enter="!createFolderComposing && submitInlineCreateFolder()"
+                @keydown.esc.prevent="cancelInlineCreateFolder()"
+                @blur="submitInlineCreateFolder()"
+              />
+              <button
+                type="button"
+                class="folder-inline-btn confirm"
+                @mousedown.prevent
+                @click="submitInlineCreateFolder()"
+              >
+                ✓
+              </button>
+              <button
+                type="button"
+                class="folder-inline-btn cancel"
+                @mousedown.prevent
+                @click="cancelInlineCreateFolder()"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        </article>
+
+        <article
+          v-for="(f, index) in files"
+          :key="fileKey(f)"
+          class="file-card"
+          :class="{ selected: selectedSet.has(fileKey(f)), processing: isInlineProcessing(f) }"
+          @contextmenu.prevent.stop="openContextMenu($event, f)"
+        >
+          <label
+            v-if="isAdmin"
+            class="file-card-checkbox"
+            :for="`grid-file-checkbox-${index}`"
+            @click.stop
+          >
+            <input
+              :id="`grid-file-checkbox-${index}`"
+              type="checkbox"
+              :checked="selectedSet.has(fileKey(f))"
+              @change="toggleSelection(fileKey(f), ($event.target as HTMLInputElement).checked)"
+            />
+          </label>
+
+          <div
+            v-if="isInlineRenaming(f)"
+            class="file-card-main file-card-rename"
+            @click.stop
+            @contextmenu.stop
+          >
+            <span class="file-card-icon"><FileIcon :file="f" :size="40" /></span>
+            <input
+              ref="renameInputRef"
+              v-model="renameDraft"
+              class="inline-rename-input grid-rename-input"
+              @compositionstart="renameComposing = true"
+              @compositionend="renameComposing = false"
+              @keydown.enter="!renameComposing && submitInlineRename()"
+              @keydown.esc.prevent="cancelInlineRename()"
+              @blur="submitInlineRename()"
+            />
+            <div class="inline-rename-wrap">
+              <button
+                type="button"
+                class="folder-inline-btn confirm"
+                @mousedown.prevent
+                @click="submitInlineRename()"
+              >
+                ✓
+              </button>
+              <button
+                type="button"
+                class="folder-inline-btn cancel"
+                @mousedown.prevent
+                @click="cancelInlineRename()"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          <button v-else type="button" class="file-card-main" @click="emit('open', f)">
+            <span class="file-card-icon"><FileIcon :file="f" :size="40" /></span>
+            <span class="file-card-name" :title="f.name">{{ f.name }}</span>
+            <span v-if="isInlineProcessing(f)" class="inline-delete-status">
+              <span class="inline-rename-spinner" :aria-label="getRowOperationText(f)" />
+              {{ getRowOperationText(f) }}
+            </span>
+            <span v-else class="file-card-time">{{ formatTime(f.mod_time) }}</span>
+          </button>
+        </article>
+      </div>
+    </div>
+
+    <FileContextMenu
+      :open="contextMenu.open"
+      :x="contextMenu.x"
+      :y="contextMenu.y"
+      :items="contextMenuItems"
+      @action="handleContextAction"
+      @close="closeContextMenu"
+    />
+    <FileContextMenu
+      :open="headerContextMenu.open"
+      :x="headerContextMenu.x"
+      :y="headerContextMenu.y"
+      :items="headerContextMenuItems"
+      @action="handleHeaderContextAction"
+      @close="closeDirectoryContextMenu"
+    />
+  </div>
+</template>
+
+<style scoped>
+.file-list {
+  overflow-x: auto;
+  position: relative;
+  border-radius: 0 0 12px 12px;
+}
+
+.file-list.view-grid {
+  overflow: visible;
+}
+
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 60px 20px;
+  color: var(--text-muted);
+}
+
+.state--empty p,
+.state--empty-cell {
+  margin: 0;
+  font-style: italic;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.file-row {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.file-row:hover {
+  background: var(--surface-sunken);
+}
+
+.file-list__load-more-row {
+  pointer-events: none;
+}
+
+.file-list__load-more-sentinel {
+  height: 1px;
+  padding: 0;
+  border-bottom: none;
+  background: transparent;
+}
+
+.file-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-regular);
+  min-width: 0;
+}
+
+.file-icon-wrap {
+  line-height: 0;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.file-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.file-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.file-mobile-meta {
+  display: none;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-grid-wrapper {
+  padding: 0 0 16px;
+}
+
+.file-grid-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.grid-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-regular);
+  cursor: pointer;
+  user-select: none;
+}
+
+.grid-count {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.file-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(142px, 1fr));
+  gap: 14px 12px;
+  padding: 16px;
+}
+
+.file-card {
+  position: relative;
+  min-width: 0;
+  border-radius: 14px;
+}
+
+.file-card-main {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 10px 14px;
+  border: none;
+  border-radius: 14px;
+  background: transparent;
+  cursor: pointer;
+  text-align: center;
+  transition: background-color 0.18s ease;
+}
+
+.file-card:hover .file-card-main,
+.file-card.selected .file-card-main {
+  background: var(--surface-sunken);
+}
+
+.file-card.selected .file-card-main {
+  background: var(--info-soft);
+}
+
+.file-card-icon {
+  width: 56px;
+  height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.file-card-name {
+  width: 100%;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-card-time {
+  width: 100%;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-card-checkbox {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+}
+
+.file-card:hover .file-card-checkbox,
+.file-card.selected .file-card-checkbox {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.file-card-inline-create .file-card-main {
+  background: var(--surface-sunken);
+}
+
+@media (max-width: 768px) {
+  .file-list {
+    overflow-x: hidden;
+  }
+
+  .file-name {
+    align-items: flex-start;
+  }
+
+  .file-mobile-meta {
+    display: block;
+  }
+}
+</style>

@@ -1,0 +1,123 @@
+package upload
+
+import (
+	"context"
+	"os"
+	"time"
+)
+
+func (m *Manager) Pause(_ context.Context, taskID string) (*Task, bool) {
+	m.mu.Lock()
+	st, ok := m.tasks[taskID]
+	if !ok {
+		m.mu.Unlock()
+		return nil, false
+	}
+	if st.Status != StatusPending && st.Status != StatusRunning {
+		t := m.snapshot(st)
+		m.mu.Unlock()
+		return t, true
+	}
+	st.cancelMode = "pause"
+	st.Status = StatusPaused
+	st.SpeedBytesPerSecond = 0
+	st.Message = "上传已暂停"
+	st.Error = ""
+	st.UpdatedAt = unixFloat(time.Now())
+	cancel := st.cancel
+	snap := st
+	m.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	m.runCond.Broadcast()
+	m.persistTask(snap)
+	m.broadcast()
+	return m.Get(context.Background(), taskID)
+}
+
+func (m *Manager) Resume(ctx context.Context, taskID string) (*Task, bool) {
+	m.mu.Lock()
+	st, ok := m.tasks[taskID]
+	if !ok {
+		m.mu.Unlock()
+		return nil, false
+	}
+	if st.Status != StatusPaused && st.Status != StatusFailed && st.Status != StatusCanceled {
+		t := m.snapshot(st)
+		m.mu.Unlock()
+		return t, true
+	}
+	done := st.runDone
+	m.mu.Unlock()
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return m.Get(context.Background(), taskID)
+		}
+	}
+
+	m.mu.Lock()
+	st, ok = m.tasks[taskID]
+	if !ok {
+		m.mu.Unlock()
+		return nil, false
+	}
+	if st.Status != StatusPaused && st.Status != StatusFailed && st.Status != StatusCanceled {
+		t := m.snapshot(st)
+		m.mu.Unlock()
+		return t, true
+	}
+	if st.localPath == "" {
+		st.Status = StatusFailed
+		st.Message = "上传失败"
+		st.Error = "本地临时文件不存在，无法继续上传"
+		st.UpdatedAt = unixFloat(time.Now())
+		snap := st
+		m.mu.Unlock()
+		m.persistTask(snap)
+		m.broadcast()
+		return snapshotCopy(snap), true
+	}
+	if _, err := os.Stat(st.localPath); err != nil {
+		st.Status = StatusFailed
+		st.Message = "上传失败"
+		st.Error = "本地临时文件不存在，无法继续上传"
+		st.UpdatedAt = unixFloat(time.Now())
+		snap := st
+		m.mu.Unlock()
+		m.persistTask(snap)
+		m.broadcast()
+		return snapshotCopy(snap), true
+	}
+	m.queueOrder++
+	st.QueueOrder = m.queueOrder
+	st.Status = StatusPending
+	st.Error = ""
+	st.Result = nil
+	st.cancelMode = ""
+	st.runDone = make(chan struct{})
+	progress, uploaded := resumedProgress(st)
+	if len(st.resumeData) > 0 {
+		st.Progress = progress
+		st.UploadedBytes = uploaded
+		st.Message = "准备继续上传"
+	} else {
+		st.Progress = 0
+		st.UploadedBytes = 0
+		st.Message = "等待上传"
+	}
+	snap := st
+	task := m.snapshot(st)
+	m.mu.Unlock()
+	m.persistTask(snap)
+	go m.runTask(taskID)
+	m.broadcast()
+	return task, true
+}
+
+func snapshotCopy(st *taskState) *Task {
+	t := st.Task
+	return &t
+}

@@ -1,0 +1,79 @@
+package strm
+
+import (
+	"context"
+	"io"
+	"log/slog"
+	"sync"
+	"testing"
+	"time"
+
+	"litepan/internal/domain"
+	"litepan/internal/settings"
+	"litepan/internal/store"
+)
+
+func testService(t *testing.T) (*Service, *store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	db, err := store.Open(ctx, store.Options{Memory: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(db)
+	settingsSvc, err := settings.New(ctx, st.Configs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(ServiceOptions{
+		Repo:     st.StrmTasks,
+		Settings: settingsSvc,
+		Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	return svc, st
+}
+
+type reciprocalRetentionBusy struct {
+	other RunningAccountLister
+}
+
+func (r reciprocalRetentionBusy) GetRunningAccountIDs() []int64 {
+	if r.other != nil {
+		_ = r.other.GetRunningAccountIDs()
+	}
+	return []int64{7}
+}
+
+func TestShouldRunCrossBusyCheckNoDeadlock(t *testing.T) {
+	svc, _ := testService(t)
+	svc.SetRetentionBusyChecker(reciprocalRetentionBusy{other: svc})
+
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		svc.mu.Lock()
+		time.Sleep(200 * time.Millisecond)
+		svc.mu.Unlock()
+	}()
+	go func() {
+		defer wg.Done()
+		task := &domain.StrmTask{ID: 1, AccountID: 7, LastScan: time.Now().Add(-2 * time.Hour)}
+		svc.shouldRun(task, time.Now())
+	}()
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shouldRun cross busy check deadlocked")
+	}
+}

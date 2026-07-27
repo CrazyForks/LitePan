@@ -1,0 +1,209 @@
+package api
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+
+	"litepan/internal/crosstransfer"
+	"litepan/internal/domain"
+)
+
+func (h *Handler) crossTransferRoutes(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.crossTransfer != nil) {
+		return
+	}
+	routes := crosstransfer.BuildRoutes()
+	writeOK(w, routes)
+}
+
+type crossTransferScanReq struct {
+	SourceAccountID    int64  `json:"source_account_id"`
+	SourceParentID     string `json:"source_parent_id"`
+	Method             string `json:"method"`
+	SourceDisplayPath  string `json:"source_display_path"`
+}
+
+func (h *Handler) crossTransferScan(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.crossTransfer != nil) {
+		return
+	}
+	var req crossTransferScanReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, err)
+		return
+	}
+	result, err := h.crossTransfer.ScanSource(r.Context(), req.SourceAccountID, req.SourceParentID, req.Method, req.SourceDisplayPath)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeOK(w, result)
+}
+
+type crossTransferProbeFile struct {
+	SourceFileID string `json:"source_file_id"`
+	RelPath      string `json:"rel_path"`
+	Name         string `json:"name"`
+	Size         int64  `json:"size"`
+	Hash         string `json:"hash"`
+}
+
+type crossTransferProbeReq struct {
+	SourceAccountID int64                    `json:"source_account_id"`
+	TargetAccountID int64                    `json:"target_account_id"`
+	TargetParentID  string                   `json:"target_parent_id"`
+	Method          string                   `json:"method"`
+	Files           []crossTransferProbeFile `json:"files"`
+}
+
+func (h *Handler) crossTransferProbe(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.crossTransfer != nil) {
+		return
+	}
+	var req crossTransferProbeReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, err)
+		return
+	}
+	h.streamCrossTransferNDJSON(w, r, func(emit func(crosstransfer.StreamEvent) error) error {
+		files := make([]crosstransfer.TransferFile, 0, len(req.Files))
+		for _, f := range req.Files {
+			files = append(files, crosstransfer.TransferFile{
+				SourceFileID: f.SourceFileID,
+				RelPath:      f.RelPath,
+				Name:         f.Name,
+				Size:         f.Size,
+				Hash:         f.Hash,
+			})
+		}
+		return h.crossTransfer.ProbeStream(r.Context(), req.SourceAccountID, req.TargetAccountID, req.TargetParentID, req.Method, files, emit)
+	})
+}
+
+type crossTransferTransferFile struct {
+	SourceFileID string `json:"source_file_id"`
+	RelPath      string `json:"rel_path"`
+	RelDir       string `json:"rel_dir"`
+	Name         string `json:"name"`
+	Size         int64  `json:"size"`
+	Hash         string `json:"hash"`
+}
+
+type crossTransferExecuteReq struct {
+	SourceAccountID    int64                       `json:"source_account_id"`
+	SourceAccountName  string                      `json:"source_account_name"`
+	SourceDriverType   string                      `json:"source_driver_type"`
+	TargetAccountID    int64                       `json:"target_account_id"`
+	TargetAccountName  string                      `json:"target_account_name"`
+	TargetDriverType   string                      `json:"target_driver_type"`
+	TargetParentID     string                      `json:"target_parent_id"`
+	TargetDisplayPath  string                      `json:"target_display_path"`
+	Method             string                      `json:"method"`
+	Files              []crossTransferTransferFile `json:"files"`
+	Conflict           string                      `json:"conflict"`
+	Fallback           bool                        `json:"fallback"`
+}
+
+func (h *Handler) crossTransferExecute(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.crossTransfer != nil) {
+		return
+	}
+	var req crossTransferExecuteReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, err)
+		return
+	}
+	files := make([]crosstransfer.TransferFile, 0, len(req.Files))
+	for _, f := range req.Files {
+		files = append(files, crosstransfer.TransferFile{
+			SourceFileID: f.SourceFileID,
+			RelPath:      f.RelPath,
+			RelDir:       f.RelDir,
+			Name:         f.Name,
+			Size:         f.Size,
+			Hash:         f.Hash,
+		})
+	}
+	h.streamCrossTransferNDJSON(w, r, func(emit func(crosstransfer.StreamEvent) error) error {
+		return h.crossTransfer.ExecuteStream(r.Context(), crosstransfer.ExecuteInput{
+			SourceAccountID:   req.SourceAccountID,
+			SourceAccountName: req.SourceAccountName,
+			SourceDriverType:  req.SourceDriverType,
+			TargetAccountID:   req.TargetAccountID,
+			TargetAccountName: req.TargetAccountName,
+			TargetDriverType:  req.TargetDriverType,
+			TargetParentID:    req.TargetParentID,
+			TargetDisplayPath: req.TargetDisplayPath,
+			MethodID:          req.Method,
+			Files:             files,
+			Conflict:          req.Conflict,
+			Fallback:          req.Fallback,
+		}, emit)
+	})
+}
+
+func (h *Handler) streamCrossTransferNDJSON(w http.ResponseWriter, r *http.Request, fn func(func(crosstransfer.StreamEvent) error) error) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, domain.Errorf(domain.CodeInternal, "不支持流式响应"))
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	writeLine := func(event crosstransfer.StreamEvent) error {
+		raw, err := json.Marshal(event)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "%s\n", raw); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	}
+
+	if err := fn(writeLine); err != nil {
+		_ = writeLine(crosstransfer.StreamEvent{"event": "error", "message": err.Error()})
+	}
+}
+
+func (h *Handler) crossTransferRelayTasks(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.crossTransfer != nil) {
+		return
+	}
+	writeOK(w, h.crossTransfer.Relay().ListTasks())
+}
+
+func (h *Handler) crossTransferRelayStream(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.crossTransfer != nil) {
+		return
+	}
+	s, err := newSSEWriter(w)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	ch := h.crossTransfer.Relay().Subscribe()
+	defer h.crossTransfer.Relay().Unsubscribe(ch)
+	streamSSEMessages(r, s, "tasks", "", ch)
+}
+
+type crossTransferRelayDeleteReq struct {
+	TaskIDs []string `json:"task_ids"`
+}
+
+func (h *Handler) crossTransferRelayBatchDelete(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.crossTransfer != nil) {
+		return
+	}
+	var req crossTransferRelayDeleteReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, err)
+		return
+	}
+	removed := h.crossTransfer.Relay().DeleteTasks(req.TaskIDs)
+	writeOK(w, map[string]any{"removed": removed})
+}
