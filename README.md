@@ -115,11 +115,7 @@ services:
 > **不要用 `ponphil/litepan:latest` 部署本仓库对应的 Go 版。**  
 > `latest` 仍是 Python 旧版镜像。若你需要旧版程序与 Compose 脚本，请前往归档仓库：[LitePan-old](https://github.com/Ponphil/LitePan-old)。
 
-<br>
-
----
-
-## ▎ 反馈与支持
+## ▎ 支持
 
 <table>
   <tr>
@@ -129,15 +125,21 @@ services:
       <img src="docs/pictures/wechat-tip.png" alt="微信赞赏" width="260">
     </td>
     <td width="50%" valign="top">
-      <h3>反馈</h3>
-      <p>交流请到 <a href="https://space.bilibili.com/1501989416">B 站主页</a>。</p>
-      <p>暂不接受公开 PR；有维护意愿请私信。</p>
+      <h3>赞助致谢</h3>
+      <p>
+        感谢 <strong>Harvey</strong> 的支持（¥6.66）
+        <img src="https://img.shields.io/badge/%E9%A6%96%E8%B5%9E-E6A817?style=flat-square&labelColor=1B1B2F" alt="首赞" height="18" align="absmiddle">
+      </p>
+      <p>
+        感谢 <strong>飞翔的小鸟</strong> 的支持（¥10）
+      </p>
     </td>
   </tr>
 </table>
 
-<br>
-
+## ▎ 反馈
+交流请到 <a href="https://space.bilibili.com/1501989416">B 站主页</a>
+暂不接受公开 PR；有维护意愿请私信。
 ---
 
 ## ▎ 许可
