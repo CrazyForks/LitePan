@@ -2,31 +2,40 @@ package strm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"litepan/internal/playback"
 )
 
 const (
-	metadataHTTPAttempts  = 3
-	metadataResolveRounds = 3
-	metadataClientTimeout = 5 * time.Minute
-	metadataFallbackUA    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	metadataCDNConcurrency = 3
+	metadataHTTPAttempts   = 3
+	metadataResolveRounds  = 3
+	metadataClientTimeout  = 5 * time.Minute
+	metadataFallbackUA     = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
+type metadataResolver interface {
+	Resolve(ctx context.Context, accountID int64, fileID, ua string, refresh bool) (playback.Resolved, error)
+}
+
 type metadataSyncer struct {
-	playback   *playback.Service
+	playback   metadataResolver
 	failures   *FailureCollector
 	client     *http.Client
 	onProgress ScanProgressReporter
+	resolveMu  sync.Mutex
 }
 
 type metadataItem struct {
@@ -36,6 +45,16 @@ type metadataItem struct {
 	relPath       string
 	legacyRelPath string
 	direct        bool
+}
+
+type metadataGroup struct {
+	fileID string
+	items  []metadataItem
+}
+
+type metadataDownloadJob struct {
+	group    metadataGroup
+	resolved playback.Resolved
 }
 
 func (m *metadataSyncer) syncFiles(ctx context.Context, accountID int64, root string, items []metadataItem) (int64, error) {
@@ -52,23 +71,113 @@ func (m *metadataSyncer) syncFiles(ctx context.Context, accountID int64, root st
 	if client == nil {
 		client = &http.Client{Timeout: metadataClientTimeout}
 	}
+
+	var stateMu sync.Mutex
 	var created int64
-	for i, item := range pending {
-		if err := ctx.Err(); err != nil {
-			return created, err
-		}
-		label := metadataProgressLabel(item.relPath)
-		reportMetadataProgress(m.onProgress, i, total, label)
-		ok, err := m.syncOne(ctx, client, accountID, root, item)
-		if err != nil {
-			return created, err
-		}
-		if ok {
+	done := 0
+	finish := func(item metadataItem, made bool) {
+		stateMu.Lock()
+		if made {
 			created++
 		}
-		reportMetadataProgress(m.onProgress, i+1, total, label)
+		done++
+		reportMetadataProgress(m.onProgress, done, total, metadataProgressLabel(item.relPath))
+		stateMu.Unlock()
 	}
-	return created, nil
+	createdCount := func() int64 {
+		stateMu.Lock()
+		defer stateMu.Unlock()
+		return created
+	}
+
+	groups := make([]metadataGroup, 0, len(pending))
+	groupIndex := make(map[string]int, len(pending))
+	for _, item := range pending {
+		if err := ctx.Err(); err != nil {
+			return createdCount(), err
+		}
+		migrated, err := migrateLegacyMetadata(root, item)
+		if err != nil {
+			m.recordFailure(item.relPath, err.Error())
+			finish(item, false)
+			continue
+		}
+		if migrated {
+			finish(item, true)
+			continue
+		}
+		key := item.fileID
+		if key == "" {
+			key = "\x00" + item.relPath
+		}
+		if index, ok := groupIndex[key]; ok {
+			groups[index].items = append(groups[index].items, item)
+			continue
+		}
+		groupIndex[key] = len(groups)
+		groups = append(groups, metadataGroup{fileID: item.fileID, items: []metadataItem{item}})
+	}
+
+	jobs := make(chan metadataDownloadJob, metadataCDNConcurrency*2)
+	var workers sync.WaitGroup
+	workers.Add(metadataCDNConcurrency)
+	for range metadataCDNConcurrency {
+		go func() {
+			defer workers.Done()
+			for job := range jobs {
+				body, err := m.downloadResolvedWithRetry(ctx, client, accountID, job.group.fileID, job.resolved)
+				if err != nil {
+					if ctx.Err() == nil {
+						for _, item := range job.group.items {
+							m.recordFailure(item.relPath, err.Error())
+							finish(item, false)
+						}
+					}
+					continue
+				}
+				for _, item := range job.group.items {
+					if ctx.Err() != nil {
+						break
+					}
+					written, writeErr := writeMetadataFile(root, item.relPath, body)
+					if writeErr != nil {
+						m.recordFailure(item.relPath, writeErr.Error())
+						finish(item, false)
+						continue
+					}
+					finish(item, written)
+				}
+			}
+		}()
+	}
+
+	for _, group := range groups {
+		if err := ctx.Err(); err != nil {
+			break
+		}
+		resolved, err := m.resolve(ctx, accountID, group.fileID, false)
+		if err != nil {
+			if ctx.Err() != nil {
+				break
+			}
+			for _, item := range group.items {
+				m.recordFailure(item.relPath, err.Error())
+				finish(item, false)
+			}
+			continue
+		}
+		select {
+		case jobs <- metadataDownloadJob{group: group, resolved: resolved}:
+		case <-ctx.Done():
+			break
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	if err := ctx.Err(); err != nil {
+		return createdCount(), err
+	}
+	return createdCount(), nil
 }
 
 func filterPendingMetadataItems(root string, items []metadataItem) []metadataItem {
@@ -103,75 +212,150 @@ func (m *metadataSyncer) syncOne(ctx context.Context, client *http.Client, accou
 	if info, statErr := os.Stat(dest); statErr == nil && info.Size() > 0 {
 		return false, nil
 	}
-	if item.legacyRelPath != "" {
-		legacy := filepath.Join(root, item.legacyRelPath)
-		if info, statErr := os.Stat(legacy); statErr == nil && info.Size() > 0 {
-			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-				m.recordFailure(item.relPath, err.Error())
-				return false, nil
-			}
-			if err := os.Rename(legacy, dest); err != nil {
-				m.recordFailure(item.relPath, err.Error())
-				return false, nil
-			}
-			return true, nil
-		}
+	if migrated, migrateErr := migrateLegacyMetadata(root, item); migrateErr != nil {
+		m.recordFailure(item.relPath, migrateErr.Error())
+		return false, nil
+	} else if migrated {
+		return true, nil
 	}
 	body, dlErr := m.downloadWithRetry(ctx, client, accountID, item.fileID, 0)
 	if dlErr != nil {
 		m.recordFailure(item.relPath, dlErr.Error())
 		return false, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		m.recordFailure(item.relPath, err.Error())
+	written, writeErr := writeMetadataFile(root, item.relPath, body)
+	if writeErr != nil {
+		m.recordFailure(item.relPath, writeErr.Error())
 		return false, nil
 	}
-	if err := os.WriteFile(dest, body, 0o644); err != nil {
-		m.recordFailure(item.relPath, err.Error())
+	return written, nil
+}
+
+func migrateLegacyMetadata(root string, item metadataItem) (bool, error) {
+	if item.legacyRelPath == "" {
 		return false, nil
+	}
+	legacy := filepath.Join(root, item.legacyRelPath)
+	if info, err := os.Stat(legacy); err != nil || info.Size() <= 0 {
+		return false, nil
+	}
+	dest := filepath.Join(root, item.relPath)
+	if _, err := os.Stat(dest); err == nil {
+		return false, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return false, err
+	}
+	if err := os.Link(legacy, dest); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := os.Remove(legacy); err != nil {
+		return false, err
 	}
 	return true, nil
+}
+
+func writeMetadataFile(root, relPath string, body []byte) (bool, error) {
+	dest := filepath.Join(root, relPath)
+	if _, err := os.Stat(dest); err == nil {
+		return false, nil
+	}
+	dir := filepath.Dir(dest)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return false, err
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(dest)+".tmp-*")
+	if err != nil {
+		return false, err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return false, err
+	}
+	if _, err := tmp.Write(body); err != nil {
+		_ = tmp.Close()
+		return false, err
+	}
+	if err := tmp.Close(); err != nil {
+		return false, err
+	}
+	if err := os.Link(tmpPath, dest); err == nil {
+		return true, nil
+	} else if errors.Is(err, fs.ErrExist) {
+		return false, nil
+	} else {
+		return false, err
+	}
+}
+
+func (m *metadataSyncer) downloadResolvedWithRetry(
+	ctx context.Context,
+	client *http.Client,
+	accountID int64,
+	fileID string,
+	resolved playback.Resolved,
+) ([]byte, error) {
+	var lastErr error
+	res := resolved
+	for round := 0; round < metadataResolveRounds; round++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if round > 0 {
+			refreshed, err := m.resolve(ctx, accountID, fileID, true)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			res = refreshed
+		}
+		if res.Link.URL == "" {
+			lastErr = fmt.Errorf("无下载地址")
+			continue
+		}
+		size := res.File.Size
+		if size <= 0 && res.Link.Size > 0 {
+			size = res.Link.Size
+		}
+		body, err := fetchMetadataURLWithRetry(ctx, client, res.Link.URL, res.Link.Headers, size)
+		if err == nil {
+			return body, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("元数据下载失败")
+	}
+	return nil, lastErr
+}
+
+func (m *metadataSyncer) downloadWithRetry(ctx context.Context, client *http.Client, accountID int64, fileID string, expectedSize int64) ([]byte, error) {
+	res, err := m.resolve(ctx, accountID, fileID, false)
+	if err != nil {
+		return nil, err
+	}
+	if expectedSize > 0 {
+		res.File.Size = expectedSize
+		res.Link.Size = expectedSize
+	}
+	return m.downloadResolvedWithRetry(ctx, client, accountID, fileID, res)
+}
+
+func (m *metadataSyncer) resolve(ctx context.Context, accountID int64, fileID string, refresh bool) (playback.Resolved, error) {
+	m.resolveMu.Lock()
+	defer m.resolveMu.Unlock()
+	return m.playback.Resolve(ctx, accountID, fileID, "", refresh)
 }
 
 func (m *metadataSyncer) recordFailure(path, reason string) {
 	if m.failures != nil {
 		m.failures.Add(ScanFailureMetadata, path, reason)
 	}
-}
-
-func (m *metadataSyncer) downloadWithRetry(ctx context.Context, client *http.Client, accountID int64, fileID string, expectedSize int64) ([]byte, error) {
-	var lastErr error
-	for round := 0; round < metadataResolveRounds; round++ {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		refresh := round > 0
-		res, err := m.playback.Resolve(ctx, accountID, fileID, "", refresh)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if res.Link.URL == "" {
-			lastErr = fmt.Errorf("无下载地址")
-			continue
-		}
-		size := expectedSize
-		if size <= 0 && res.File.Size > 0 {
-			size = res.File.Size
-		}
-		body, fetchErr := fetchMetadataURLWithRetry(ctx, client, res.Link.URL, res.Link.Headers, size)
-		if fetchErr == nil {
-			return body, nil
-		}
-		lastErr = fetchErr
-		if isIntegrityMetadataErr(fetchErr) || isRefreshMetadataErr(fetchErr) {
-			continue
-		}
-	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("元数据下载失败")
-	}
-	return nil, lastErr
 }
 
 func fetchMetadataURLWithRetry(ctx context.Context, client *http.Client, downloadURL string, headers http.Header, expectedSize int64) ([]byte, error) {
@@ -280,20 +464,6 @@ func isIntegrityMetadataErr(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "不一致")
-}
-
-func isRefreshMetadataErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "invalid signature") {
-		return true
-	}
-	if strings.Contains(msg, "http 403") || strings.Contains(msg, "http 401") {
-		return true
-	}
-	return false
 }
 
 func metadataRelPath(outputFolder string, relDirs []string, fileName string) string {
