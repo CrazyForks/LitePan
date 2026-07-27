@@ -138,8 +138,10 @@ services:
 </table>
 
 ## ▎ 反馈
-交流请到 <a href="https://space.bilibili.com/1501989416">B 站主页</a>
+
+交流请到 <a href="https://space.bilibili.com/1501989416">B 站主页</a>。  
 暂不接受公开 PR；有维护意愿请私信。
+
 ---
 
 ## ▎ 许可
