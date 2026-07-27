@@ -2,6 +2,7 @@ package strm
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"sync"
@@ -75,5 +76,19 @@ func TestShouldRunCrossBusyCheckNoDeadlock(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("shouldRun cross busy check deadlocked")
+	}
+}
+
+func TestTaskRunContextHasNoFixedDeadline(t *testing.T) {
+	ctx, cancel := taskRunContext(context.Background())
+	if _, ok := ctx.Deadline(); ok {
+		cancel()
+		t.Fatal("STRM 任务不应有固定执行期限")
+	}
+
+	cancel()
+	<-ctx.Done()
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		t.Fatalf("取消任务后错误 = %v，期望 context.Canceled", ctx.Err())
 	}
 }

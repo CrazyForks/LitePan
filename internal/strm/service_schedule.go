@@ -117,13 +117,8 @@ func (s *Service) runTaskAsync(task *domain.StrmTask) {
 			s.clearTaskRunState(task.ID, task.AccountID)
 			s.mu.Unlock()
 		}()
-		if parent == nil {
-			parent = context.Background()
-		}
-		runCtx, cancel := context.WithCancel(parent)
+		runCtx, cancel := taskRunContext(parent)
 		defer cancel()
-		runCtx, timeoutCancel := context.WithTimeout(runCtx, 30*time.Minute)
-		defer timeoutCancel()
 		s.mu.Lock()
 		s.taskCancels[task.ID] = cancel
 		s.mu.Unlock()
@@ -204,6 +199,13 @@ func (s *Service) runTaskAsync(task *domain.StrmTask) {
 			s.notifyScanFailures(task, result.Failures)
 		}
 	}()
+}
+
+func taskRunContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithCancel(parent)
 }
 
 func (s *Service) updateScanPersist(taskID int64, patch domain.StrmScanPatch) error {
