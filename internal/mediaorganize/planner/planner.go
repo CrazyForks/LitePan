@@ -301,6 +301,7 @@ func (p *Planner) isCategoryDir(name string, items []domain.FileItem) bool {
 	directMedia := 0
 	childDirs := 0
 	seasonDirs := 0
+	rangeDirs := 0
 	workDirs := 0
 	for _, item := range items {
 		if p.isMedia(item) {
@@ -310,6 +311,9 @@ func (p *Planner) isCategoryDir(name string, items []domain.FileItem) bool {
 			childDirs++
 			if rules.IsSeasonDirName(item.Name) {
 				seasonDirs++
+			}
+			if rules.IsEpisodeRangeDirName(item.Name) {
+				rangeDirs++
 			}
 			if rules.LooksLikeWorkDirName(item.Name) {
 				workDirs++
@@ -322,7 +326,7 @@ func (p *Planner) isCategoryDir(name string, items []domain.FileItem) bool {
 	if childDirs < 2 {
 		return false
 	}
-	if seasonDirs > 0 {
+	if seasonDirs > 0 || rangeDirs > 0 {
 		return false
 	}
 	return workDirs >= 2 && float64(workDirs)/float64(childDirs) >= 0.5

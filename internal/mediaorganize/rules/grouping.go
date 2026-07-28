@@ -8,7 +8,7 @@ import (
 )
 
 func LooksLikeWorkDirName(name string) bool {
-	if IsGenericMediaDir(name) || IsSeasonDirName(name) {
+	if IsGenericMediaDir(name) || IsSeasonDirName(name) || IsEpisodeRangeDirName(name) {
 		return false
 	}
 	if isCollectionContainerDir(name, nil) {

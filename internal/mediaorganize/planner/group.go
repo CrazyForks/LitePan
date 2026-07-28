@@ -120,6 +120,7 @@ func (p *Planner) groupEntries(entries []batchEntry) (map[groupKey][]batchEntry,
 		scanEntries[i] = rules.ScanEntry{FileName: e.item.Name, Ancestors: anc}
 	}
 	layout := rules.AnalyzeTVTreeLayout(scanEntries)
+	rangeLayouts := rules.AnalyzeEpisodeRangeLayouts(scanEntries)
 
 	for _, raw := range entries {
 		entry := raw
@@ -133,7 +134,7 @@ func (p *Planner) groupEntries(entries []batchEntry) (map[groupKey][]batchEntry,
 		rootParsed := rules.ParsedMedia{}
 		nonSpecial := make([]rules.Ancestor, 0, len(ancestors))
 		for _, anc := range ancestors {
-			if rules.IsGenericMediaDir(anc.Name) || rules.IsSeasonDirName(anc.Name) {
+			if rules.IsGenericMediaDir(anc.Name) || rules.IsSeasonDirName(anc.Name) || rules.IsEpisodeRangeDirName(anc.Name) {
 				continue
 			}
 			if rules.IsCollectionContainerDir(anc.Name, nil) {
@@ -152,6 +153,15 @@ func (p *Planner) groupEntries(entries []batchEntry) (map[groupKey][]batchEntry,
 		}
 		fileParsed = rules.MergeThreeLayerParsed(fileParsed, dirParsed, rootParsed)
 		fileParsed = rules.PrepareTVFileParsed(fileParsed, ancestors)
+		var rangeOK bool
+		fileParsed, rangeOK = rules.ApplyEpisodeRangeLayout(fileParsed, entry.item.Name, ancestors, rangeLayouts)
+		if !rangeOK {
+			pending = append(pending, pendingSkip{
+				item:   entry.item,
+				reason: "分集范围目录与文件集数不一致，请检查目录范围或文件编号",
+			})
+			continue
+		}
 		partLabel := rules.ExtractPartLabel(entry.item.Name)
 		specialLabel := rules.ExtractSpecialLabel(entry.item.Name)
 
@@ -221,7 +231,7 @@ func (p *Planner) groupEntries(entries []batchEntry) (map[groupKey][]batchEntry,
 		} else {
 			for i := len(ancestors) - 1; i >= 0; i-- {
 				anc := ancestors[i]
-				if rules.IsGenericMediaDir(anc.Name) || rules.IsSeasonDirName(anc.Name) {
+				if rules.IsGenericMediaDir(anc.Name) || rules.IsSeasonDirName(anc.Name) || rules.IsEpisodeRangeDirName(anc.Name) {
 					continue
 				}
 				if rules.IsCollectionContainerDir(anc.Name, nil) {
@@ -238,7 +248,7 @@ func (p *Planner) groupEntries(entries []batchEntry) (map[groupKey][]batchEntry,
 		}
 		if movieDirID == "" && len(ancestors) > 0 {
 			anc := ancestors[len(ancestors)-1]
-			if !rules.IsGenericMediaDir(anc.Name) && !rules.IsSeasonDirName(anc.Name) {
+			if !rules.IsGenericMediaDir(anc.Name) && !rules.IsSeasonDirName(anc.Name) && !rules.IsEpisodeRangeDirName(anc.Name) {
 				parsed := rules.NormalizeParsedMedia(rules.ParseDirName(anc.Name))
 				if parsed.Title != "" {
 					movieDirID = anc.ID

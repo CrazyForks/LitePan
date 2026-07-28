@@ -209,6 +209,119 @@ func TestYirenRootScatterAmbiguous(t *testing.T) {
 	}
 }
 
+func TestEpisodeRangeDirectories(t *testing.T) {
+	valid := map[string]EpisodeRange{
+		"1-100":      {Start: 1, End: 100},
+		"101 – 200":  {Start: 101, End: 200},
+		"第201至300集":  {Start: 201, End: 300},
+		"301-更新中":    {Start: 301, OpenEnded: true},
+		"401-500 4K": {Start: 401, End: 500},
+	}
+	for name, want := range valid {
+		got, ok := ParseEpisodeRangeDir(name)
+		if !ok || got != want {
+			t.Fatalf("ParseEpisodeRangeDir(%q) = %+v, %v，期望 %+v, true", name, got, ok, want)
+		}
+	}
+	for _, name := range []string{"100", "2019-2020", "2020-更新中", "720-1080", "电影1-100", "1-1", "1-全集"} {
+		if _, ok := ParseEpisodeRangeDir(name); ok {
+			t.Fatalf("ParseEpisodeRangeDir(%q) 不应命中", name)
+		}
+	}
+}
+
+func TestEpisodeRangeLayoutInference(t *testing.T) {
+	show := Ancestor{ID: "show", Name: "完美世界 (2021)"}
+	tests := []struct {
+		name      string
+		rangeName string
+		files     []string
+		want      []int
+		valid     bool
+		relative  bool
+	}{
+		{
+			name:      "首段裸数字",
+			rangeName: "1-100",
+			files:     []string{"01 4K.mp4", "50.mp4", "100 1080p.mp4"},
+			want:      []int{1, 50, 100},
+			valid:     true,
+		},
+		{
+			name:      "后段绝对编号",
+			rangeName: "101-200",
+			files:     []string{"第101集 4K.mp4", "EP150.mp4", "S01E200 1080p.mp4"},
+			want:      []int{101, 150, 200},
+			valid:     true,
+		},
+		{
+			name:      "后段相对编号",
+			rangeName: "101-200",
+			files:     []string{"01 4K.mp4", "02.mp4", "100 1080p.mp4"},
+			want:      []int{101, 102, 200},
+			valid:     true,
+			relative:  true,
+		},
+		{
+			name:      "更新中绝对编号",
+			rangeName: "201-更新中",
+			files:     []string{"201.mp4", "278 4K.mp4"},
+			want:      []int{201, 278},
+			valid:     true,
+		},
+		{
+			name:      "更新中相对编号",
+			rangeName: "201-更新中",
+			files:     []string{"01.mp4", "02 4K.mp4"},
+			want:      []int{201, 202},
+			valid:     true,
+			relative:  true,
+		},
+		{
+			name:      "绝对相对混用",
+			rangeName: "101-200",
+			files:     []string{"01.mp4", "150.mp4"},
+			valid:     false,
+		},
+		{
+			name:      "显式集号不做偏移",
+			rangeName: "101-200",
+			files:     []string{"S01E001.mp4", "S01E002.mp4"},
+			valid:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rangeAnc := Ancestor{ID: "range", Name: tt.rangeName}
+			ancestors := []Ancestor{show, rangeAnc}
+			entries := make([]ScanEntry, 0, len(tt.files))
+			for _, file := range tt.files {
+				entries = append(entries, ScanEntry{FileName: file, Ancestors: ancestors})
+			}
+			layouts := AnalyzeEpisodeRangeLayouts(entries)
+			layout := layouts["range"]
+			if layout.Valid != tt.valid || layout.Relative != tt.relative {
+				t.Fatalf("layout = %+v，期望 valid=%v relative=%v", layout, tt.valid, tt.relative)
+			}
+			if !tt.valid {
+				return
+			}
+			for i, file := range tt.files {
+				parsed := NormalizeParsedMedia(ParseFilenameStrict(file))
+				got, ok := ApplyEpisodeRangeLayout(parsed, file, ancestors, layouts)
+				if !ok || got.Season == nil || *got.Season != 1 || got.Episode == nil || *got.Episode != tt.want[i] {
+					t.Fatalf("%s 应为 S01E%03d，实际 %+v, ok=%v", file, tt.want[i], got, ok)
+				}
+			}
+			showID, showName, parsed := PickTVShowInfo(ancestors, ParsedMedia{Season: intPtr(1), Episode: intPtr(1)})
+			if showID != "show" || showName != show.Name || parsed.Title != "完美世界" {
+				t.Fatalf("范围目录应继承作品目录，实际 id=%q name=%q parsed=%+v", showID, showName, parsed)
+			}
+		})
+	}
+}
+
 func intValue(v *int) int {
 	if v == nil {
 		return 0

@@ -72,7 +72,7 @@ func LooksLikeTVFile(parsed ParsedMedia, ancestors []Ancestor) RuleResult {
 func PickTVShowInfo(ancestors []Ancestor, fileParsed ParsedMedia) (showDirID, showDirName string, parsed ParsedMedia) {
 	for idx := len(ancestors) - 1; idx >= 0; idx-- {
 		dir := ancestors[idx]
-		if IsGenericMediaDir(dir.Name) || IsSeasonDirName(dir.Name) ||
+		if IsGenericMediaDir(dir.Name) || IsSeasonDirName(dir.Name) || IsEpisodeRangeDirName(dir.Name) ||
 			isCollectionContainerDir(dir.Name, nil) || isSpecialContentDirName(dir.Name) {
 			continue
 		}
@@ -152,7 +152,7 @@ func looksLikeStandaloneMovieDir(name string) bool {
 	if raw == "" {
 		return false
 	}
-	if IsGenericMediaDir(raw) || IsSeasonDirName(raw) ||
+	if IsGenericMediaDir(raw) || IsSeasonDirName(raw) || IsEpisodeRangeDirName(raw) ||
 		isCollectionContainerDir(raw, nil) || isSpecialContentDirName(raw) {
 		return false
 	}
@@ -171,12 +171,12 @@ func looksLikeStandaloneMovieDir(name string) bool {
 }
 
 var (
-	specialContentDirRe = regexpMust(`(?:^|[\s._\-（(【\[])(?:番外篇?|特别篇|特別篇|前传|后传|外传|OVA|OAD|SP|Side Story|Specials?)(?:[\s._\-）)】\]\']|$)`)
-	collectionContainerHintRe = regexpMust(`(?i)(?:\+|＋|/|(?:前?第?[一二三四五六七八九十\d]+季[与和]|[与和]前?第?[一二三四五六七八九十\d]+季|季[与和][前第]?[一二三四五六七八九十\d]+)|打包|合集|全集|全季|各季|前几季|前五季|前\d+季|番外.*剧场|剧场.*番外|番外\+|\+番外|季\+|\+季|多季|seasons?\s*[\+\&]|extras?\s*[\+\&])`)
+	specialContentDirRe             = regexpMust(`(?:^|[\s._\-（(【\[])(?:番外篇?|特别篇|特別篇|前传|后传|外传|OVA|OAD|SP|Side Story|Specials?)(?:[\s._\-）)】\]\']|$)`)
+	collectionContainerHintRe       = regexpMust(`(?i)(?:\+|＋|/|(?:前?第?[一二三四五六七八九十\d]+季[与和]|[与和]前?第?[一二三四五六七八九十\d]+季|季[与和][前第]?[一二三四五六七八九十\d]+)|打包|合集|全集|全季|各季|前几季|前五季|前\d+季|番外.*剧场|剧场.*番外|番外\+|\+番外|季\+|\+季|多季|seasons?\s*[\+\&]|extras?\s*[\+\&])`)
 	collectionContainerStrongHintRe = collectionContainerHintRe
-	seasonRangeTitleRe = regexpMust(`^前?[一二三四五六七八九十\d]+季$`)
-	standaloneMovieDirHintRe = regexpMust(`(?i)(?:剧场版|映画|电影版|大电影|院线版|Movie\s*Edition)`)
-	seasonOnlyTitleRe = regexpMust(`(?i)^第\s*\d{1,3}\s*季$`)
+	seasonRangeTitleRe              = regexpMust(`^前?[一二三四五六七八九十\d]+季$`)
+	standaloneMovieDirHintRe        = regexpMust(`(?i)(?:剧场版|映画|电影版|大电影|院线版|Movie\s*Edition)`)
+	seasonOnlyTitleRe               = regexpMust(`(?i)^第\s*\d{1,3}\s*季$`)
 )
 
 func regexpMust(pattern string) *regexp.Regexp {

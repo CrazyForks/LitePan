@@ -433,7 +433,7 @@ func MergeThreeLayerParsed(fileParsed, dirParsed, rootParsed ParsedMedia) Parsed
 	chosenTitle := strings.TrimSpace(out.Title)
 	for _, src := range sources {
 		srcTitle := strings.TrimSpace(src.Title)
-		if srcTitle == "" || IsGenericMediaDir(srcTitle) || IsSeasonDirName(srcTitle) {
+		if srcTitle == "" || IsGenericMediaDir(srcTitle) || IsSeasonDirName(srcTitle) || IsEpisodeRangeDirName(srcTitle) {
 			continue
 		}
 		if chosenTitle == "" {

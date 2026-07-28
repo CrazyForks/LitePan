@@ -1264,6 +1264,122 @@ func TestGroupYirenRootScatterAndSeasonFolders(t *testing.T) {
 	}
 }
 
+func TestPlanEpisodeRangeDirectories(t *testing.T) {
+	fs := &mockFS{dirs: map[string][]domain.FileItem{
+		"root": {
+			{ID: "show", Name: "完美世界 (2021)", IsDir: true},
+			{ID: "years", Name: "2019-2020", IsDir: true},
+		},
+		"show": {
+			{ID: "r1", Name: "1-100", IsDir: true},
+			{ID: "r2", Name: "101-200", IsDir: true},
+			{ID: "r3", Name: "201-更新中", IsDir: true},
+		},
+		"r1": {
+			{ID: "e1", Name: "01 4K.mp4"},
+			{ID: "e100", Name: "100 1080p.mp4"},
+		},
+		"r2": {
+			{ID: "e101", Name: "01 4K.mp4"},
+			{ID: "e102", Name: "02.mp4"},
+			{ID: "e200", Name: "100 1080p.mp4"},
+		},
+		"r3": {
+			{ID: "e201", Name: "201.mp4"},
+			{ID: "e278", Name: "278 4K.mp4"},
+		},
+		"years": {
+			{ID: "movie", Name: "测试电影.mkv"},
+		},
+	}}
+	p := planner.New(
+		context.Background(),
+		fs,
+		1,
+		planner.TaskConfig{
+			TargetDirectoryID: "root",
+			ActionType:        "rename",
+			MediaType:         "auto",
+			RenameMarker:      "off",
+			Recursive:         true,
+		},
+		nil,
+		"task-test",
+		nil,
+		func(string) {},
+		nil,
+		func() error { return nil },
+	)
+	plan, err := p.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantEpisodes := map[string]int{
+		"e1": 1, "e100": 100,
+		"e101": 101, "e102": 102, "e200": 200,
+		"e201": 201, "e278": 278,
+	}
+	gotEpisodes := map[string]int{}
+	for _, action := range plan.Actions {
+		want, tracked := wantEpisodes[action.SourceID]
+		if !tracked {
+			continue
+		}
+		if action.Metadata["title"] != "完美世界" {
+			t.Fatalf("%s title=%v，期望完美世界", action.SourceID, action.Metadata["title"])
+		}
+		episode := rules.AsFirstInt(action.Metadata["episode"])
+		season := rules.AsFirstInt(action.Metadata["season"])
+		if episode == nil || *episode != want || season == nil || *season != 1 {
+			t.Fatalf("%s metadata=%+v，期望 S01E%03d", action.SourceID, action.Metadata, want)
+		}
+		gotEpisodes[action.SourceID] = *episode
+	}
+	if len(gotEpisodes) != len(wantEpisodes) {
+		t.Fatalf("范围目录动作不完整：got=%v want=%v actions=%+v skipped=%+v", gotEpisodes, wantEpisodes, plan.Actions, plan.Skipped)
+	}
+}
+
+func TestPlanRejectsInconsistentEpisodeRange(t *testing.T) {
+	fs := &mockFS{dirs: map[string][]domain.FileItem{
+		"root": {{ID: "show", Name: "完美世界 (2021)", IsDir: true}},
+		"show": {{ID: "range", Name: "101-200", IsDir: true}},
+		"range": {
+			{ID: "relative", Name: "01.mp4"},
+			{ID: "absolute", Name: "150.mp4"},
+		},
+	}}
+	p := planner.New(
+		context.Background(),
+		fs,
+		1,
+		planner.TaskConfig{
+			TargetDirectoryID: "root",
+			ActionType:        "rename",
+			MediaType:         "auto",
+			Recursive:         true,
+		},
+		nil,
+		"task-test",
+		nil,
+		func(string) {},
+		nil,
+		func() error { return nil },
+	)
+	plan, err := p.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Actions) != 0 || len(plan.Skipped) != 2 {
+		t.Fatalf("混合编号应全部跳过，actions=%+v skipped=%+v", plan.Actions, plan.Skipped)
+	}
+	for _, item := range plan.Skipped {
+		if !strings.Contains(fmt.Sprint(item["reason"]), "分集范围目录与文件集数不一致") {
+			t.Fatalf("unexpected skip: %+v", item)
+		}
+	}
+}
+
 func TestRenamePlanDeletesEmptyCollectionContainerAfterFlatten(t *testing.T) {
 	fs := &mockFS{dirs: map[string][]domain.FileItem{
 		"root": {{ID: "show", Name: "一人之下", IsDir: true}},
