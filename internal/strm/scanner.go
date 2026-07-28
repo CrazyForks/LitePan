@@ -118,6 +118,9 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 		if err != nil {
 			return result, err
 		}
+		if err := validateMonitorBranches(task, allBranches); err != nil {
+			return result, err
+		}
 	}
 	scopes, branchParentIDs := buildScanScopes(task, allBranches, useBranch)
 	if len(scopes) == 0 {
@@ -211,6 +214,26 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 		}
 	}
 
+	cleanupEnabled := task.ScanMode == domain.StrmScanModeIncrementalUpdate || task.ScanMode == domain.StrmScanModeFullSync
+	cleanupScopes := effectiveCleanupScopes(useBranch, state.cleanupScopes)
+	cleanupSkipped := state.skippedDirs
+	if !useBranch {
+		cleanupSkipped = nil
+	}
+	if cleanupEnabled && len(seen) == 0 {
+		localCount, err := countScopedStrmFiles(root, task.OutputFolder, cleanupScopes, cleanupSkipped)
+		if err != nil {
+			return result, err
+		}
+		if localCount > 0 {
+			return result, domain.Errorf(
+				domain.CodeValidation,
+				"远端扫描未发现可生成的媒体文件，但本地仍有 %d 个 STRM；为防止误删已停止清理。若云端目录已清空，请删除 STRM 任务并选择同时删除本地文件",
+				localCount,
+			)
+		}
+	}
+
 	if task.SyncMetadata && len(state.metadataDirs) > 0 {
 		filteredMetadata := filterMetadataItems(metadataItems, dirHasMedia, subtreeHasMedia, deps.Settings.MetadataParentEnabled)
 		metadataDirs := filterMetadataDirectories(state.metadataDirs, dirHasMedia, subtreeHasMedia, deps.Settings.MetadataParentEnabled)
@@ -235,14 +258,8 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 		result.RemovedCount += syncResult.Deleted
 	}
 
-	if task.ScanMode == domain.StrmScanModeIncrementalUpdate || task.ScanMode == domain.StrmScanModeFullSync {
-		var removed int64
-		var err error
-		if useBranch && len(state.cleanupScopes) > 0 {
-			removed, err = cleanupScopedStaleFiles(root, task.OutputFolder, seen, state.cleanupScopes, state.skippedDirs, failures)
-		} else {
-			removed, err = cleanupScopedStaleFiles(root, task.OutputFolder, seen, []cleanupScope{{relDirs: nil, recursive: true}}, nil, failures)
-		}
+	if cleanupEnabled {
+		removed, err := cleanupScopedStaleFiles(root, task.OutputFolder, seen, cleanupScopes, cleanupSkipped, failures)
 		if err != nil {
 			return result, err
 		}
@@ -268,6 +285,37 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 func useBranchScan(runMode string, task *domain.StrmTask) bool {
 	return runMode == domain.StrmRunModeBranch ||
 		(runMode != domain.StrmRunModeFull && task.BranchCheckEnabled)
+}
+
+func validateMonitorBranches(task *domain.StrmTask, branches []*domain.StrmBranch) error {
+	for _, branch := range branches {
+		if branch == nil || branch.BranchType == domain.StrmBranchTypeBase {
+			continue
+		}
+		parentID := strings.TrimSpace(branch.ParentID)
+		path := strings.TrimSpace(branch.Path)
+		relativePath := strings.Trim(strings.TrimSpace(branch.RelativePath), "/")
+		expectedRelative := branchRelativePath(task.Path, path)
+		if parentID != "" && parentID != "0" && path != "" && relativePath != "" && expectedRelative == relativePath {
+			continue
+		}
+		if path == "" {
+			path = "/"
+		}
+		return domain.Errorf(
+			domain.CodeValidation,
+			"监控分支目录异常（%s），为防止误删已停止扫描；请删除后重新添加该监控分支",
+			path,
+		)
+	}
+	return nil
+}
+
+func effectiveCleanupScopes(useBranch bool, scopes []cleanupScope) []cleanupScope {
+	if useBranch && len(scopes) > 0 {
+		return scopes
+	}
+	return []cleanupScope{{recursive: true}}
 }
 
 func buildScanScopes(task *domain.StrmTask, branches []*domain.StrmBranch, useBranch bool) ([]scanScope, map[string]struct{}) {
@@ -821,6 +869,68 @@ func cleanupScopedStaleFiles(root, outputFolder string, seen map[string]struct{}
 		_ = removeEmptyDirs(cleanupRoot)
 	}
 	return removed, nil
+}
+
+func countScopedStrmFiles(root, outputFolder string, scopes []cleanupScope, skipped map[string]struct{}) (int64, error) {
+	taskFolder := SafeName(outputFolder)
+	found := make(map[string]struct{})
+	record := func(path string) error {
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if !isStrmUnderSkipped(rel, taskFolder, skipped) {
+			found[rel] = struct{}{}
+		}
+		return nil
+	}
+	for _, scope := range scopes {
+		cleanupRoot := filepath.Join(root, taskFolder)
+		cleanupRel := taskFolder
+		for _, dir := range scope.relDirs {
+			safeDir := SafeName(dir)
+			cleanupRoot = filepath.Join(cleanupRoot, safeDir)
+			cleanupRel = filepath.Join(cleanupRel, safeDir)
+		}
+		if pathHasOversizedComponent(cleanupRel) {
+			continue
+		}
+		if scope.recursive {
+			err := filepath.WalkDir(cleanupRoot, func(path string, entry fs.DirEntry, err error) error {
+				if err != nil {
+					if os.IsNotExist(err) {
+						return nil
+					}
+					return err
+				}
+				if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".strm") {
+					return nil
+				}
+				return record(path)
+			})
+			if err != nil && !os.IsNotExist(err) {
+				return 0, err
+			}
+			continue
+		}
+		entries, err := os.ReadDir(cleanupRoot)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return 0, err
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".strm") {
+				continue
+			}
+			if err := record(filepath.Join(cleanupRoot, entry.Name())); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return int64(len(found)), nil
 }
 
 func cleanupMissingRemoteChildDirs(root, outputFolder string, remoteChildren map[string]map[string]struct{}, failures *FailureCollector, log *slog.Logger) (int64, error) {
