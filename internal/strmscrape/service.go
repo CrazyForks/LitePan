@@ -120,9 +120,19 @@ func (s *Service) startAsyncOperation(taskID int64, total int, message, doneMess
 	if !s.operationMu.TryLock() {
 		return domain.Errorf(domain.CodeValidation, "刮削任务进行中")
 	}
+	releaseFiles := func() {}
+	if s.strm != nil {
+		var ok bool
+		releaseFiles, ok = s.strm.TryBeginTaskFileOperation(taskID)
+		if !ok {
+			s.operationMu.Unlock()
+			return domain.Errorf(domain.CodeValidation, "该 STRM 任务正在运行，请稍后再刮削")
+		}
+	}
 	s.mu.Lock()
 	if s.progress.Running {
 		s.mu.Unlock()
+		releaseFiles()
 		s.operationMu.Unlock()
 		return domain.Errorf(domain.CodeValidation, "刮削任务进行中")
 	}
@@ -138,6 +148,7 @@ func (s *Service) startAsyncOperation(taskID int64, total int, message, doneMess
 	s.mu.Unlock()
 
 	go func() {
+		defer releaseFiles()
 		defer s.operationMu.Unlock()
 		defer cancel()
 		err := run(runCtx)

@@ -32,6 +32,7 @@ type ScanSettings struct {
 	MetadataExtensions    string
 	MetadataMaxSizeMB     int
 	MetadataParentEnabled bool
+	MetadataSyncMode      string
 	ISOFilenameEnabled    bool
 }
 
@@ -75,6 +76,7 @@ type branchScanState struct {
 	skippedDirs    map[string]struct{}
 	cleanupScopes  []cleanupScope
 	remoteChildren map[string]map[string]struct{}
+	metadataDirs   map[string]metadataDirectory
 }
 
 func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode string) (ScanResult, error) {
@@ -133,6 +135,7 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 	state := &branchScanState{
 		skippedDirs:    make(map[string]struct{}),
 		remoteChildren: make(map[string]map[string]struct{}),
+		metadataDirs:   make(map[string]metadataDirectory),
 	}
 
 	var monitorScopes, childScopes []scanScope
@@ -140,7 +143,7 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 		if scope.baseEntry {
 			children, remoteNames, err := walkBaseBranchEntry(ctx, task, deps, scope, exts, metaExts, excludeDirs, excludeFiles,
 				minMediaBytes, metaMaxBytes, task.SyncMetadata,
-				branchParentIDs, state.skippedDirs, root, &candidates, &metadataItems, dirHasMedia, subtreeHasMedia, log)
+				branchParentIDs, state.skippedDirs, state.metadataDirs, root, &candidates, &metadataItems, dirHasMedia, subtreeHasMedia, log)
 			if err != nil {
 				return result, err
 			}
@@ -162,7 +165,7 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 		state.cleanupScopes = append(state.cleanupScopes, cleanupScope{relDirs: scope.relDirs, recursive: scope.recursive})
 		if err := walkScope(ctx, task, deps, scope, exts, metaExts, excludeDirs, excludeFiles,
 			minMediaBytes, metaMaxBytes, task.SyncMetadata,
-			state.remoteChildren, &candidates, &metadataItems, dirHasMedia, subtreeHasMedia); err != nil {
+			state.remoteChildren, state.metadataDirs, &candidates, &metadataItems, dirHasMedia, subtreeHasMedia); err != nil {
 			return result, err
 		}
 	}
@@ -170,7 +173,7 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 		state.cleanupScopes = append(state.cleanupScopes, cleanupScope{relDirs: scope.relDirs, recursive: true})
 		if err := walkScope(ctx, task, deps, scope, exts, metaExts, excludeDirs, excludeFiles,
 			minMediaBytes, metaMaxBytes, task.SyncMetadata,
-			state.remoteChildren, &candidates, &metadataItems, dirHasMedia, subtreeHasMedia); err != nil {
+			state.remoteChildren, state.metadataDirs, &candidates, &metadataItems, dirHasMedia, subtreeHasMedia); err != nil {
 			return result, err
 		}
 	}
@@ -208,15 +211,28 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 		}
 	}
 
-	var filteredMetadata []metadataItem
-	if task.SyncMetadata && len(metadataItems) > 0 {
-		filteredMetadata = filterMetadataItems(metadataItems, dirHasMedia, subtreeHasMedia, deps.Settings.MetadataParentEnabled)
-		syncer := &metadataSyncer{playback: deps.Playback, failures: failures, onProgress: deps.OnProgress}
-		n, err := syncer.syncFiles(ctx, task.AccountID, root, filteredMetadata)
+	if task.SyncMetadata && len(state.metadataDirs) > 0 {
+		filteredMetadata := filterMetadataItems(metadataItems, dirHasMedia, subtreeHasMedia, deps.Settings.MetadataParentEnabled)
+		metadataDirs := filterMetadataDirectories(state.metadataDirs, dirHasMedia, subtreeHasMedia, deps.Settings.MetadataParentEnabled)
+		syncResult, err := syncMetadata(ctx, metadataSyncRequest{
+			AccountID:    task.AccountID,
+			Root:         root,
+			OutputFolder: task.OutputFolder,
+			Mode:         deps.Settings.MetadataSyncMode,
+			Extensions:   metaExts,
+			MaxSizeBytes: metaMaxBytes,
+			RemoteItems:  filteredMetadata,
+			Directories:  metadataDirs,
+			Files:        deps.Files,
+			Playback:     deps.Playback,
+			Failures:     failures,
+			OnProgress:   deps.OnProgress,
+		})
 		if err != nil {
 			return result, err
 		}
-		result.GeneratedCount += n
+		result.GeneratedCount += syncResult.Downloaded
+		result.RemovedCount += syncResult.Deleted
 	}
 
 	if task.ScanMode == domain.StrmScanModeIncrementalUpdate || task.ScanMode == domain.StrmScanModeFullSync {
@@ -234,7 +250,7 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 		if err != nil {
 			return result, err
 		}
-		result.RemovedCount = removed + n
+		result.RemovedCount += removed + n
 	}
 
 	log.Debug("strm scan finished",
@@ -353,6 +369,7 @@ func walkBaseBranchEntry(
 	syncMetadata bool,
 	branchParentIDs map[string]struct{},
 	skippedDirs map[string]struct{},
+	metadataDirs map[string]metadataDirectory,
 	strmRoot string,
 	candidates *[]mediaCandidate,
 	metadataItems *[]metadataItem,
@@ -365,6 +382,7 @@ func walkBaseBranchEntry(
 	if err != nil {
 		return nil, nil, err
 	}
+	recordMetadataDirectory(metadataDirs, scope.parentID, relDirs)
 
 	currentKey := dirKey(relDirs)
 	localHasMedia := false
@@ -480,6 +498,7 @@ func walkScope(
 	minMediaBytes, metaMaxBytes int64,
 	syncMetadata bool,
 	remoteChildren map[string]map[string]struct{},
+	metadataDirs map[string]metadataDirectory,
 	candidates *[]mediaCandidate,
 	metadataItems *[]metadataItem,
 	dirHasMedia, subtreeHasMedia map[string]bool,
@@ -500,6 +519,7 @@ func walkScope(
 		if err != nil {
 			return err
 		}
+		recordMetadataDirectory(metadataDirs, n.parentID, n.relDirs)
 		childNames := make(map[string]struct{})
 		dirKey := dirKey(n.relDirs)
 		localHasMedia := false
@@ -573,7 +593,7 @@ func filterMetadataItems(items []metadataItem, dirHasMedia, subtreeHasMedia map[
 	seen := make(map[string]int)
 	for _, item := range items {
 		key := dirKey(item.relDirs)
-		if !dirHasMedia[key] && !(parentEnabled && subtreeHasMedia[key]) {
+		if dirHasMedia != nil && !dirHasMedia[key] && !(parentEnabled && subtreeHasMedia[key]) {
 			continue
 		}
 		if index, ok := seen[item.relPath]; ok {
@@ -668,7 +688,7 @@ func relDirsFromDirKey(key string) []string {
 func localTaskDir(root, outputFolder string, relDirs []string) string {
 	local := filepath.Join(root, SafeName(outputFolder))
 	for _, dir := range relDirs {
-		local = filepath.Join(local, dir)
+		local = filepath.Join(local, SafeName(dir))
 	}
 	return local
 }

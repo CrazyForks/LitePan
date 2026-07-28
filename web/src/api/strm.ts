@@ -31,7 +31,12 @@ export interface StrmTask {
   last_scan_status?: string;
   automation_managed?: boolean;
   is_scanning?: boolean;
-  scan_phase?: "scanning" | "syncing_metadata";
+  scan_phase?:
+    | "scanning"
+    | "comparing_metadata"
+    | "syncing_metadata"
+    | "uploading_metadata"
+    | "cleaning_metadata";
   current_label?: string;
   scanned_dirs?: number;
   scanned_files?: number;
@@ -70,6 +75,7 @@ export interface StrmSettings {
   metadata_extensions: string;
   metadata_max_size_mb: number;
   metadata_parent_enabled: boolean;
+  metadata_sync_mode: "cloud_primary" | "local_primary" | "bidirectional";
 }
 
 export type StrmTaskInput = Pick<
@@ -197,10 +203,13 @@ export interface StrmCurrentDirectoryResult {
   deleted: number;
   media_count: number;
   metadata_created: number;
+  metadata_uploaded: number;
+  metadata_deleted: number;
 }
 
 export function generateCurrentDirectoryStrm(body: {
   account_id: number;
+  parent_id: string;
   path: string;
   items: StrmCurrentDirectoryItem[];
 }) {
@@ -215,6 +224,7 @@ export interface StrmDirectoryStatus {
 
 export function fetchStrmDirectoryStatus(body: {
   account_id: number;
+  parent_id: string;
   path: string;
   items: StrmCurrentDirectoryItem[];
 }, signal?: AbortSignal) {
@@ -256,6 +266,7 @@ export function saveStrmSettings(body: Partial<Record<keyof StrmSettings, string
     ["metadata_extensions", (v) => String(v)],
     ["metadata_max_size_mb", (v) => String(v)],
     ["metadata_parent_enabled", (v) => (v ? "true" : "false")],
+    ["metadata_sync_mode", (v) => String(v)],
   ];
   for (const [key, fmt] of map) {
     if (body[key] !== undefined) payload[key] = fmt(body[key]);

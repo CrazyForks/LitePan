@@ -141,7 +141,7 @@ func TestWalkBaseBranchEntryTreatsSkippedLocalSTRMAsSubtreeMedia(t *testing.T) {
 		context.Background(), task, deps, scope,
 		map[string]struct{}{"mkv": {}}, map[string]struct{}{"jpg": {}},
 		nil, nil, 0, 10<<20, true,
-		make(map[string]struct{}), skippedDirs, root,
+		make(map[string]struct{}), skippedDirs, make(map[string]metadataDirectory), root,
 		&candidates, &metadataItems, dirHasMedia, subtreeHasMedia, nil,
 	)
 	if err != nil {

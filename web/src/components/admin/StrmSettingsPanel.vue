@@ -41,6 +41,7 @@ type StrmSettingsForm = Pick<
   | "metadata_extensions"
   | "metadata_max_size_mb"
   | "metadata_parent_enabled"
+  | "metadata_sync_mode"
 >;
 
 const { loading, loaded, runLoad } = useSettingsLoad(false);
@@ -72,6 +73,7 @@ const {
     metadata_extensions: "",
     metadata_max_size_mb: 10,
     metadata_parent_enabled: true,
+    metadata_sync_mode: "local_primary",
   },
   {
     compareField: (key, cur, orig) => {
@@ -84,6 +86,11 @@ const {
 );
 
 const conflictPolicyOptions = CONFLICT_POLICIES.map((p) => ({ value: p.value, label: p.label }));
+const metadataSyncModeOptions = [
+  { value: "cloud_primary", label: "网盘元数据为主" },
+  { value: "local_primary", label: "本地元数据补缺" },
+  { value: "bidirectional", label: "本地与云端互补" },
+];
 
 function setNumberSetting(key: "min_file_size_mb" | "metadata_max_size_mb", raw: string) {
   settings[key] = parseSettingNumber(raw);
@@ -109,6 +116,7 @@ function applySettings(data: Awaited<ReturnType<typeof fetchStrmSettings>>) {
     metadata_extensions: data.metadata_extensions ?? "",
     metadata_max_size_mb: parseSettingNumber(data.metadata_max_size_mb) || 10,
     metadata_parent_enabled: !!data.metadata_parent_enabled,
+    metadata_sync_mode: data.metadata_sync_mode || "local_primary",
   });
 }
 
@@ -120,6 +128,17 @@ async function loadSettings(options?: { silent?: boolean }) {
 
 async function saveSettings() {
   if (!settingsChanged.value) return;
+  if (isSettingChanged("metadata_sync_mode") && settings.metadata_sync_mode === "cloud_primary") {
+    try {
+      await confirm({
+        title: "启用网盘元数据为主",
+        message: "今后运行已开启元数据同步的 STRM 任务时，会删除本地存在但网盘没有的元数据文件。仅处理配置的后缀和完整扫描成功的目录，是否继续？",
+        confirmText: "启用",
+      });
+    } catch {
+      return;
+    }
+  }
   saving.value = true;
   try {
     const data = await saveStrmSettings({
@@ -133,6 +152,7 @@ async function saveSettings() {
       metadata_extensions: settings.metadata_extensions,
       metadata_max_size_mb: settings.metadata_max_size_mb,
       metadata_parent_enabled: settings.metadata_parent_enabled,
+      metadata_sync_mode: settings.metadata_sync_mode,
     });
     applySettings(data);
     toast.success("STRM 设置已保存");
@@ -352,6 +372,22 @@ defineExpose(
             </template>
           </AppDropdown>
         </template>
+        <SettingsRow :show-changed-badge="true" :changed="isSettingChanged('metadata_sync_mode')">
+          <template #info>
+            <div class="settings-row__label">
+              <span>元数据同步策略</span>
+              <SettingsHelpTooltip title="元数据同步策略说明">
+                <p><strong>网盘元数据为主：</strong>下载网盘缺到本地的文件，并清理本地多出的元数据。</p>
+                <p><strong>本地元数据补缺：</strong>只从网盘补齐本地缺少的元数据，本地多出的元数据继续保留。</p>
+                <p><strong>本地与云端互补：</strong>网盘缺的上传、本地缺的下载，两边同名文件均不覆盖。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <AppSelect v-model="settings.metadata_sync_mode" :options="metadataSyncModeOptions" />
+          </template>
+        </SettingsRow>
+
         <SettingsRow :show-changed-badge="true" :changed="isSettingChanged('metadata_extensions')">
           <template #info>
             <div class="settings-row__label">

@@ -210,6 +210,7 @@ const strmPrompt = useStrmDirectoryPrompt({
   refreshing,
   enabled: strmAutoDetectEnabled,
   getDisplayPath: getCurrentDisplayPath,
+  getParentId: () => currentParentId.value,
 });
 
 function getCurrentDisplayPath(): string {
@@ -227,6 +228,7 @@ async function handleGenerateCurrentDirectoryStrm() {
   try {
     const result = await generateCurrentDirectoryStrm({
       account_id: currentAccountId.value,
+      parent_id: currentParentId.value,
       path: getCurrentDisplayPath(),
       items: files.value.map((file) => ({
         id: file.id,
@@ -235,7 +237,13 @@ async function handleGenerateCurrentDirectoryStrm() {
         is_dir: file.is_dir,
       })),
     });
-    if ((result.media_count || 0) <= 0 && (result.deleted || 0) <= 0 && (result.metadata_created || 0) <= 0) {
+    if (
+      (result.media_count || 0) <= 0 &&
+      (result.deleted || 0) <= 0 &&
+      (result.metadata_created || 0) <= 0 &&
+      (result.metadata_uploaded || 0) <= 0 &&
+      (result.metadata_deleted || 0) <= 0
+    ) {
       toast.info("当前目录没有需要同步的 STRM");
       return;
     }
@@ -246,7 +254,13 @@ async function handleGenerateCurrentDirectoryStrm() {
       `已存在 ${result.skipped_existing || 0}`,
     ];
     if ((result.metadata_created || 0) > 0) {
-      parts.push(`元数据 ${result.metadata_created}`);
+      parts.push(`元数据下载 ${result.metadata_created}`);
+    }
+    if ((result.metadata_uploaded || 0) > 0) {
+      parts.push(`元数据上传 ${result.metadata_uploaded}`);
+    }
+    if ((result.metadata_deleted || 0) > 0) {
+      parts.push(`元数据清理 ${result.metadata_deleted}`);
     }
     if ((result.skipped_conflict || 0) > 0) {
       parts.push(`冲突跳过 ${result.skipped_conflict}`);

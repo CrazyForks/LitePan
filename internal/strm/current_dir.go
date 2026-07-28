@@ -27,6 +27,8 @@ type CurrentDirectoryResult struct {
 	Deleted            int64
 	MediaCount         int64
 	MetadataCreated    int64
+	MetadataUploaded   int64
+	MetadataDeleted    int64
 }
 
 type CurrentDirectoryStatus struct {
@@ -37,6 +39,7 @@ type CurrentDirectoryStatus struct {
 
 type currentDirWork struct {
 	task            *domain.StrmTask
+	parentID        string
 	relDirs         []string
 	outputFolder    string
 	root            string
@@ -47,9 +50,9 @@ type currentDirWork struct {
 	skippedConflict int64
 }
 
-func (s *Service) CheckCurrentDirectoryStatus(ctx context.Context, accountID int64, currentPath string, items []CurrentDirectoryEntry) (CurrentDirectoryStatus, error) {
+func (s *Service) CheckCurrentDirectoryStatus(ctx context.Context, accountID int64, parentID, currentPath string, items []CurrentDirectoryEntry) (CurrentDirectoryStatus, error) {
 	var status CurrentDirectoryStatus
-	work, err := s.prepareCurrentDirectoryWork(ctx, accountID, currentPath, items)
+	work, err := s.prepareCurrentDirectoryWork(ctx, accountID, parentID, currentPath, items)
 	if err != nil {
 		return status, err
 	}
@@ -74,25 +77,44 @@ func (s *Service) CheckCurrentDirectoryStatus(ctx context.Context, accountID int
 			status.PendingStrm++
 		}
 	}
-	if work.task.SyncMetadata && len(work.metadataItems) > 0 {
+	if work.task.SyncMetadata {
 		filtered := filterMetadataItems(work.metadataItems, nil, nil, false)
-		status.PendingMetadata = int64(len(filterPendingMetadataItems(work.root, filtered)))
+		plan, planErr := buildMetadataSyncPlan(ctx, metadataSyncRequest{
+			Root:         work.root,
+			OutputFolder: work.outputFolder,
+			Mode:         work.scanCfg.MetadataSyncMode,
+			Extensions:   parseExtensions(work.scanCfg.MetadataExtensions),
+			MaxSizeBytes: metadataMaxBytes(work.scanCfg.MetadataMaxSizeMB),
+			RemoteItems:  filtered,
+			Directories: map[string]metadataDirectory{
+				dirKey(work.relDirs): {parentID: work.parentID, relDirs: work.relDirs},
+			},
+		})
+		if planErr != nil {
+			return status, planErr
+		}
+		status.PendingMetadata = int64(len(plan.downloads) + len(plan.uploads) + len(plan.deletes))
 	}
 	return status, nil
 }
 
-func (s *Service) GenerateCurrentDirectory(ctx context.Context, accountID int64, currentPath string, items []CurrentDirectoryEntry) (CurrentDirectoryResult, error) {
+func (s *Service) GenerateCurrentDirectory(ctx context.Context, accountID int64, parentID, currentPath string, items []CurrentDirectoryEntry) (CurrentDirectoryResult, error) {
 	var out CurrentDirectoryResult
 	if s == nil || s.repo == nil {
 		return out, domain.Errf(domain.CodeNotImplement)
 	}
-	work, err := s.prepareCurrentDirectoryWork(ctx, accountID, currentPath, items)
+	work, err := s.prepareCurrentDirectoryWork(ctx, accountID, parentID, currentPath, items)
 	if err != nil {
 		return out, err
 	}
 	if work == nil {
 		return out, nil
 	}
+	releaseFiles, ok := s.TryBeginTaskFileOperation(work.task.ID)
+	if !ok {
+		return out, domain.Errorf(domain.CodeValidation, "该任务正在运行或刮削元数据，请稍后再试")
+	}
+	defer releaseFiles()
 	out.MatchedTaskID = work.task.ID
 	out.MediaCount = int64(len(work.selected))
 	out.SkippedConflict = work.skippedConflict
@@ -153,20 +175,34 @@ func (s *Service) GenerateCurrentDirectory(ctx context.Context, accountID int64,
 		out.Deleted = removed
 	}
 
-	if work.task.SyncMetadata && len(work.metadataItems) > 0 {
+	if work.task.SyncMetadata {
 		filtered := filterMetadataItems(work.metadataItems, nil, nil, false)
-		syncer := &metadataSyncer{playback: s.playback}
-		n, syncErr := syncer.syncFiles(ctx, work.task.AccountID, work.root, filtered)
+		syncResult, syncErr := syncMetadata(ctx, metadataSyncRequest{
+			AccountID:    work.task.AccountID,
+			Root:         work.root,
+			OutputFolder: work.outputFolder,
+			Mode:         work.scanCfg.MetadataSyncMode,
+			Extensions:   parseExtensions(work.scanCfg.MetadataExtensions),
+			MaxSizeBytes: metadataMaxBytes(work.scanCfg.MetadataMaxSizeMB),
+			RemoteItems:  filtered,
+			Directories: map[string]metadataDirectory{
+				dirKey(work.relDirs): {parentID: work.parentID, relDirs: work.relDirs},
+			},
+			Files:    s.files,
+			Playback: s.playback,
+		})
 		if syncErr != nil {
 			return out, syncErr
 		}
-		out.MetadataCreated = n
+		out.MetadataCreated = syncResult.Downloaded
+		out.MetadataUploaded = syncResult.Uploaded
+		out.MetadataDeleted = syncResult.Deleted
 	}
 
 	return out, nil
 }
 
-func (s *Service) prepareCurrentDirectoryWork(ctx context.Context, accountID int64, currentPath string, items []CurrentDirectoryEntry) (*currentDirWork, error) {
+func (s *Service) prepareCurrentDirectoryWork(ctx context.Context, accountID int64, parentID, currentPath string, items []CurrentDirectoryEntry) (*currentDirWork, error) {
 	if s == nil || s.repo == nil {
 		return nil, domain.Errf(domain.CodeNotImplement)
 	}
@@ -241,6 +277,7 @@ func (s *Service) prepareCurrentDirectoryWork(ctx context.Context, accountID int
 
 	return &currentDirWork{
 		task:            task,
+		parentID:        parentID,
 		relDirs:         relDirs,
 		outputFolder:    outputFolder,
 		root:            s.strmDir,
@@ -250,6 +287,13 @@ func (s *Service) prepareCurrentDirectoryWork(ctx context.Context, accountID int
 		remoteDirNames:  remoteDirNames,
 		skippedConflict: skippedConflict,
 	}, nil
+}
+
+func metadataMaxBytes(maxMB int) int64 {
+	if maxMB <= 0 {
+		return 0
+	}
+	return int64(maxMB) * 1024 * 1024
 }
 
 func strmFilePending(root, relPath, url, scanMode string) bool {

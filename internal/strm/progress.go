@@ -10,8 +10,11 @@ import (
 )
 
 const (
-	ScanPhaseScan     = "scanning"
-	ScanPhaseMetadata = "syncing_metadata"
+	ScanPhaseScan            = "scanning"
+	ScanPhaseMetadataCompare = "comparing_metadata"
+	ScanPhaseMetadata        = "syncing_metadata"
+	ScanPhaseMetadataUpload  = "uploading_metadata"
+	ScanPhaseMetadataCleanup = "cleaning_metadata"
 )
 
 type ScanProgressUpdate struct {
@@ -146,11 +149,15 @@ func reportScanProgress(r ScanProgressReporter, phase string, dirDelta, fileDelt
 }
 
 func reportMetadataProgress(r ScanProgressReporter, done, total int, label string) {
+	reportMetadataActionProgress(r, ScanPhaseMetadata, done, total, label)
+}
+
+func reportMetadataActionProgress(r ScanProgressReporter, phase string, done, total int, label string) {
 	if r == nil {
 		return
 	}
 	u := ScanProgressUpdate{
-		Phase: ScanPhaseMetadata,
+		Phase: phase,
 		Label: label,
 	}
 	if total >= 0 {

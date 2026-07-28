@@ -361,6 +361,7 @@ type strmCurrentDirectoryItemDTO struct {
 
 type strmCurrentDirectoryDTO struct {
 	AccountID int64                         `json:"account_id"`
+	ParentID  string                        `json:"parent_id"`
 	Path      string                        `json:"path"`
 	Items     []strmCurrentDirectoryItemDTO `json:"items"`
 }
@@ -375,6 +376,8 @@ type strmCurrentDirectoryResultDTO struct {
 	Deleted            int64 `json:"deleted"`
 	MediaCount         int64 `json:"media_count"`
 	MetadataCreated    int64 `json:"metadata_created"`
+	MetadataUploaded   int64 `json:"metadata_uploaded"`
+	MetadataDeleted    int64 `json:"metadata_deleted"`
 }
 
 type strmDirectoryStatusDTO struct {
@@ -398,7 +401,7 @@ func (h *Handler) checkStrmDirectoryStatus(w http.ResponseWriter, r *http.Reques
 			ID: item.ID, Name: item.Name, Size: item.Size, IsDir: item.IsDir,
 		})
 	}
-	status, err := h.strm.CheckCurrentDirectoryStatus(r.Context(), in.AccountID, in.Path, items)
+	status, err := h.strm.CheckCurrentDirectoryStatus(r.Context(), in.AccountID, in.ParentID, in.Path, items)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -425,7 +428,7 @@ func (h *Handler) generateCurrentDirectoryStrm(w http.ResponseWriter, r *http.Re
 			ID: item.ID, Name: item.Name, Size: item.Size, IsDir: item.IsDir,
 		})
 	}
-	result, err := h.strm.GenerateCurrentDirectory(r.Context(), in.AccountID, in.Path, items)
+	result, err := h.strm.GenerateCurrentDirectory(r.Context(), in.AccountID, in.ParentID, in.Path, items)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -440,6 +443,8 @@ func (h *Handler) generateCurrentDirectoryStrm(w http.ResponseWriter, r *http.Re
 		Deleted:            result.Deleted,
 		MediaCount:         result.MediaCount,
 		MetadataCreated:    result.MetadataCreated,
+		MetadataUploaded:   result.MetadataUploaded,
+		MetadataDeleted:    result.MetadataDeleted,
 	}
 	if out.MatchedTaskID <= 0 {
 		writeJSON(w, http.StatusBadRequest, Resp{
@@ -546,6 +551,7 @@ func mapStrmSettingAliases(in map[string]string) {
 		"metadata_extensions":     settings.KeyStrmMetadataExtensions,
 		"metadata_max_size_mb":    settings.KeyStrmMetadataMaxSizeMB,
 		"metadata_parent_enabled": settings.KeyStrmMetadataParentEnabled,
+		"metadata_sync_mode":      settings.KeyStrmMetadataSyncMode,
 	}
 	for k, v := range aliases {
 		if raw, ok := in[k]; ok {

@@ -56,6 +56,9 @@ func (s *Service) shouldRun(task *domain.StrmTask, now time.Time) bool {
 	if s.isRetentionBusy(task.AccountID) {
 		return false
 	}
+	if s.IsTaskFileOperationBusy(task.ID) {
+		return false
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.running[task.ID] {
@@ -88,9 +91,14 @@ func (s *Service) runTaskAsync(task *domain.StrmTask) {
 	if s.isRetentionBusy(task.AccountID) {
 		return
 	}
+	releaseFiles, ok := s.TryBeginTaskFileOperation(task.ID)
+	if !ok {
+		return
+	}
 	s.mu.Lock()
 	if s.running[task.ID] {
 		s.mu.Unlock()
+		releaseFiles()
 		return
 	}
 	s.running[task.ID] = true
@@ -112,6 +120,7 @@ func (s *Service) runTaskAsync(task *domain.StrmTask) {
 	)
 
 	go func() {
+		defer releaseFiles()
 		defer func() {
 			s.mu.Lock()
 			s.clearTaskRunState(task.ID, task.AccountID)

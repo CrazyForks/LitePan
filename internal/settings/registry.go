@@ -42,6 +42,7 @@ const (
 	KeyStrmMetadataExtensions      = "strm_metadata_extensions"
 	KeyStrmMetadataMaxSizeMB       = "strm_metadata_max_size_mb"
 	KeyStrmMetadataParentEnabled   = "strm_metadata_parent_enabled"
+	KeyStrmMetadataSyncMode        = "strm_metadata_sync_mode"
 	KeyStrmScrapeWriteMode         = "strm_scrape_write_mode"
 
 	KeyMOProxyEnabled           = "mo_proxy_enabled"
@@ -439,6 +440,19 @@ func defaultSpecs() []Spec {
 			Label:       "父目录元数据同步",
 			Description: "子目录有影片时，也同步父目录下的海报、nfo 等元数据。",
 			Default:     "true",
+		},
+		{
+			Key:         KeyStrmMetadataSyncMode,
+			Type:        TypeSelect,
+			Category:    "strm",
+			Label:       "元数据同步策略",
+			Description: "local_primary=保留本地并从云端补缺；cloud_primary=本地目录与云端保持一致；bidirectional=本地与云端互相补缺。",
+			Default:     "local_primary",
+			Options: []Option{
+				{Value: "cloud_primary", Label: "网盘元数据为主"},
+				{Value: "local_primary", Label: "本地元数据补缺"},
+				{Value: "bidirectional", Label: "本地与云端互补"},
+			},
 		},
 		{
 			Key:         KeyStrmScrapeWriteMode,

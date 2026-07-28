@@ -47,6 +47,7 @@ type Service struct {
 	dirtyAccounts            map[int64]bool
 	pendingRun               map[int64]string
 	scanProgress             map[int64]liveScanProgress
+	fileOperations           map[int64]struct{}
 	organizeBusy             RunningAccountLister
 	retentionBusy            RunningAccountLister
 	automationManagedChecker func(context.Context, int64) (bool, error)
@@ -95,6 +96,7 @@ func NewService(opts ServiceOptions) *Service {
 		taskCancels:     make(map[int64]context.CancelFunc),
 		dirtyAccounts:   make(map[int64]bool),
 		pendingRun:      make(map[int64]string),
+		fileOperations:  make(map[int64]struct{}),
 	}
 }
 
@@ -114,6 +116,38 @@ func (s *Service) SetRetentionBusyChecker(checker RunningAccountLister) {
 	s.mu.Lock()
 	s.retentionBusy = checker
 	s.mu.Unlock()
+}
+
+func (s *Service) IsTaskFileOperationBusy(taskID int64) bool {
+	if s == nil || taskID <= 0 {
+		return false
+	}
+	s.mu.Lock()
+	_, busy := s.fileOperations[taskID]
+	s.mu.Unlock()
+	return busy
+}
+
+func (s *Service) TryBeginTaskFileOperation(taskID int64) (func(), bool) {
+	if s == nil || taskID <= 0 {
+		return nil, false
+	}
+	s.mu.Lock()
+	if _, busy := s.fileOperations[taskID]; busy {
+		s.mu.Unlock()
+		return nil, false
+	}
+	s.fileOperations[taskID] = struct{}{}
+	s.mu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			delete(s.fileOperations, taskID)
+			s.mu.Unlock()
+		})
+	}, true
 }
 
 func (s *Service) SetAutomationManagedChecker(checker func(context.Context, int64) (bool, error)) {
@@ -341,6 +375,9 @@ func (s *Service) RunTaskNow(ctx context.Context, id int64, runMode string) (*do
 	if s.isRetentionBusy(task.AccountID) {
 		return nil, domain.Errorf(domain.CodeValidation, "同账号缓存保持任务执行中，请稍后再试")
 	}
+	if s.IsTaskFileOperationBusy(task.ID) {
+		return nil, domain.Errorf(domain.CodeValidation, "该 STRM 任务正在处理本地文件，请稍后再试")
+	}
 	if runMode == "" {
 		runMode = domain.StrmRunModeAuto
 	}
@@ -363,8 +400,8 @@ func (s *Service) RunTaskNow(ctx context.Context, id int64, runMode string) (*do
 	return task, nil
 }
 
-func (s *Service) OnFileMutated(_ context.Context, e eventbus.FileMutated) {
-	if e.Op == "move" {
+func (s *Service) OnFileMutated(ctx context.Context, e eventbus.FileMutated) {
+	if e.Op == "move" || isMetadataSyncMutation(ctx) {
 		return
 	}
 	s.mu.Lock()
@@ -398,6 +435,7 @@ func (s *Service) GetRuntimeSettings(ctx context.Context, requestBase string) (m
 		"metadata_extensions":     s.settings.String(settings.KeyStrmMetadataExtensions),
 		"metadata_max_size_mb":    s.settings.Int(settings.KeyStrmMetadataMaxSizeMB),
 		"metadata_parent_enabled": s.settings.Bool(settings.KeyStrmMetadataParentEnabled),
+		"metadata_sync_mode":      normalizeMetadataSyncMode(s.settings.String(settings.KeyStrmMetadataSyncMode)),
 	}, nil
 }
 
@@ -559,6 +597,7 @@ func (s *Service) scanSettings() ScanSettings {
 		MetadataExtensions:    s.settings.String(settings.KeyStrmMetadataExtensions),
 		MetadataMaxSizeMB:     s.settings.Int(settings.KeyStrmMetadataMaxSizeMB),
 		MetadataParentEnabled: s.settings.Bool(settings.KeyStrmMetadataParentEnabled),
+		MetadataSyncMode:      normalizeMetadataSyncMode(s.settings.String(settings.KeyStrmMetadataSyncMode)),
 	}
 }
 

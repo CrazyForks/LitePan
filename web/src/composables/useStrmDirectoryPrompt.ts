@@ -22,7 +22,7 @@ export function formatStrmDirectoryPrompt(status: StrmDirectoryStatus): string {
   if (strm > 0) parts.push(`${strm} 个 STRM`);
   if (meta > 0) parts.push(`${meta} 个元数据`);
   if (!parts.length) return "";
-  return `发现未生成的 ${parts.join("、")}，是否现在生成？`;
+  return `发现待处理的 ${parts.join("、")}，是否现在处理？`;
 }
 
 export function useStrmDirectoryPrompt(options: {
@@ -33,6 +33,7 @@ export function useStrmDirectoryPrompt(options: {
   refreshing: Ref<boolean>;
   enabled?: Ref<boolean>;
   getDisplayPath: () => string;
+  getParentId: () => string;
 }) {
   const status = ref<StrmDirectoryStatus | null>(null);
   const dismissedKey = ref<string | null>(null);
@@ -43,7 +44,7 @@ export function useStrmDirectoryPrompt(options: {
   function promptKey(): string {
     const id = options.accountId.value;
     if (!id) return "";
-    return `${id}:${options.getDisplayPath()}`;
+    return `${id}:${options.getParentId()}:${options.getDisplayPath()}`;
   }
 
   const promptText = computed(() => {
@@ -77,20 +78,22 @@ export function useStrmDirectoryPrompt(options: {
     }
     const currentSeq = ++seq;
     const path = options.getDisplayPath();
+    const parentId = options.getParentId();
     const items = buildDirectoryItems(options.files.value);
     const controller = new AbortController();
     statusController = controller;
     try {
       const result = await fetchStrmDirectoryStatus({
         account_id: accountId,
+        parent_id: parentId,
         path,
         items,
       }, controller.signal);
-      if (isStaleStatusRequest(currentSeq, accountId, path)) return;
+      if (isStaleStatusRequest(currentSeq, accountId, parentId, path)) return;
       status.value = result;
     } catch (error) {
       if (isCancelledRequest(error)) return;
-      if (isStaleStatusRequest(currentSeq, accountId, path)) return;
+      if (isStaleStatusRequest(currentSeq, accountId, parentId, path)) return;
       status.value = null;
     } finally {
       if (statusController === controller) {
@@ -99,10 +102,11 @@ export function useStrmDirectoryPrompt(options: {
     }
   }
 
-  function isStaleStatusRequest(requestSeq: number, accountId: number, path: string) {
+  function isStaleStatusRequest(requestSeq: number, accountId: number, parentId: string, path: string) {
     return (
       requestSeq !== seq ||
       options.accountId.value !== accountId ||
+      options.getParentId() !== parentId ||
       options.getDisplayPath() !== path ||
       options.loading.value ||
       options.refreshing.value
@@ -161,6 +165,7 @@ export function useStrmDirectoryPrompt(options: {
         options.enabled?.value,
         options.isAdmin.value,
         options.accountId.value,
+        options.getParentId(),
         options.getDisplayPath(),
         options.files.value,
         options.loading.value,

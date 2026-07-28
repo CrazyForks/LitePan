@@ -429,10 +429,22 @@ function formatFileCount(count: number): string {
 }
 
 function scanPhasePrimaryText(task: StrmTask): string {
-  if (task.scan_phase === "syncing_metadata") {
-    return "正在下载元数据";
+  switch (task.scan_phase) {
+    case "comparing_metadata":
+      return "正在比对元数据";
+    case "syncing_metadata":
+      return "正在下载元数据";
+    case "uploading_metadata":
+      return "正在上传元数据";
+    case "cleaning_metadata":
+      return "正在清理本地元数据";
+    default:
+      return "正在扫描并生成 STRM";
   }
-  return "正在扫描并生成 STRM";
+}
+
+function isMetadataScanPhase(task: StrmTask): boolean {
+  return task.scan_phase !== undefined && task.scan_phase !== "scanning";
 }
 
 function isTaskScanning(task: StrmTask): boolean {
@@ -481,7 +493,7 @@ function lastScanPrimaryText(task: StrmTask): string {
 function lastScanSummary(task: StrmTask): string {
   if (isTaskScanning(task)) {
     const parts: string[] = [];
-    if (task.scan_phase === "syncing_metadata") {
+    if (isMetadataScanPhase(task)) {
       const total = Number(task.metadata_total || 0);
       const done = Number(task.metadata_done || 0);
       if (total > 0) {
