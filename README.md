@@ -136,6 +136,9 @@ services:
       <p>
         感谢 <strong>阿文</strong> 的支持（¥20）
       </p>
+      <p>
+        感谢 <strong>贾如</strong> 的支持（¥6.66）
+      </p>
     </td>
   </tr>
 </table>
