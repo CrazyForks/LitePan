@@ -133,6 +133,9 @@ services:
       <p>
         感谢 <strong>飞翔的小鸟</strong> 的支持（¥10）
       </p>
+      <p>
+        感谢 <strong>阿文</strong> 的支持（¥20）
+      </p>
     </td>
   </tr>
 </table>
