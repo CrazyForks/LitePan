@@ -184,8 +184,8 @@ async function saveDrawerSettings() {
     applyReadCache(
       await updateFuseReadCache({
         enabled: drawerForm.read_cache_enabled,
-        max_gb: drawerForm.max_gb,
-        retention_days: drawerForm.retention_days,
+        max_gb: Number(drawerForm.max_gb),
+        retention_days: Number(drawerForm.retention_days),
         eviction_policy: drawerForm.eviction_policy,
       }),
     );
@@ -375,8 +375,8 @@ async function submitForm() {
       mount_point: mountPoint,
       read_only: true,
       auto_mount: form.auto_mount,
-      uid: form.uid,
-      gid: form.gid,
+      uid: Number(form.uid),
+      gid: Number(form.gid),
       dir_mode: form.dir_mode,
       file_mode: form.file_mode,
       enabled: form.enabled,
@@ -670,10 +670,10 @@ defineExpose({
         <template v-if="showAdvanced">
           <div class="fuse-form__row">
             <FormField label="UID">
-              <AppInput v-model.number="form.uid" type="number" />
+              <AppInput v-model="form.uid" type="number" />
             </FormField>
             <FormField label="GID">
-              <AppInput v-model.number="form.gid" type="number" />
+              <AppInput v-model="form.gid" type="number" />
             </FormField>
           </div>
           <div class="fuse-form__row">
@@ -785,7 +785,7 @@ defineExpose({
             </template>
             <template #control>
               <InputActionField>
-                <AppInput v-model.number="drawerForm.max_gb" type="number" min="1" max="500" />
+                <AppInput v-model="drawerForm.max_gb" type="number" min="1" max="500" />
               </InputActionField>
             </template>
           </SettingsRow>
@@ -803,7 +803,7 @@ defineExpose({
             </template>
             <template #control>
               <InputActionField>
-                <AppInput v-model.number="drawerForm.retention_days" type="number" min="1" max="90" />
+                <AppInput v-model="drawerForm.retention_days" type="number" min="1" max="90" />
               </InputActionField>
             </template>
           </SettingsRow>

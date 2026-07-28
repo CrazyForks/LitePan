@@ -7,25 +7,26 @@ import (
 	"strconv"
 	"strings"
 
+	"litepan/internal/domain"
 	"litepan/internal/settings"
 )
 
 var moSettingFieldToKey = map[string]string{
-	"proxy_enabled":                settings.KeyMOProxyEnabled,
-	"proxy_url":                    settings.KeyMOProxyURL,
-	"proxy_username":               settings.KeyMOProxyUsername,
-	"proxy_password":               settings.KeyMOProxyPassword,
-	"tmdb_api_key":                 settings.KeyMOTmdbAPIKey,
-	"tmdb_language":                settings.KeyMOTmdbLanguage,
+	"proxy_enabled":            settings.KeyMOProxyEnabled,
+	"proxy_url":                settings.KeyMOProxyURL,
+	"proxy_username":           settings.KeyMOProxyUsername,
+	"proxy_password":           settings.KeyMOProxyPassword,
+	"tmdb_api_key":             settings.KeyMOTmdbAPIKey,
+	"tmdb_language":            settings.KeyMOTmdbLanguage,
 	"api_request_interval_ms":  settings.KeyMOAPIRequestIntervalMS,
 	"tmdb_request_interval_ms": settings.KeyMOTmdbRequestIntervalMS,
 	"min_confidence_threshold": settings.KeyMOMinConfidenceThreshold,
-	"file_extensions":              settings.KeyMOFileExtensions,
-	"metadata_extensions":          settings.KeyMOMetadataExtensions,
-	"media_tag_order":              settings.KeyMOMediaTagOrder,
-	"align_media_tags":             settings.KeyMOAlignMediaTags,
-	"max_works_per_run":            settings.KeyMOMaxWorksPerRun,
-	"overwrite_existing":           settings.KeyMOOverwriteExisting,
+	"file_extensions":          settings.KeyMOFileExtensions,
+	"metadata_extensions":      settings.KeyMOMetadataExtensions,
+	"media_tag_order":          settings.KeyMOMediaTagOrder,
+	"align_media_tags":         settings.KeyMOAlignMediaTags,
+	"max_works_per_run":        settings.KeyMOMaxWorksPerRun,
+	"overwrite_existing":       settings.KeyMOOverwriteExisting,
 }
 
 var validMediaTagKeys = map[string]struct{}{
@@ -65,14 +66,14 @@ func UpdateSettings(ctx context.Context, svc *settings.Service, updates map[stri
 		if field == "media_tag_order" {
 			parsed, err := parseMediaTagOrder(raw)
 			if err != nil {
-				return err
+				return domain.Errorf(domain.CodeValidation, "%v", err)
 			}
 			normalized[key] = string(parsed)
 			continue
 		}
 		val, err := anyToSettingString(field, raw)
 		if err != nil {
-			return err
+			return domain.Errorf(domain.CodeValidation, "%v", err)
 		}
 		if (field == "tmdb_api_key" || field == "proxy_password") && strings.TrimSpace(val) == "" {
 			continue
@@ -149,13 +150,16 @@ func anyToSettingString(field string, raw any) (string, error) {
 			return strconv.Itoa(n), nil
 		case json.Number:
 			i, err := n.Int64()
-			if err != nil {
-				return "", fmt.Errorf("%s 需为整数", field)
+			if err == nil {
+				return strconv.FormatInt(i, 10), nil
 			}
-			return strconv.FormatInt(i, 10), nil
-		default:
-			return "", fmt.Errorf("%s 需为整数", field)
+		case string:
+			i, err := strconv.Atoi(strings.TrimSpace(n))
+			if err == nil {
+				return strconv.Itoa(i), nil
+			}
 		}
+		return "", fmt.Errorf("%s 需为整数", field)
 	default:
 		switch v := raw.(type) {
 		case string:

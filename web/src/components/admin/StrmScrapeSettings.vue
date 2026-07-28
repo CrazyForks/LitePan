@@ -81,7 +81,10 @@ async function saveSettings() {
   if (saving.value) return;
   saving.value = true;
   try {
-    const data = await saveStrmScrapeSettings({ ...settings });
+    const data = await saveStrmScrapeSettings({
+      ...settings,
+      tmdb_request_interval_ms: Number(settings.tmdb_request_interval_ms),
+    });
     applyBaseline({
       ...settings,
       write_mode: (data.write_mode as StrmScrapeWriteMode) || settings.write_mode,
@@ -108,7 +111,7 @@ async function testTmdb() {
       proxy_url: settings.proxy_url,
       proxy_username: settings.proxy_username,
       proxy_password: settings.proxy_password,
-      tmdb_request_interval_ms: settings.tmdb_request_interval_ms,
+      tmdb_request_interval_ms: Number(settings.tmdb_request_interval_ms),
     });
     if (result.ok) {
       toast.success(result.proxy_used ? "TMDB 连通（已走代理）" : "TMDB 连通正常");
@@ -187,7 +190,7 @@ defineExpose(
             </div>
           </template>
           <template #control>
-            <AppInput v-model.number="settings.tmdb_request_interval_ms" type="number" min="200" max="5000" />
+            <AppInput v-model="settings.tmdb_request_interval_ms" type="number" min="200" max="5000" />
           </template>
         </SettingsRow>
       </SettingsCard>
