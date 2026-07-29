@@ -152,18 +152,41 @@ func (d *Driver) ResolveDownload(ctx context.Context, req driver.DownloadRequest
 	if err != nil {
 		return nil, err
 	}
+	downloadURL = d.resolveDownloadRedirect(ctx, downloadURL)
 	headers := http.Header{"User-Agent": []string{defaultUA}}
 	return &domain.DownloadInfo{
 		URL:         downloadURL,
 		Headers:     headers,
 		Mode:        mode,
-		Expiration:  8 * time.Hour,
+		Expiration:  time.Hour,
 		ForceProxy:  mode != domain.DownloadRedirect,
 		Size:        item.Size,
 		FileName:    item.Name,
 		ChunkSize:   downloadPartSize,
 		Concurrency: downloadConcurrency,
 	}, nil
+}
+
+func (d *Driver) resolveDownloadRedirect(ctx context.Context, rawURL string) string {
+	client := *d.client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, rawURL, nil)
+	if err != nil {
+		return rawURL
+	}
+	req.Header.Set("User-Agent", defaultUA)
+	resp, err := client.Do(req)
+	if err != nil {
+		return rawURL
+	}
+	defer resp.Body.Close()
+	location, err := resp.Location()
+	if err != nil {
+		return rawURL
+	}
+	return location.String()
 }
 
 func (d *Driver) downloadURLWithToken(raw string) (string, error) {

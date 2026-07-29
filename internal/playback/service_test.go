@@ -111,9 +111,10 @@ func assertDynamicRedirect(t *testing.T, response *http.Response) {
 		t.Fatalf("Location = %q", got)
 	}
 	wantHeaders := map[string]string{
-		"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-		"Pragma":        "no-cache",
-		"Expires":       "0",
+		"Cache-Control":   "no-store, no-cache, must-revalidate, max-age=0",
+		"Pragma":          "no-cache",
+		"Expires":         "0",
+		"Referrer-Policy": "no-referrer",
 	}
 	for name, want := range wantHeaders {
 		if got := response.Header.Get(name); got != want {

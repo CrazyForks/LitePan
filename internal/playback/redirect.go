@@ -28,4 +28,5 @@ func writeDynamicRedirectHeaders(header http.Header) {
 	header.Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 	header.Set("Pragma", "no-cache")
 	header.Set("Expires", "0")
+	header.Set("Referrer-Policy", "no-referrer")
 }
