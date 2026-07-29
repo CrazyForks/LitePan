@@ -16,7 +16,18 @@ const browseOpen = ref(false);
 const browseField = ref("");
 
 function setField(name: string, value: unknown) {
-  emit("update:modelValue", { ...props.modelValue, [name]: value });
+  const next = { ...props.modelValue, [name]: value };
+  const previousKey = String(props.modelValue[name] ?? "");
+  const nextKey = String(value ?? "");
+  for (const field of props.fields) {
+    if (field.default_by !== name || !field.defaults || !(nextKey in field.defaults)) continue;
+    const current = String(props.modelValue[field.name] ?? "").trim();
+    const previousDefault = field.defaults[previousKey];
+    if (!current || current === previousDefault || current === field.default) {
+      next[field.name] = field.defaults[nextKey];
+    }
+  }
+  emit("update:modelValue", next);
 }
 
 function selectOptions(f: FieldSchema) {

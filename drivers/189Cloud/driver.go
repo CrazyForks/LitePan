@@ -25,14 +25,19 @@ type Driver struct {
 	refreshToken  string
 	sessionKey    string
 	sessionSecret string
+	familyKey     string
+	familySecret  string
+	familyID      string
 	loginName     string
+	itemCache     map[string]domain.FileItem
+	itemOrder     []string
 }
 
 var config = driver.Config{
 	Name:                   "189_cloud",
 	DisplayName:            "天翼云盘",
-	Description:            "天翼云盘 PC 接口接入，支持扫码登录和文件管理",
-	CardTags:               []string{"个人云", "扫码登录", "支持302", "支持秒传"},
+	Description:            "天翼云盘 PC 接口接入，支持个人云、家庭云和文件管理",
+	CardTags:               []string{"个人云", "家庭云", "扫码登录", "支持302", "支持秒传"},
 	SortOrder:              7,
 	AuthLabel:              "扫码登录",
 	CardColor:              "#FEC52C",
@@ -77,16 +82,36 @@ func (d *Driver) Init(ctx context.Context) error {
 		})
 	}
 	d.mu.Lock()
+	if d.accessToken == "" {
+		d.accessToken = strings.TrimSpace(d.add.AccessToken)
+	}
 	if d.refreshToken == "" {
 		d.refreshToken = strings.TrimSpace(d.add.RefreshToken)
 	}
+	access := d.accessToken
 	empty := d.refreshToken == ""
 	d.mu.Unlock()
 	if empty {
 		return domain.Errorf(domain.CodeValidation, "请先扫码登录获取天翼云盘授权")
 	}
 	if !d.hasSession() {
-		if _, err := d.doRefresh(ctx); err != nil {
+		if access != "" {
+			if err := d.refreshSession(ctx, access); err != nil {
+				if !isSessionExpired(err) {
+					return err
+				}
+				if _, err := d.doRefresh(ctx); err != nil {
+					return err
+				}
+			}
+		} else {
+			if _, err := d.doRefresh(ctx); err != nil {
+				return err
+			}
+		}
+	}
+	if d.isFamily() {
+		if err := d.ensureFamilyID(ctx); err != nil {
 			return err
 		}
 	}
@@ -123,21 +148,34 @@ func (d *Driver) ExplainConnectionError(technical string, saving bool) string {
 }
 
 func (d *Driver) ListFiles(ctx context.Context, parentID string) ([]domain.FileItem, error) {
-	parent := d.normalizeParent(parentID)
+	parent := d.apiParentID(parentID)
+	endpoint := apiURL + "/listFiles.action"
+	baseParams := map[string]string{
+		"folderId":   parent,
+		"fileType":   "0",
+		"mediaAttr":  "0",
+		"iconOption": "5",
+	}
+	if d.isFamily() {
+		endpoint = apiURL + "/family/file/listFiles.action"
+		baseParams["familyId"] = d.currentFamilyID()
+		baseParams["orderBy"] = "1"
+		baseParams["descending"] = "false"
+	} else {
+		baseParams["recursive"] = "0"
+		baseParams["orderBy"] = "filename"
+		baseParams["descending"] = "false"
+	}
 	var out []domain.FileItem
 	for page := 1; page < 10000; page++ {
 		var resp listResp
-		err := d.apiRequest(ctx, http.MethodGet, apiURL+"/listFiles.action", map[string]string{
-			"folderId":   parent,
-			"fileType":   "0",
-			"mediaAttr":  "0",
-			"iconOption": "5",
-			"pageNum":    itoa(page),
-			"pageSize":   itoa(listPageSize),
-			"recursive":  "0",
-			"orderBy":    "filename",
-			"descending": "false",
-		}, &resp)
+		params := make(map[string]string, len(baseParams)+2)
+		for key, value := range baseParams {
+			params[key] = value
+		}
+		params["pageNum"] = itoa(page)
+		params["pageSize"] = itoa(listPageSize)
+		err := d.apiRequest(ctx, http.MethodGet, endpoint, params, &resp)
 		if err != nil {
 			return nil, err
 		}
@@ -158,18 +196,25 @@ func (d *Driver) ListFiles(ctx context.Context, parentID string) ([]domain.FileI
 			break
 		}
 	}
+	d.rememberItems(out)
 	return out, nil
 }
 
 func (d *Driver) GetFileInfo(ctx context.Context, fileID string) (*domain.FileItem, error) {
 	id := strings.TrimSpace(fileID)
-	if id == "" || id == "/" || id == d.rootID() {
+	if id == "" || id == "/" || id == d.rootID() || (d.isFamily() && id == "-11") {
 		return &domain.FileItem{
 			ID:     d.rootID(),
 			Name:   "根目录",
 			IsDir:  true,
 			IDKind: domain.IDStable,
 		}, nil
+	}
+	if d.isFamily() {
+		if item, ok := d.cachedItem(id); ok {
+			return &item, nil
+		}
+		return d.findFamilyItem(ctx, id)
 	}
 
 	raw, err := d.fetchFileInfo(ctx, id)

@@ -24,6 +24,8 @@ export interface FieldSchema {
   options?: FieldOption[];
   full_width?: boolean;
   pair_key?: string;
+  default_by?: string;
+  defaults?: Record<string, string>;
 }
 
 export interface DriverInfo {

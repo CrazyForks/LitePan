@@ -25,12 +25,21 @@ func (d *Driver) ResolveDownload(ctx context.Context, req driver.DownloadRequest
 	if fileID == "" {
 		return nil, domain.Errorf(domain.CodeValidation, "file_id 不能为空")
 	}
-	var out map[string]any
-	if err := d.apiRequest(ctx, http.MethodGet, apiURL+"/getFileDownloadUrl.action", map[string]string{
+	endpoint := apiURL + "/getFileDownloadUrl.action"
+	params := map[string]string{
 		"fileId": fileID,
 		"dt":     "3",
 		"flag":   "1",
-	}, &out); err != nil {
+	}
+	if d.isFamily() {
+		endpoint = apiURL + "/family/file/getFileDownloadUrl.action"
+		params = map[string]string{
+			"fileId":   fileID,
+			"familyId": d.currentFamilyID(),
+		}
+	}
+	var out map[string]any
+	if err := d.apiRequest(ctx, http.MethodGet, endpoint, params, &out); err != nil {
 		return nil, err
 	}
 	downloadURL := firstString(anyString(out["fileDownloadUrl"]), anyString(out["downloadUrl"]), anyString(out["url"]))
@@ -41,9 +50,13 @@ func (d *Driver) ResolveDownload(ctx context.Context, req driver.DownloadRequest
 	downloadURL = regexp.MustCompile(`(?i)^http://`).ReplaceAllString(downloadURL, "https://")
 	fileName := ""
 	size := int64(0)
-	if raw, err := d.fetchFileInfo(ctx, fileID); err == nil && raw != nil {
-		fileName = strings.TrimSpace(raw.Name)
-		size = raw.size()
+	if d.isFamily() {
+		if item, err := d.GetFileInfo(ctx, fileID); err == nil && item != nil {
+			fileName = item.Name
+			size = item.Size
+		}
+	} else if raw, err := d.fetchFileInfo(ctx, fileID); err == nil && raw != nil {
+		fileName, size = strings.TrimSpace(raw.Name), raw.size()
 	}
 	headers := http.Header{}
 	headers.Set("User-Agent", resolveUA(req.UA))
@@ -82,12 +95,22 @@ func (d *Driver) CreateFolder(ctx context.Context, parentID, name string) (*doma
 	if err := uploadutil.ValidateFileName(folderName); err != nil {
 		return nil, err
 	}
-	var entry fileEntry
-	if err := d.apiRequest(ctx, http.MethodPost, apiURL+"/createFolder.action", map[string]string{
-		"parentFolderId": d.normalizeParent(parentID),
+	endpoint := apiURL + "/createFolder.action"
+	params := map[string]string{
+		"parentFolderId": d.apiParentID(parentID),
 		"folderName":     folderName,
 		"relativePath":   "",
-	}, &entry); err != nil {
+	}
+	if d.isFamily() {
+		endpoint = apiURL + "/family/file/createFolder.action"
+		params = map[string]string{
+			"familyId":   d.currentFamilyID(),
+			"parentId":   d.apiParentID(parentID),
+			"folderName": folderName,
+		}
+	}
+	var entry fileEntry
+	if err := d.apiRequest(ctx, http.MethodPost, endpoint, params, &entry); err != nil {
 		return nil, err
 	}
 	entry.isDir = true
@@ -98,6 +121,7 @@ func (d *Driver) CreateFolder(ctx context.Context, parentID, name string) (*doma
 	if item.Name == "" {
 		item.Name = folderName
 	}
+	d.rememberItems([]domain.FileItem{item})
 	return &item, nil
 }
 
@@ -120,16 +144,30 @@ func (d *Driver) RenameFile(ctx context.Context, fileID, newName string) error {
 	if err != nil {
 		return err
 	}
-	if item.IsDir {
-		return d.apiRequest(ctx, http.MethodPost, apiURL+"/renameFolder.action", map[string]string{
-			"folderId":       id,
-			"destFolderName": name,
-		}, nil)
+	method := http.MethodPost
+	prefix := apiURL
+	base := map[string]string{}
+	if d.isFamily() {
+		method = http.MethodGet
+		prefix = apiURL + "/family/file"
+		base["familyId"] = d.currentFamilyID()
 	}
-	return d.apiRequest(ctx, http.MethodPost, apiURL+"/renameFile.action", map[string]string{
-		"fileId":       id,
-		"destFileName": name,
-	}, nil)
+	if item.IsDir {
+		base["folderId"] = id
+		base["destFolderName"] = name
+		if err := d.apiRequest(ctx, method, prefix+"/renameFolder.action", base, nil); err != nil {
+			return err
+		}
+	} else {
+		base["fileId"] = id
+		base["destFileName"] = name
+		if err := d.apiRequest(ctx, method, prefix+"/renameFile.action", base, nil); err != nil {
+			return err
+		}
+	}
+	item.Name = name
+	d.rememberItems([]domain.FileItem{*item})
+	return nil
 }
 
 func (d *Driver) DeleteFiles(ctx context.Context, fileIDs []string) error {
@@ -159,8 +197,10 @@ func (d *Driver) DeleteFiles(ctx context.Context, fileIDs []string) error {
 		if err := d.waitBatchTask(ctx, "CLEAR_RECYCLE", clearID, time.Second, 40*time.Second); err != nil {
 			return err
 		}
+		d.forgetItems(ids)
 		return nil
 	}
+	d.forgetItems(ids)
 	return nil
 }
 
@@ -184,7 +224,7 @@ func (d *Driver) transferFiles(ctx context.Context, taskType string, fileIDs []s
 	if err != nil {
 		return err
 	}
-	taskID, err := d.createBatchTask(ctx, taskType, taskInfos, d.normalizeParent(targetParentID), nil)
+	taskID, err := d.createBatchTask(ctx, taskType, taskInfos, d.apiParentID(targetParentID), nil)
 	if err != nil {
 		return err
 	}
@@ -250,6 +290,9 @@ func (d *Driver) createBatchTask(ctx context.Context, taskType string, taskInfos
 	form.Set("type", taskType)
 	form.Set("taskInfos", string(raw))
 	form.Set("targetFolderId", targetFolderID)
+	if d.isFamily() {
+		form.Set("familyId", d.currentFamilyID())
+	}
 	for k, v := range extra {
 		form.Set(k, v)
 	}
@@ -271,7 +314,7 @@ func (d *Driver) waitBatchTask(ctx context.Context, taskType, taskID string, int
 		form.Set("type", taskType)
 		form.Set("taskId", taskID)
 		var resp map[string]any
-		if err := d.formRequest(ctx, http.MethodPost, apiURL+"/batch/checkBatchTask.action", form, &resp); err != nil {
+		if err := d.formRequestFor(ctx, http.MethodPost, apiURL+"/batch/checkBatchTask.action", form, &resp, false); err != nil {
 			return err
 		}
 		status := anyInt(resp["taskStatus"])

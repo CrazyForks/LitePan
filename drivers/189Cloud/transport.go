@@ -47,29 +47,66 @@ const (
 )
 
 func (d *Driver) rootID() string {
-	if id := strings.TrimSpace(d.add.RootFolderID); id != "" && id != "/" && id != "0" {
+	id := strings.TrimSpace(d.add.RootFolderID)
+	if !d.isRootAlias(id) {
 		return id
+	}
+	if d.isFamily() {
+		return "/"
 	}
 	return "-11"
 }
 
 func (d *Driver) normalizeParent(parentID string) string {
 	p := strings.TrimSpace(parentID)
-	if p == "" || p == "/" || p == "0" || p == "root" {
+	if d.isRootAlias(p) {
 		return d.rootID()
 	}
 	return p
 }
 
+func (d *Driver) isRootAlias(id string) bool {
+	switch strings.ToLower(strings.TrimSpace(id)) {
+	case "", "/", "0", "root":
+		return true
+	case "-11", "home":
+		return d.isFamily()
+	default:
+		return false
+	}
+}
+
+func (d *Driver) apiParentID(parentID string) string {
+	parent := d.normalizeParent(parentID)
+	if d.isFamily() && d.isRootAlias(parent) {
+		return ""
+	}
+	return parent
+}
+
 func (d *Driver) hasSession() bool {
+	return d.hasSessionFor(d.isFamily())
+}
+
+func (d *Driver) hasSessionFor(family bool) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if family {
+		return d.familyKey != "" && d.familySecret != ""
+	}
 	return d.sessionKey != "" && d.sessionSecret != ""
 }
 
 func (d *Driver) currentSession() (string, string) {
+	return d.currentSessionFor(d.isFamily())
+}
+
+func (d *Driver) currentSessionFor(family bool) (string, string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if family {
+		return d.familyKey, d.familySecret
+	}
 	return d.sessionKey, d.sessionSecret
 }
 
@@ -115,16 +152,20 @@ func (d *Driver) apiRequest(ctx context.Context, method, rawURL string, params m
 }
 
 func (d *Driver) formRequest(ctx context.Context, method, rawURL string, form url.Values, out any) error {
-	if !d.hasSession() {
+	return d.formRequestFor(ctx, method, rawURL, form, out, d.isFamily())
+}
+
+func (d *Driver) formRequestFor(ctx context.Context, method, rawURL string, form url.Values, out any, family bool) error {
+	if !d.hasSessionFor(family) {
 		if _, err := d.doRefresh(ctx); err != nil {
 			return err
 		}
 	}
-	if err := d.signedForm(ctx, method, rawURL, form, out); isSessionExpired(err) {
+	if err := d.signedFormFor(ctx, method, rawURL, form, out, family); isSessionExpired(err) {
 		if _, rerr := d.doRefresh(ctx); rerr != nil {
 			return rerr
 		}
-		return d.signedForm(ctx, method, rawURL, form, out)
+		return d.signedFormFor(ctx, method, rawURL, form, out, family)
 	} else if err != nil {
 		return err
 	}
@@ -134,9 +175,7 @@ func (d *Driver) formRequest(ctx context.Context, method, rawURL string, form ur
 func (d *Driver) signedJSON(ctx context.Context, method, rawURL string, params map[string]string, out any) error {
 	query := clientSuffix()
 	for k, v := range params {
-		if strings.TrimSpace(v) != "" {
-			query.Set(k, v)
-		}
+		query.Set(k, v)
 	}
 	headers, err := d.signatureHeaders(method, rawURL, "")
 	if err != nil {
@@ -146,8 +185,12 @@ func (d *Driver) signedJSON(ctx context.Context, method, rawURL string, params m
 }
 
 func (d *Driver) signedForm(ctx context.Context, method, rawURL string, form url.Values, out any) error {
+	return d.signedFormFor(ctx, method, rawURL, form, out, d.isFamily())
+}
+
+func (d *Driver) signedFormFor(ctx context.Context, method, rawURL string, form url.Values, out any, family bool) error {
 	query := clientSuffix()
-	headers, err := d.signatureHeaders(method, rawURL, "")
+	headers, err := d.signatureHeadersFor(method, rawURL, "", family)
 	if err != nil {
 		return err
 	}
@@ -167,6 +210,9 @@ func (d *Driver) rawJSON(ctx context.Context, method, rawURL string, query url.V
 	resp, data, err := httpx.Execute(d.client, req, httpx.DefaultReadLimit)
 	if err != nil {
 		return domain.Wrap(domain.CodeDriverError, err)
+	}
+	if is189AuthExpiredPayload(data) {
+		return domain.Errorf(domain.CodeAuthExpired, "天翼云盘认证会话已失效")
 	}
 	if resp.StatusCode != http.StatusOK {
 		return domain.Errorf(domain.CodeDriverError, "天翼云盘 API HTTP %d: %s", resp.StatusCode, httpx.Truncate(data, 300))
@@ -193,6 +239,9 @@ func (d *Driver) rawForm(ctx context.Context, method, rawURL string, query url.V
 	if err != nil {
 		return domain.Wrap(domain.CodeDriverError, err)
 	}
+	if is189AuthExpiredPayload(data) {
+		return domain.Errorf(domain.CodeAuthExpired, "天翼云盘认证会话已失效")
+	}
 	if resp.StatusCode != http.StatusOK {
 		return domain.Errorf(domain.CodeDriverError, "天翼云盘 API HTTP %d: %s", resp.StatusCode, httpx.Truncate(data, 300))
 	}
@@ -200,7 +249,7 @@ func (d *Driver) rawForm(ctx context.Context, method, rawURL string, query url.V
 }
 
 func parse189Response(data []byte, out any) error {
-	if bytes.Contains(data, []byte("InvalidSessionKey")) || bytes.Contains(data, []byte("userSessionBO is null")) {
+	if is189AuthExpiredPayload(data) {
 		return domain.Errorf(domain.CodeAuthExpired, "天翼云盘会话已失效")
 	}
 	trimmed := bytes.TrimSpace(data)
@@ -255,6 +304,14 @@ func parse189XMLResponse(data []byte, out any) error {
 	return nil
 }
 
+func is189AuthExpiredPayload(data []byte) bool {
+	lower := bytes.ToLower(data)
+	return bytes.Contains(lower, []byte("invalidsessionkey")) ||
+		bytes.Contains(lower, []byte("usersessionbo is null")) ||
+		bytes.Contains(lower, []byte("userinvalidopentoken")) ||
+		bytes.Contains(lower, []byte("unifyaccountinfo is null"))
+}
+
 func responseMessage(env map[string]json.RawMessage, keys ...string) string {
 	for _, key := range keys {
 		var s string
@@ -288,11 +345,19 @@ func isSessionExpired(err error) bool {
 		return true
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "InvalidSessionKey") || strings.Contains(msg, "userSessionBO is null")
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "invalidsessionkey") ||
+		strings.Contains(lower, "usersessionbo is null") ||
+		strings.Contains(lower, "userinvalidopentoken") ||
+		strings.Contains(lower, "unifyaccountinfo is null")
 }
 
 func (d *Driver) signatureHeaders(method, rawURL, params string) (map[string]string, error) {
-	sessionKey, sessionSecret := d.currentSession()
+	return d.signatureHeadersFor(method, rawURL, params, d.isFamily())
+}
+
+func (d *Driver) signatureHeadersFor(method, rawURL, params string, family bool) (map[string]string, error) {
+	sessionKey, sessionSecret := d.currentSessionFor(family)
 	if sessionKey == "" || sessionSecret == "" {
 		return nil, domain.Errorf(domain.CodeAuthExpired, "天翼云盘会话未初始化")
 	}

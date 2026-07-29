@@ -7,8 +7,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"litepan/internal/domain"
 	"litepan/internal/driver"
@@ -30,6 +33,7 @@ type uploadHashInfo struct {
 }
 
 type cloud189ResumeCtx struct {
+	space          string
 	parentID       string
 	requestedName  string
 	targetName     string
@@ -58,8 +62,9 @@ func (d *Driver) UploadLocalFile(ctx context.Context, req driver.LocalUploadRequ
 	fileSize := local.Size
 	partSize := uploadPartSize(fileSize)
 	policy := uploadutil.NormalizeConflictPolicy(req.ConflictPolicy)
+	space := d.uploadSpaceKey()
 
-	resume := normalize189ResumeState(req.ResumeState, parentID, requestedName, fileSize, partSize, uploadHashInfo{})
+	resume := normalize189ResumeState(req.ResumeState, space, parentID, requestedName, fileSize, partSize, uploadHashInfo{})
 	hadResumeCandidate := resume != nil
 	targetName := requestedName
 	if resume != nil {
@@ -85,7 +90,7 @@ func (d *Driver) UploadLocalFile(ctx context.Context, req driver.LocalUploadRequ
 	if err != nil {
 		return nil, err
 	}
-	resume = normalize189ResumeState(req.ResumeState, parentID, requestedName, fileSize, partSize, hashInfo)
+	resume = normalize189ResumeState(req.ResumeState, space, parentID, requestedName, fileSize, partSize, hashInfo)
 	if hadResumeCandidate && resume == nil {
 		var skipped bool
 		targetName, skipped, err = d.prepareUploadName(ctx, parentID, requestedName, policy)
@@ -110,10 +115,13 @@ func (d *Driver) UploadLocalFile(ctx context.Context, req driver.LocalUploadRequ
 	} else {
 		uploadutil.NotifyProgress(req.OnProgress, 0, fileSize, "正在创建上传会话")
 		initParams := map[string]string{
-			"parentFolderId": parentID,
+			"parentFolderId": d.apiParentID(parentID),
 			"fileName":       url.QueryEscape(targetName),
 			"fileSize":       fmt.Sprintf("%d", fileSize),
 			"sliceSize":      fmt.Sprintf("%d", partSize),
+		}
+		if d.isFamily() {
+			initParams["familyId"] = d.currentFamilyID()
 		}
 		if singlePart || emptyFile {
 			initParams["fileMd5"] = hashInfo.fileMD5
@@ -132,6 +140,7 @@ func (d *Driver) UploadLocalFile(ctx context.Context, req driver.LocalUploadRequ
 		}
 		rapid = anyInt(initData["fileDataExists"]) == 1 || anyInt(initResp["fileDataExists"]) == 1
 		resume = &cloud189ResumeCtx{
+			space:          space,
 			parentID:       parentID,
 			requestedName:  requestedName,
 			targetName:     targetName,
@@ -153,10 +162,7 @@ func (d *Driver) UploadLocalFile(ctx context.Context, req driver.LocalUploadRequ
 			if _, completed := resume.completedParts[partNumber]; completed {
 				continue
 			}
-			urlsResp, err := d.uploadEncryptedRequest(ctx, "getMultiUploadUrls", map[string]string{
-				"uploadFileId": uploadFileID,
-				"partInfo":     partInfo,
-			})
+			urlsResp, err := d.getMultiUploadURLs(ctx, uploadFileID, partInfo, partNumber, totalParts)
 			if err != nil {
 				return nil, err
 			}
@@ -214,8 +220,70 @@ func (d *Driver) UploadLocalFile(ctx context.Context, req driver.LocalUploadRequ
 	}, nil
 }
 
-func normalize189ResumeState(state map[string]any, parentID, requestedName string, fileSize, partSize int64, hashes uploadHashInfo) *cloud189ResumeCtx {
-	if len(state) == 0 || strings.TrimSpace(uploadutil.AnyString(state["parent_id"])) != parentID ||
+func (d *Driver) getMultiUploadURLs(ctx context.Context, uploadFileID, partInfo string, partNumber, totalParts int) (map[string]any, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			delay := time.Duration(attempt) * 300 * time.Millisecond
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
+		}
+		resp, err := d.uploadEncryptedRequest(ctx, "getMultiUploadUrls", map[string]string{
+			"uploadFileId": uploadFileID,
+			"partInfo":     partInfo,
+		})
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		if !retryableUploadURLFailure(ctx, err) {
+			return nil, err
+		}
+	}
+	return nil, domain.Errorf(
+		domain.CodeDriverError,
+		"获取第 %d/%d 个分片上传地址失败（已自动重试 2 次）：%s",
+		partNumber,
+		totalParts,
+		rootErrorMessage(lastErr),
+	)
+}
+
+func retryableUploadURLFailure(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil || isSessionExpired(err) {
+		return false
+	}
+	var urlErr *url.Error
+	var netErr net.Error
+	return errors.As(err, &urlErr) ||
+		errors.As(err, &netErr) ||
+		errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+func rootErrorMessage(err error) string {
+	for err != nil {
+		next := errors.Unwrap(err)
+		if next == nil {
+			return err.Error()
+		}
+		err = next
+	}
+	return "未知网络错误"
+}
+
+func normalize189ResumeState(state map[string]any, space, parentID, requestedName string, fileSize, partSize int64, hashes uploadHashInfo) *cloud189ResumeCtx {
+	stateSpace := strings.TrimSpace(uploadutil.AnyString(state["space"]))
+	if stateSpace == "" {
+		stateSpace = "personal"
+	}
+	if len(state) == 0 || stateSpace != space ||
+		strings.TrimSpace(uploadutil.AnyString(state["parent_id"])) != parentID ||
 		strings.TrimSpace(uploadutil.AnyString(state["requested_name"])) != requestedName {
 		return nil
 	}
@@ -236,6 +304,7 @@ func normalize189ResumeState(state map[string]any, parentID, requestedName strin
 		totalParts = int((fileSize + partSize - 1) / partSize)
 	}
 	return &cloud189ResumeCtx{
+		space:          space,
 		parentID:       parentID,
 		requestedName:  requestedName,
 		targetName:     targetName,
@@ -259,6 +328,7 @@ func persist189ResumeState(onState driver.UploadStateCallback, resume *cloud189R
 		progress = 99
 	}
 	onState(map[string]any{
+		"space":           resume.space,
 		"parent_id":       resume.parentID,
 		"requested_name":  resume.requestedName,
 		"target_name":     resume.targetName,
@@ -410,7 +480,11 @@ func (d *Driver) uploadEncryptedRequestOnce(ctx context.Context, endpoint string
 	if err != nil {
 		return nil, err
 	}
-	rawURL := uploadURL + "/person/" + strings.TrimLeft(endpoint, "/")
+	space := "person"
+	if d.isFamily() {
+		space = "family"
+	}
+	rawURL := uploadURL + "/" + space + "/" + strings.TrimLeft(endpoint, "/")
 	query := clientSuffix()
 	query.Set("params", encrypted)
 	headers, err := d.signatureHeaders(http.MethodGet, rawURL, encrypted)
@@ -582,6 +656,13 @@ func (d *Driver) ResolveTransferHash(ctx context.Context, item *domain.FileItem,
 	if !allowStream || item == nil || strings.TrimSpace(item.ID) == "" {
 		return "", nil
 	}
+	if d.isFamily() {
+		info, err := d.GetFileInfo(ctx, item.ID)
+		if err != nil {
+			return "", err
+		}
+		return driver.HashFromItem(info, "md5"), nil
+	}
 	info, err := d.fetchFileInfo(ctx, item.ID)
 	if err != nil {
 		return "", err
@@ -608,13 +689,19 @@ func (d *Driver) RapidUploadByHash(ctx context.Context, req driver.RapidUploadRe
 		operation = "3"
 	}
 	var committed rapidCommitResp
-	if err := d.formRequest(ctx, http.MethodPost, commitURL, url.Values{
-		"opertype":     {operation},
-		"resumePolicy": {"1"},
-		"uploadFileId": {uploadFileID},
-		"isLog":        {"0"},
-	}, &committed); err != nil {
-		return nil, err
+	if d.isFamily() {
+		if err := d.commitFamilyRapidUpload(ctx, commitURL, uploadFileID, &committed); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := d.formRequest(ctx, http.MethodPost, commitURL, url.Values{
+			"opertype":     {operation},
+			"resumePolicy": {"1"},
+			"uploadFileId": {uploadFileID},
+			"isLog":        {"0"},
+		}, &committed); err != nil {
+			return nil, err
+		}
 	}
 	return &driver.RapidUploadResult{
 		Reuse:    true,
@@ -659,19 +746,53 @@ func (d *Driver) createRapidUpload(ctx context.Context, req driver.RapidUploadRe
 
 	parentID := d.normalizeParent(req.ParentID)
 	var created rapidCreateResp
-	if err := d.formRequest(ctx, http.MethodPost, apiURL+"/createUploadFile.action", url.Values{
-		"parentFolderId": {parentID},
-		"fileName":       {fileName},
-		"size":           {strconv.FormatInt(req.Size, 10)},
-		"md5":            {hash},
-		"opertype":       {"3"},
-		"flag":           {"1"},
-		"resumePolicy":   {"1"},
-		"isLog":          {"0"},
-	}, &created); err != nil {
-		return rapidCreateResp{}, "", err
+	if d.isFamily() {
+		if err := d.apiRequest(ctx, http.MethodPost, apiURL+"/family/file/createFamilyFile.action", map[string]string{
+			"familyId":     d.currentFamilyID(),
+			"parentId":     d.apiParentID(parentID),
+			"fileMd5":      hash,
+			"fileName":     fileName,
+			"fileSize":     strconv.FormatInt(req.Size, 10),
+			"resumePolicy": "1",
+		}, &created); err != nil {
+			return rapidCreateResp{}, "", err
+		}
+	} else {
+		if err := d.formRequest(ctx, http.MethodPost, apiURL+"/createUploadFile.action", url.Values{
+			"parentFolderId": {parentID},
+			"fileName":       {fileName},
+			"size":           {strconv.FormatInt(req.Size, 10)},
+			"md5":            {hash},
+			"opertype":       {"3"},
+			"flag":           {"1"},
+			"resumePolicy":   {"1"},
+			"isLog":          {"0"},
+		}, &created); err != nil {
+			return rapidCreateResp{}, "", err
+		}
 	}
 	return created, parentID, nil
+}
+
+func (d *Driver) commitFamilyRapidUpload(ctx context.Context, commitURL, uploadFileID string, out any) error {
+	commit := func() error {
+		headers, err := d.signatureHeadersFor(http.MethodPost, commitURL, "", true)
+		if err != nil {
+			return err
+		}
+		headers["ResumePolicy"] = "1"
+		headers["UploadFileId"] = uploadFileID
+		headers["FamilyId"] = d.currentFamilyID()
+		return d.rawForm(ctx, http.MethodPost, commitURL, clientSuffix(), url.Values{}, headers, out)
+	}
+	if err := commit(); isSessionExpired(err) {
+		if _, refreshErr := d.doRefresh(ctx); refreshErr != nil {
+			return refreshErr
+		}
+		return commit()
+	} else {
+		return err
+	}
 }
 
 func normalize189RapidProbeError(err error) error {

@@ -110,12 +110,18 @@ func (d *Driver) refreshSession(ctx context.Context, accessToken string) error {
 		}
 		return domain.Errorf(domain.CodeAuthExpired, "%s", msg)
 	}
-	if out.SessionKey == "" || out.SessionSecret == "" {
-		return domain.Errorf(domain.CodeAuthExpired, "刷新会话成功但缺少 sessionKey/sessionSecret")
+	if d.isFamily() {
+		if out.FamilySessionKey == "" || out.FamilySessionSecret == "" {
+			return domain.Errorf(domain.CodeAuthExpired, "刷新会话成功但缺少家庭云会话信息")
+		}
+	} else if out.SessionKey == "" || out.SessionSecret == "" {
+		return domain.Errorf(domain.CodeAuthExpired, "刷新会话成功但缺少个人云会话信息")
 	}
 	d.mu.Lock()
 	d.sessionKey = out.SessionKey
 	d.sessionSecret = out.SessionSecret
+	d.familyKey = out.FamilySessionKey
+	d.familySecret = out.FamilySessionSecret
 	d.loginName = out.LoginName
 	if out.RefreshToken != "" {
 		d.refreshToken = out.RefreshToken

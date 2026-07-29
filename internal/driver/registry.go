@@ -18,14 +18,16 @@ type FieldOption struct {
 
 // FieldSchema 描述一个配置字段，供前端自动生成表单。
 type FieldSchema struct {
-	Name      string        `json:"name"`
-	Label     string        `json:"label"`
-	Type      string        `json:"type"` // string/select/number/bool/password/local_dir
-	Required  bool          `json:"required"`
-	Default   string        `json:"default,omitempty"`
-	Options   []FieldOption `json:"options,omitempty"`
-	FullWidth bool          `json:"full_width,omitempty"` // form:"full" — 独占一行
-	PairKey   string        `json:"pair_key,omitempty"`   // form:"pair=xxx" — 与同 key 字段两列并排
+	Name      string            `json:"name"`
+	Label     string            `json:"label"`
+	Type      string            `json:"type"` // string/select/number/bool/password/local_dir
+	Required  bool              `json:"required"`
+	Default   string            `json:"default,omitempty"`
+	Options   []FieldOption     `json:"options,omitempty"`
+	FullWidth bool              `json:"full_width,omitempty"` // form:"full" — 独占一行
+	PairKey   string            `json:"pair_key,omitempty"`   // form:"pair=xxx" — 与同 key 字段两列并排
+	DefaultBy string            `json:"default_by,omitempty"`
+	Defaults  map[string]string `json:"defaults,omitempty"`
 }
 
 // DriverInfo 是驱动对外暴露的元信息 + 表单 schema。
@@ -175,10 +177,12 @@ func buildSchema(add any) []FieldSchema {
 			name = f.Name
 		}
 		fs := FieldSchema{
-			Name:    name,
-			Label:   f.Tag.Get("label"),
-			Type:    f.Tag.Get("type"),
-			Default: f.Tag.Get("default"),
+			Name:      name,
+			Label:     f.Tag.Get("label"),
+			Type:      f.Tag.Get("type"),
+			Default:   f.Tag.Get("default"),
+			DefaultBy: f.Tag.Get("default_by"),
+			Defaults:  parseDefaultsTag(f.Tag.Get("defaults")),
 		}
 		required, fullWidth, pairKey, skipForm := parseFormTag(f.Tag.Get("form"))
 		if skipForm {
@@ -220,6 +224,24 @@ func parseFormTag(raw string) (required, fullWidth bool, pairKey string, skipFor
 		}
 	}
 	return
+}
+
+func parseDefaultsTag(raw string) map[string]string {
+	out := map[string]string{}
+	for _, part := range strings.Split(raw, ",") {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key != "" {
+			out[key] = strings.TrimSpace(value)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func parseOptionsTag(raw string) []FieldOption {

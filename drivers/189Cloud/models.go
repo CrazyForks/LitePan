@@ -20,12 +20,25 @@ type oauthRefreshResp struct {
 }
 
 type sessionResp struct {
-	ResCode       json.RawMessage `json:"res_code"`
-	ResMessage    string          `json:"res_message"`
-	SessionKey    string          `json:"sessionKey"`
-	SessionSecret string          `json:"sessionSecret"`
-	LoginName     string          `json:"loginName"`
-	RefreshToken  string          `json:"refreshToken"`
+	ResCode             json.RawMessage `json:"res_code"`
+	ResMessage          string          `json:"res_message"`
+	AccessToken         string          `json:"accessToken"`
+	SessionKey          string          `json:"sessionKey"`
+	SessionSecret       string          `json:"sessionSecret"`
+	FamilySessionKey    string          `json:"familySessionKey"`
+	FamilySessionSecret string          `json:"familySessionSecret"`
+	LoginName           string          `json:"loginName"`
+	RefreshToken        string          `json:"refreshToken"`
+}
+
+type familyListResp struct {
+	FamilyInfoResp []familyInfo `json:"familyInfoResp"`
+}
+
+type familyInfo struct {
+	FamilyID   flexString `json:"familyId"`
+	RemarkName string     `json:"remarkName"`
+	UseFlag    int        `json:"useFlag"`
 }
 
 type listResp struct {

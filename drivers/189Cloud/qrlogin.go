@@ -228,6 +228,7 @@ func finalizeQRLogin(ctx context.Context, client *http.Client, redirectURL strin
 	return &driver.QRPollResult{
 		Status: driver.QRSuccess,
 		Credentials: domain.AuthCredentials{
+			AccessToken:  out.AccessToken,
 			RefreshToken: out.RefreshToken,
 			TokenExpires: time.Now().Add(7 * 24 * time.Hour),
 		},
