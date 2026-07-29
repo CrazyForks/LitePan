@@ -1031,6 +1031,15 @@ defineExpose({
                     <span class="organize-plan-group-count">{{ group.actionCount }} 项</span>
                   </span>
                   <span class="organize-plan-group-controls">
+                    <a
+                      v-if="group.tmdbUrl"
+                      :href="group.tmdbUrl"
+                      class="plan-row-btn"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="在 TMDB 核对作品"
+                      @click.stop
+                    ><i class="fas fa-arrow-up-right-from-square" aria-hidden="true" /></a>
                     <button v-if="group.dirAction" type="button" class="plan-row-btn" title="编辑作品目录名" @click.stop="startPlanActionEdit(group.dirAction)"><i class="fas fa-pen" aria-hidden="true" /></button>
                     <button type="button" class="plan-row-btn plan-row-btn--danger" title="从计划中移除整组" @click.stop="removePlanGroup(group)"><i class="fas fa-trash" aria-hidden="true" /></button>
                   </span>
@@ -1860,6 +1869,7 @@ defineExpose({
   cursor: pointer;
   font-size: 11px;
   padding: 0;
+  text-decoration: none;
 }
 
 .plan-row-btn:hover {

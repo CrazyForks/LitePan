@@ -30,6 +30,7 @@ export interface PlanGroupRow {
 export interface PlanGroup {
   key: string;
   tmdbId: string;
+  tmdbUrl: string;
   dirAction: MediaOrganizePlanAction | null;
   virtualDir: boolean;
   hasDirInfo: boolean;
@@ -267,6 +268,13 @@ export function useOrganizePlanPreview() {
       out.push({
         key: g.key,
         tmdbId: g.tmdbId,
+        tmdbUrl: g.tmdbId
+          ? `https://www.themoviedb.org/${
+              [g.dirAction, ...g.actions].some((action) => action?.metadata?.media_kind === "tv")
+                ? "tv"
+                : "movie"
+            }/${encodeURIComponent(g.tmdbId)}`
+          : "",
         dirAction: g.dirAction,
         virtualDir,
         hasDirInfo: Boolean(g.dirAction || (titleOld && titleNew)),
