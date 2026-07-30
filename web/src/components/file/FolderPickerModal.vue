@@ -25,6 +25,8 @@ const props = withDefaults(
     rootAnchor?: { parentId: string; path: string; label?: string };
     multiSelect?: boolean;
     initialSelections?: FolderSelection[];
+    initialLocationMode?: "preserve" | "root";
+    selectionRestoreMode?: "preserve" | "reset";
   }>(),
   {
     title: "选择目录",
@@ -40,6 +42,8 @@ const props = withDefaults(
     rootAnchor: undefined,
     multiSelect: false,
     initialSelections: () => [],
+    initialLocationMode: "preserve",
+    selectionRestoreMode: "preserve",
   },
 );
 
@@ -66,13 +70,25 @@ function initAccount() {
 }
 
 function initSelections() {
-  selectedItems.value = props.multiSelect
+  selectedItems.value = props.multiSelect && props.selectionRestoreMode === "preserve"
     ? props.initialSelections.map((item) => ({
       ...item,
       ancestorIds: [...(item.ancestorIds ?? [])],
     }))
     : [];
 }
+
+const effectiveInitialBreadcrumb = computed(() =>
+  props.initialLocationMode === "root" ? [] : props.initialBreadcrumb,
+);
+
+const effectiveInitialPath = computed(() =>
+  props.initialLocationMode === "root" ? "" : props.initialPath,
+);
+
+const effectiveRootAnchor = computed(() =>
+  props.initialLocationMode === "root" ? undefined : props.rootAnchor,
+);
 
 watch(
   () => props.open,
@@ -150,9 +166,9 @@ function onResolve(folder: {
           :excluded-folder-ids="excludedFolderIds"
           :allow-create-folder="allowCreateFolder"
           :show-refresh="showRefresh"
-          :initial-breadcrumb="selAccount === accountId ? initialBreadcrumb : []"
-          :initial-path="selAccount === accountId ? initialPath : ''"
-          :root-anchor="selAccount === accountId ? rootAnchor : undefined"
+          :initial-breadcrumb="selAccount === accountId ? effectiveInitialBreadcrumb : []"
+          :initial-path="selAccount === accountId ? effectiveInitialPath : ''"
+          :root-anchor="selAccount === accountId ? effectiveRootAnchor : undefined"
           :multi-select="multiSelect"
           :selected-items="multiSelect ? selectedItems : undefined"
           @update:selected-items="selectedItems = $event"

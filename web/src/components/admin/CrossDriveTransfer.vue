@@ -332,6 +332,8 @@
       :initial-path="pickerInitialPath"
       :multi-select="pickerMode === 'src'"
       :initial-selections="pickerMode === 'src' ? pickerInitialSelections : []"
+      :initial-location-mode="pickerMode === 'src' ? 'root' : 'preserve'"
+      :selection-restore-mode="pickerMode === 'src' ? 'reset' : 'preserve'"
       :title="pickerMode === 'src' ? '选择源目录' : '选择目标目录'"
       :confirm-text="pickerMode === 'src' ? '确认选择' : '选择当前目录'"
       show-refresh
