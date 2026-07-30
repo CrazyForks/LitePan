@@ -180,7 +180,7 @@ func AnalyzeTVTreeLayout(entries []ScanEntry) map[string]TVTreeLayoutEntry {
 	layout := map[string]TVTreeLayoutEntry{}
 	for _, entry := range entries {
 		fp := PrepareTVFileParsed(NormalizeParsedMedia(ParseFilenameStrict(entry.FileName)), entry.Ancestors)
-		tvRule := LooksLikeTVFile(fp, entry.Ancestors)
+		tvRule := LooksLikeTVFileWithName(fp, entry.Ancestors, entry.FileName)
 		if !tvRule.Matched {
 			continue
 		}

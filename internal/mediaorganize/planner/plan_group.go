@@ -252,6 +252,7 @@ func (p *Planner) planGroup(key groupKey, items []batchEntry, alignDefaults map[
 			continue
 		}
 		if p.actionType == "rename" && rules.IsAlreadyOrganized(entry.item.Name, p.marker) &&
+			!p.renameEntryNeedsPlacement(key, entry) &&
 			!p.shouldKeepStructuredFileForTMDBDir(entry, items, tmdbID) {
 			p.skip(entry.item, p.structuredSkipReason(items, tmdbID))
 			continue
@@ -298,13 +299,13 @@ func (p *Planner) planGroup(key groupKey, items []batchEntry, alignDefaults map[
 		mode := "move"
 		if isRename {
 			mode = "rename"
-			if rules.IsSameGeneratedName(entry.item.Name, newFilename) {
-				p.skip(entry.item, "已是目标名")
-				continue
-			}
 			srcDirName := p.scannedDirNames[entry.sourceDirID]
+			needsTVSeasonPlacement := p.tvFileNeedsSeasonFolderPlacement(key, entry)
 			isScattered := entry.sourceDirID == p.parentID || rules.IsGenericMediaDir(srcDirName)
-			if isScattered {
+			if needsTVSeasonPlacement {
+				workDirRef := p.renameWorkDirRefForSeasonPlacement(key, entry, newFolderName)
+				targetParent, deps = p.resolveTargetParentForMove(workDirRef, isTV, currentSeason, seasonDirCache)
+			} else if isScattered {
 				subWorkRef := p.ensureDirAction(entry.sourceDirID, newFolderName)
 				if isTV {
 					targetParent, deps = p.resolveTargetParentForMove(subWorkRef, isTV, currentSeason, seasonDirCache)
@@ -316,6 +317,10 @@ func (p *Planner) planGroup(key groupKey, items []batchEntry, alignDefaults map[
 				}
 			} else if key.mediaKind == "movie" && promotedMovieParent != "" {
 				targetParent = chooseStr(key.dirID, entry.sourceDirID)
+			}
+			if rules.IsSameGeneratedName(entry.item.Name, newFilename) && targetParent == entry.sourceDirID {
+				p.skip(entry.item, "已是目标名")
+				continue
 			}
 		} else {
 			targetParent, deps = p.resolveTargetParentForMove(targetWorkRef, isTV, currentSeason, seasonDirCache)
@@ -382,7 +387,7 @@ func (p *Planner) isAlreadyOrganizedRenameGroup(key groupKey, items []batchEntry
 		if !rules.IsAlreadyOrganized(entry.item.Name, p.marker) {
 			return false
 		}
-		if p.seasonDirNeedsStandardization(entry) {
+		if p.seasonDirNeedsStandardization(entry) || p.renameEntryNeedsPlacement(key, entry) {
 			return false
 		}
 	}
@@ -398,6 +403,43 @@ func (p *Planner) seasonDirNeedsStandardization(entry batchEntry) bool {
 	}
 	targetName := rules.BuildSeasonFolderName(entry.fileParsed.Season, p.seasonFolderTpl)
 	return targetName != "" && !rules.IsSameGeneratedName(entry.sourceDirName, targetName)
+}
+
+func (p *Planner) tvFileNeedsSeasonFolderPlacement(key groupKey, entry batchEntry) bool {
+	if key.mediaKind != "tv" || entry.fileParsed.Season == nil {
+		return false
+	}
+	if entry.sourceDirName != "" &&
+		(rules.IsSeasonDirName(entry.sourceDirName) || rules.IsSpecialContentDirName(entry.sourceDirName)) {
+		return false
+	}
+	if entry.sourceDirID == p.parentID {
+		return true
+	}
+	if rules.IsGenericMediaDir(entry.sourceDirName) {
+		return true
+	}
+	return key.dirID != "" && entry.sourceDirID == key.dirID
+}
+
+func (p *Planner) renameEntryNeedsPlacement(key groupKey, entry batchEntry) bool {
+	if p.tvFileNeedsSeasonFolderPlacement(key, entry) {
+		return true
+	}
+	if key.mediaKind != "movie" {
+		return false
+	}
+	return entry.sourceDirID == p.parentID || rules.IsGenericMediaDir(entry.sourceDirName)
+}
+
+func (p *Planner) renameWorkDirRefForSeasonPlacement(key groupKey, entry batchEntry, newFolderName string) string {
+	if key.dirID != "" {
+		return key.dirID
+	}
+	if entry.sourceDirID == p.parentID {
+		return p.parentID
+	}
+	return p.ensureDirAction(entry.sourceDirID, newFolderName)
 }
 
 func chooseTargetDirName(needsRename bool, oldName, newName string) string {

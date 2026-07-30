@@ -29,7 +29,7 @@ func IsSeasonDirName(name string) bool {
 	return ParseSeasonDirNumber(name) != nil
 }
 
-var explicitSeasonTokenRe = regexp.MustCompile(`(?i)(?:^|[^a-z])(?:s\d{1,3}e\d{1,4}|season\s*\d{1,3})|第\s*(?:\d{1,3}|[零〇一二两三四五六七八九十百]+)\s*季`)
+var explicitSeasonTokenRe = regexp.MustCompile(`(?i)(?:^|[^a-z])(?:s\d{1,3}e\d{1,4}|\d{1,3}\s*x\s*\d{1,4}|season\s*\d{1,3})|第\s*(?:\d{1,3}|[零〇一二两三四五六七八九十百]+)\s*季`)
 
 // 显式季号优先于解析默认 Season=1
 func HasExplicitSeasonToken(name string) bool {
@@ -37,11 +37,17 @@ func HasExplicitSeasonToken(name string) bool {
 }
 
 func LooksLikeTVFile(parsed ParsedMedia, ancestors []Ancestor) RuleResult {
+	return LooksLikeTVFileWithName(parsed, ancestors, "")
+}
+
+func LooksLikeTVFileWithName(parsed ParsedMedia, ancestors []Ancestor, fileName string) RuleResult {
 	reasons := make([]string, 0, 4)
 	score := 0.0
 	if parsed.Season != nil && parsed.Episode != nil {
-		reasons = append(reasons, "文件名匹配 S/E 模式")
-		score += 0.7
+		if fileName == "" || HasExplicitSeasonToken(fileName) || hasTVHintAncestor(ancestors) {
+			reasons = append(reasons, "文件名匹配 S/E 模式")
+			score += 0.7
+		}
 	} else if parsed.Episode != nil && hasSpecialContentAncestor(ancestors) {
 		reasons = append(reasons, "文件名含集数且位于番外/特别篇目录")
 		score += 0.7
@@ -99,6 +105,19 @@ func PickTVShowInfo(ancestors []Ancestor, fileParsed ParsedMedia) (showDirID, sh
 func hasSpecialContentAncestor(ancestors []Ancestor) bool {
 	for _, anc := range ancestors {
 		if isSpecialContentDirName(anc.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTVHintAncestor(ancestors []Ancestor) bool {
+	for _, anc := range ancestors {
+		if IsSeasonDirName(anc.Name) || IsEpisodeRangeDirName(anc.Name) || isSpecialContentDirName(anc.Name) {
+			return true
+		}
+		parsed := NormalizeParsedMedia(ParseDirName(anc.Name))
+		if parsed.Season != nil {
 			return true
 		}
 	}

@@ -690,6 +690,102 @@ func TestRenamePlanSkipsAlreadyOrganizedTVFiles(t *testing.T) {
 	}
 }
 
+func TestRenamePlanCreatesSeasonFolderForAlreadyNamedTVFilesUnderShowRoot(t *testing.T) {
+	files := []domain.FileItem{
+		{ID: "ep01", Name: "开始捉迷藏 (2025) 简体中文 S01E01.mp4"},
+		{ID: "ep02", Name: "开始捉迷藏 (2025) 简体中文 S01E02.mp4"},
+	}
+	fs := &mockFS{dirs: map[string][]domain.FileItem{
+		"root": {{ID: "show", Name: "开始捉迷藏", IsDir: true}},
+		"show": files,
+	}}
+	p := planner.New(
+		context.Background(),
+		fs,
+		1,
+		planner.TaskConfig{
+			TargetDirectoryID: "root",
+			ActionType:        "rename",
+			MediaType:         "auto",
+			RenameMarker:      "off",
+			UseTMDB:           false,
+			Recursive:         true,
+		},
+		planner.Settings{},
+		"task-test",
+		nil,
+		func(string) {},
+		nil,
+		func() error { return nil },
+	)
+	plan, err := p.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seasonEnsures := 0
+	fileMoves := 0
+	for _, a := range plan.Actions {
+		if a.Kind == moplan.ActionKindEnsureDir && a.TargetParentID == "show" && a.TargetName == "Season 01" {
+			seasonEnsures++
+			continue
+		}
+		if a.Kind == moplan.ActionKindRelocate && strings.HasPrefix(a.SourceID, "ep") {
+			fileMoves++
+			if a.TargetParentID == "show" {
+				t.Fatalf("episode should move into season dir, got target_parent=%q action=%+v", a.TargetParentID, a)
+			}
+		}
+	}
+	if seasonEnsures != 1 {
+		t.Fatalf("want 1 season ensure action, got %d; actions=%+v", seasonEnsures, plan.Actions)
+	}
+	if fileMoves != 2 {
+		t.Fatalf("want 2 episode relocate actions, got %d; actions=%+v skipped=%+v", fileMoves, plan.Actions, plan.Skipped)
+	}
+}
+
+func TestRenamePlanCreatesSeasonFolderWhenRunningInsideShowDir(t *testing.T) {
+	files := []domain.FileItem{
+		{ID: "ep01", Name: "开始捉迷藏 (2025) 简体中文 S01E01.mp4"},
+		{ID: "ep02", Name: "开始捉迷藏 (2025) 简体中文 S01E02.mp4"},
+	}
+	fs := &mockFS{dirs: map[string][]domain.FileItem{
+		"show": files,
+	}}
+	p := planner.New(
+		context.Background(),
+		fs,
+		1,
+		planner.TaskConfig{
+			TargetDirectoryID: "show",
+			ActionType:        "rename",
+			MediaType:         "auto",
+			RenameMarker:      "off",
+			UseTMDB:           false,
+			Recursive:         true,
+		},
+		planner.Settings{},
+		"task-test",
+		nil,
+		func(string) {},
+		nil,
+		func() error { return nil },
+	)
+	plan, err := p.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seasonEnsures := 0
+	for _, a := range plan.Actions {
+		if a.Kind == moplan.ActionKindEnsureDir && a.TargetParentID == "show" && a.TargetName == "Season 01" {
+			seasonEnsures++
+		}
+	}
+	if seasonEnsures != 1 {
+		t.Fatalf("want 1 season ensure action under current show dir, got %d; actions=%+v skipped=%+v", seasonEnsures, plan.Actions, plan.Skipped)
+	}
+}
+
 func TestRenamePlanAddsTMDBToStructuredMovieDir(t *testing.T) {
 	fs := &mockFS{dirs: map[string][]domain.FileItem{
 		"root": {{ID: "movie", Name: "千与千寻 (2001)", IsDir: true}},

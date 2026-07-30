@@ -331,6 +331,14 @@ func TestEpisodeRangeLayoutInference(t *testing.T) {
 	}
 }
 
+func TestLooksLikeTVFileWithNameIgnoresCodecEpisodeFalsePositive(t *testing.T) {
+	parsed := NormalizeParsedMedia(ParseFilenameStrict("千与千寻 (2001) [2160p H.265].mkv"))
+	got := LooksLikeTVFileWithName(parsed, nil, "千与千寻 (2001) [2160p H.265].mkv")
+	if got.Matched {
+		t.Fatalf("编码标签不应把电影识别成剧集，got=%+v parsed=%+v", got, parsed)
+	}
+}
+
 func intValue(v *int) int {
 	if v == nil {
 		return 0

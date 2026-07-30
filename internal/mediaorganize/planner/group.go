@@ -185,7 +185,7 @@ func (p *Planner) groupEntries(entries []batchEntry) (map[groupKey][]batchEntry,
 		nestedMovieID, _ := rules.FindNearestStandaloneMovieDir(ancestors)
 		forceMovie := nestedMovieID != "" || shouldPreferStructuredMovieDir(rawFileParsed, dirParsed, ancestors, entry.item.Name)
 
-		tvRule := rules.LooksLikeTVFile(fileParsed, ancestors)
+		tvRule := rules.LooksLikeTVFileWithName(fileParsed, ancestors, entry.item.Name)
 		isTV := !forceMovie && (p.taskMediaType == "tv" || (p.taskMediaType == "auto" && tvRule.Matched))
 
 		if isTV {
