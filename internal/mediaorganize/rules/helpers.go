@@ -86,6 +86,8 @@ func ParseExtensionSet(text string) map[string]struct{} {
 	out := make(map[string]struct{})
 	for _, part := range strings.Split(text, ";") {
 		part = strings.TrimSpace(strings.ToLower(part))
+		part = strings.TrimPrefix(part, "*.")
+		part = strings.TrimLeft(part, ".")
 		if part != "" {
 			out[part] = struct{}{}
 		}

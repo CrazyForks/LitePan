@@ -159,7 +159,7 @@ func MergeAlignedMediaTags(parsed ParsedMedia, defaults map[string]any) ParsedMe
 
 func BuildMediaInfoTags(parsed ParsedMedia, tagOrder []string) string {
 	if len(tagOrder) == 0 {
-		tagOrder = DefaultMediaTagOrder
+		return ""
 	}
 	m := parsed.ToMap()
 	parts := make([]string, 0, len(tagOrder))

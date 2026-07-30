@@ -212,6 +212,79 @@ func TestStrmScrapeOutcome(t *testing.T) {
 	}
 }
 
+func TestEvaluateOrganizeAction(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		summary     map[string]any
+		params      map[string]any
+		completed   bool
+		success     bool
+		risk        float64
+		riskTotal   int
+		messagePart string
+	}{
+		{
+			name: "异常跳过未超过允许比例",
+			summary: map[string]any{
+				"total": 10, "skipped": 4, "normal_skipped": 2, "abnormal_skipped": 2,
+			},
+			params:    map[string]any{"max_risk_percent": 30},
+			completed: true, success: true, risk: 25, riskTotal: 8,
+			messagePart: "异常比例 25%",
+		},
+		{
+			name: "异常跳过超过允许比例",
+			summary: map[string]any{
+				"total": 10, "skipped": 4, "normal_skipped": 2, "abnormal_skipped": 3,
+			},
+			params:    map[string]any{"max_risk_percent": 30},
+			completed: true, success: false, risk: 37.5, riskTotal: 8,
+			messagePart: "超过允许值 30%",
+		},
+		{
+			name: "真实失败不受允许比例兜底",
+			summary: map[string]any{
+				"total": 10, "failed": 1,
+			},
+			params:    map[string]any{"max_risk_percent": 100},
+			completed: true, success: false, risk: 10, riskTotal: 10,
+			messagePart: "失败项：1 个",
+		},
+		{
+			name: "旧结果缺少异常跳过时使用跳过数",
+			summary: map[string]any{
+				"total": 3, "skipped": 1,
+			},
+			params:    map[string]any{},
+			completed: true, success: false, risk: 33.33, riskTotal: 3,
+			messagePart: "超过允许值 30%",
+		},
+		{
+			name: "任务停止始终失败",
+			summary: map[string]any{
+				"total": 10, "stopped": true,
+			},
+			params:    map[string]any{},
+			completed: true, success: false, risk: 0, riskTotal: 10,
+			messagePart: "已停止",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := evaluateOrganizeAction(tt.summary, tt.params, tt.completed)
+			if got.success != tt.success || got.riskPercent != tt.risk || got.riskTotal != tt.riskTotal {
+				t.Fatalf("结果 = success:%v risk:%v total:%d，期望 success:%v risk:%v total:%d",
+					got.success, got.riskPercent, got.riskTotal, tt.success, tt.risk, tt.riskTotal)
+			}
+			if !strings.Contains(got.message, tt.messagePart) {
+				t.Fatalf("消息 %q 不包含 %q", got.message, tt.messagePart)
+			}
+		})
+	}
+}
+
 func TestValidateRuleChecksEveryOrganizeStrmCombination(t *testing.T) {
 	t.Parallel()
 

@@ -88,7 +88,6 @@ export interface MediaOrganizeSettings {
   tmdb_language: string;
   api_request_interval_ms: number;
   tmdb_request_interval_ms: number;
-  min_confidence_threshold: number;
   file_extensions: string;
   metadata_extensions: string;
   media_tag_order: string[] | string;

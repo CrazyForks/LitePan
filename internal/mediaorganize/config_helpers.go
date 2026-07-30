@@ -41,7 +41,6 @@ func PlannerSettingsFromAPI(settings map[string]any) map[string]any {
 	return out
 }
 
-// EnrichPlannerSettings 以 settings.Service 为准补齐 planner 所需 mo_* 键，避免 map 转换遗漏。
 func EnrichPlannerSettings(svc *settings.Service, api map[string]any) map[string]any {
 	out := PlannerSettingsFromAPI(api)
 	if svc == nil {
@@ -59,7 +58,6 @@ func EnrichPlannerSettings(svc *settings.Service, api map[string]any) map[string
 	}
 	out["mo_api_request_interval_ms"] = svc.Int(settings.KeyMOAPIRequestIntervalMS)
 	out["mo_tmdb_request_interval_ms"] = svc.Int(settings.KeyMOTmdbRequestIntervalMS)
-	out["mo_min_confidence_threshold"] = svc.String(settings.KeyMOMinConfidenceThreshold)
 	out["mo_file_extensions"] = svc.String(settings.KeyMOFileExtensions)
 	out["mo_metadata_extensions"] = svc.String(settings.KeyMOMetadataExtensions)
 	out["mo_media_tag_order"] = svc.String(settings.KeyMOMediaTagOrder)

@@ -89,7 +89,6 @@ const {
   tmdb_language: "zh-CN",
   api_request_interval_ms: 300,
   tmdb_request_interval_ms: 250,
-  min_confidence_threshold: 0,
   file_extensions: "",
   metadata_extensions: "",
   media_tag_order: "",

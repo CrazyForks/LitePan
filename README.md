@@ -131,16 +131,22 @@ services:
         <img src="https://img.shields.io/badge/%E9%A6%96%E8%B5%9E-E6A817?style=flat-square&labelColor=1B1B2F" alt="首赞" height="18" align="absmiddle">
       </p>
       <p>
-        感谢 <strong>飞翔的小鸟</strong> 的支持（¥10）
-      </p>
-      <p>
         感谢 <strong>阿文</strong> 的支持（¥20）
       </p>
       <p>
         感谢 <strong>贾如</strong> 的支持（¥6.66）
       </p>
       <p>
-        感谢 <strong>新洲方太李</strong> 的支持（¥6.66）
+        感谢 <strong>一叶知秋</strong> 的支持（¥20）
+      </p>
+      <p>
+        感谢 <strong>新洲方太李</strong> 的支持（¥20）
+      </p>
+      <p>
+        感谢 <strong>畅天</strong> 的支持（¥6.66）
+      </p>
+      <p>
+        感谢 <strong>多喝烫水</strong> 的支持（¥20）
       </p>
     </td>
   </tr>

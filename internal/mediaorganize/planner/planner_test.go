@@ -162,6 +162,75 @@ func newTestPlanner(fs *mockFS, tmdb planner.TMDBClient, rootID string) *planner
 	)
 }
 
+func TestGlobalExtensionsOverrideTaskSnapshot(t *testing.T) {
+	p := planner.New(
+		context.Background(),
+		nil,
+		1,
+		planner.TaskConfig{
+			FileExtensions:     rules.DefaultMediaExtensions,
+			MetadataExtensions: rules.DefaultMetadataExtensions,
+		},
+		planner.Settings{
+			"mo_file_extensions":     rules.DefaultMediaExtensions + ";vob",
+			"mo_metadata_extensions": rules.DefaultMetadataExtensions + ";xml",
+		},
+		"task-test",
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	if !planner.ExtensionEnabledForTest(p, "vob", false) {
+		t.Fatal("全局媒体后缀新增 vob 后应立即生效")
+	}
+	if !planner.ExtensionEnabledForTest(p, "xml", true) {
+		t.Fatal("全局元数据后缀新增 xml 后应立即生效")
+	}
+}
+
+func TestEmptyMediaTagOrderDoesNotRestoreDefaultTags(t *testing.T) {
+	fs := &mockFS{dirs: map[string][]domain.FileItem{
+		"root": {{
+			ID:   "f1",
+			Name: "千与千寻.2001.2160p.H265.AAC.mkv",
+		}},
+	}}
+	p := planner.New(
+		context.Background(),
+		fs,
+		1,
+		planner.TaskConfig{
+			TargetDirectoryID: "root",
+			ActionType:        "rename",
+			MediaType:         "movie",
+			RenameMarker:      "off",
+			UseTMDB:           false,
+			Recursive:         true,
+		},
+		planner.Settings{"mo_media_tag_order": "[]"},
+		"task-test",
+		nil,
+		func(string) {},
+		nil,
+		func() error { return nil },
+	)
+	plan, err := p.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range plan.Actions {
+		if action.SourceID != "f1" {
+			continue
+		}
+		if strings.Contains(action.TargetName, "[") || strings.Contains(action.TargetName, "]") {
+			t.Fatalf("媒体标签全部关闭后文件名不应包含方括号，实际 %q", action.TargetName)
+		}
+		return
+	}
+	t.Fatalf("未生成文件整理动作: actions=%+v skipped=%+v", plan.Actions, plan.Skipped)
+}
+
 func TestGroupSpiritedAwayDirs(t *testing.T) {
 	dirA := "千与千寻 蓝光原盘REMUX 国日双音 内封简日字幕"
 	dirB := "[4K][DBD-Raws&诸神字幕组][千与千寻][2160P][BDRip][简繁中日内封][FLAC]"

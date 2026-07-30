@@ -95,8 +95,9 @@ func (s *Service) runTaskAsync(task *domain.StrmTask) {
 	if !ok {
 		return
 	}
+	taskConcurrency := s.settings.Int(settings.KeyStrmTaskConcurrency)
 	s.mu.Lock()
-	if s.running[task.ID] {
+	if !s.canStartTaskLocked(task, taskConcurrency) {
 		s.mu.Unlock()
 		releaseFiles()
 		return
@@ -208,6 +209,14 @@ func (s *Service) runTaskAsync(task *domain.StrmTask) {
 			s.notifyScanFailures(task, result.Failures)
 		}
 	}()
+}
+
+func (s *Service) canStartTaskLocked(task *domain.StrmTask, taskConcurrency int) bool {
+	if task == nil || s.running[task.ID] || len(s.running) >= taskConcurrency {
+		return false
+	}
+	_, accountRunning := s.runningAccounts[task.AccountID]
+	return task.AccountID <= 0 || !accountRunning
 }
 
 func taskRunContext(parent context.Context) (context.Context, context.CancelFunc) {

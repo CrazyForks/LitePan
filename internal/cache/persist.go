@@ -4,7 +4,6 @@ import (
 	"time"
 )
 
-// ConfigurePersistence 启停定时快照；dir 为数据目录下的 cache 子目录。
 func (s *Service) ConfigurePersistence(enabled bool, dir string, interval time.Duration) {
 	if interval < time.Minute {
 		interval = time.Minute
@@ -13,6 +12,7 @@ func (s *Service) ConfigurePersistence(enabled bool, dir string, interval time.D
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
 
+	changed := s.persistDir != dir || s.persistInterval != interval
 	s.persistDir = dir
 	s.persistEnabled = enabled
 	s.persistInterval = interval
@@ -22,7 +22,10 @@ func (s *Service) ConfigurePersistence(enabled bool, dir string, interval time.D
 		return
 	}
 	if s.persistStop != nil {
-		return
+		if !changed {
+			return
+		}
+		s.stopPersistenceLocked()
 	}
 	stop := make(chan struct{})
 	s.persistStop = stop
@@ -37,7 +40,6 @@ func (s *Service) stopPersistenceLocked() {
 	s.persistStop = nil
 }
 
-// persistLoop 接收自身的 stop 通道，避免与 stopPersistenceLocked 写 s.persistStop 竞争。
 func (s *Service) persistLoop(stop chan struct{}) {
 	s.persistMu.Lock()
 	interval := s.persistInterval

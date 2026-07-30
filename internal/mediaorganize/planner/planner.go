@@ -103,25 +103,21 @@ func New(
 }
 
 func (p *Planner) loadSettings() {
-	extText := p.cfg.FileExtensions
-	if extText == "" {
-		extText = strSetting(p.settings, "mo_file_extensions", rules.DefaultMediaExtensions)
-	}
-	metaText := p.cfg.MetadataExtensions
-	if metaText == "" {
-		metaText = strSetting(p.settings, "mo_metadata_extensions", rules.DefaultMetadataExtensions)
-	}
+	extText := extensionSetting(p.settings, "mo_file_extensions", p.cfg.FileExtensions, rules.DefaultMediaExtensions)
+	metaText := extensionSetting(p.settings, "mo_metadata_extensions", p.cfg.MetadataExtensions, rules.DefaultMetadataExtensions)
 	p.mediaExts = rules.ParseExtensionSet(extText)
 	p.metaExts = rules.ParseExtensionSet(metaText)
 
 	tagOrderRaw := strSetting(p.settings, "mo_media_tag_order", "")
+	tagOrderConfigured := false
 	if tagOrderRaw != "" {
 		var order []string
-		if err := json.Unmarshal([]byte(tagOrderRaw), &order); err == nil && len(order) > 0 {
+		if err := json.Unmarshal([]byte(tagOrderRaw), &order); err == nil {
 			p.mediaTagOrder = order
+			tagOrderConfigured = true
 		}
 	}
-	if len(p.mediaTagOrder) == 0 {
+	if !tagOrderConfigured {
 		p.mediaTagOrder = rules.DefaultMediaTagOrder
 	}
 	p.alignMediaTags = rules.SettingBool(p.settings["mo_align_media_tags"], false)
@@ -165,6 +161,19 @@ func (p *Planner) loadSettings() {
 	if p.seasonFolderTpl == "" {
 		p.seasonFolderTpl = "Season {season:02d}"
 	}
+}
+
+func extensionSetting(settings Settings, key, taskValue, fallback string) string {
+	if raw, ok := settings[key]; ok {
+		if value := strings.TrimSpace(fmt.Sprint(raw)); value != "" {
+			return value
+		}
+		return fallback
+	}
+	if value := strings.TrimSpace(taskValue); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func strSetting(settings Settings, key, fallback string) string {

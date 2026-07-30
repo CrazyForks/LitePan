@@ -45,21 +45,20 @@ const (
 	KeyStrmMetadataSyncMode        = "strm_metadata_sync_mode"
 	KeyStrmScrapeWriteMode         = "strm_scrape_write_mode"
 
-	KeyMOProxyEnabled           = "mo_proxy_enabled"
-	KeyMOProxyURL               = "mo_proxy_url"
-	KeyMOProxyUsername          = "mo_proxy_username"
-	KeyMOProxyPassword          = "mo_proxy_password"
-	KeyMOTmdbAPIKey             = "mo_tmdb_api_key"
-	KeyMOTmdbLanguage           = "mo_tmdb_language"
-	KeyMOAPIRequestIntervalMS   = "mo_api_request_interval_ms"
-	KeyMOTmdbRequestIntervalMS  = "mo_tmdb_request_interval_ms"
-	KeyMOMinConfidenceThreshold = "mo_min_confidence_threshold"
-	KeyMOFileExtensions         = "mo_file_extensions"
-	KeyMOMetadataExtensions     = "mo_metadata_extensions"
-	KeyMOMediaTagOrder          = "mo_media_tag_order"
-	KeyMOAlignMediaTags         = "mo_align_media_tags"
-	KeyMOMaxWorksPerRun         = "mo_max_works_per_run"
-	KeyMOOverwriteExisting      = "mo_overwrite_existing"
+	KeyMOProxyEnabled          = "mo_proxy_enabled"
+	KeyMOProxyURL              = "mo_proxy_url"
+	KeyMOProxyUsername         = "mo_proxy_username"
+	KeyMOProxyPassword         = "mo_proxy_password"
+	KeyMOTmdbAPIKey            = "mo_tmdb_api_key"
+	KeyMOTmdbLanguage          = "mo_tmdb_language"
+	KeyMOAPIRequestIntervalMS  = "mo_api_request_interval_ms"
+	KeyMOTmdbRequestIntervalMS = "mo_tmdb_request_interval_ms"
+	KeyMOFileExtensions        = "mo_file_extensions"
+	KeyMOMetadataExtensions    = "mo_metadata_extensions"
+	KeyMOMediaTagOrder         = "mo_media_tag_order"
+	KeyMOAlignMediaTags        = "mo_align_media_tags"
+	KeyMOMaxWorksPerRun        = "mo_max_works_per_run"
+	KeyMOOverwriteExisting     = "mo_overwrite_existing"
 )
 
 // Type 决定后台表单控件与校验方式。
@@ -168,7 +167,7 @@ func defaultSpecs() []Spec {
 			Type:        TypeInt,
 			Category:    "performance",
 			Label:       "持久化快照间隔",
-			Description: "缓存写入磁盘的间隔，修改后需重启服务生效。",
+			Description: "缓存写入磁盘的间隔，修改后立即生效。",
 			Default:     "10",
 			Unit:        "分钟",
 			Min:         intp(1),
@@ -533,14 +532,6 @@ func defaultSpecs() []Spec {
 			Unit:        "毫秒",
 			Min:         intp(100),
 			Max:         intp(5000),
-		},
-		{
-			Key:         KeyMOMinConfidenceThreshold,
-			Type:        TypeString,
-			Category:    "media_organize",
-			Label:       "最低置信度阈值",
-			Description: "低于该置信度的匹配结果将被跳过，范围 0.1–1.0。",
-			Default:     "0.5",
 		},
 		{
 			Key:         KeyMOFileExtensions,

@@ -92,3 +92,23 @@ func TestTaskRunContextHasNoFixedDeadline(t *testing.T) {
 		t.Fatalf("取消任务后错误 = %v，期望 context.Canceled", ctx.Err())
 	}
 }
+
+func TestTaskStartLimitMatchesLegacyScheduler(t *testing.T) {
+	svc, _ := testService(t)
+
+	svc.mu.Lock()
+	svc.running[1] = true
+	svc.runningAccounts[7] = struct{}{}
+	if svc.canStartTaskLocked(&domain.StrmTask{ID: 2, AccountID: 7}, 3) {
+		t.Fatal("同一账号的 STRM 任务应串行")
+	}
+	if !svc.canStartTaskLocked(&domain.StrmTask{ID: 2, AccountID: 8}, 3) {
+		t.Fatal("不同账号且未达到全局上限时应允许并发")
+	}
+	svc.running[2] = true
+	svc.running[3] = true
+	if svc.canStartTaskLocked(&domain.StrmTask{ID: 4, AccountID: 9}, 3) {
+		t.Fatal("达到全局任务并发上限后应等待")
+	}
+	svc.mu.Unlock()
+}

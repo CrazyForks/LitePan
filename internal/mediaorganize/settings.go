@@ -20,7 +20,6 @@ var moSettingFieldToKey = map[string]string{
 	"tmdb_language":            settings.KeyMOTmdbLanguage,
 	"api_request_interval_ms":  settings.KeyMOAPIRequestIntervalMS,
 	"tmdb_request_interval_ms": settings.KeyMOTmdbRequestIntervalMS,
-	"min_confidence_threshold": settings.KeyMOMinConfidenceThreshold,
 	"file_extensions":          settings.KeyMOFileExtensions,
 	"metadata_extensions":      settings.KeyMOMetadataExtensions,
 	"media_tag_order":          settings.KeyMOMediaTagOrder,
@@ -117,6 +116,9 @@ func parseMediaTagOrder(raw any) (json.RawMessage, error) {
 		items = append(items, v...)
 	default:
 		return nil, fmt.Errorf("media_tag_order 格式无效")
+	}
+	if len(items) == 0 {
+		return json.RawMessage("[]"), nil
 	}
 	filtered := make([]string, 0, len(items))
 	for _, key := range items {

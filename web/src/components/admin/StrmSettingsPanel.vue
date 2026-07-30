@@ -38,6 +38,7 @@ type StrmSettingsForm = Pick<
   | "iso_filename_enabled"
   | "min_file_size_mb"
   | "conflict_policy"
+  | "task_concurrency"
   | "metadata_extensions"
   | "metadata_max_size_mb"
   | "metadata_parent_enabled"
@@ -51,6 +52,7 @@ const replacingBaseURL = ref(false);
 const numericSettingKeys = new Set<keyof StrmSettingsForm>([
   "default_scan_interval",
   "min_file_size_mb",
+  "task_concurrency",
   "metadata_max_size_mb",
 ]);
 
@@ -70,6 +72,7 @@ const {
     iso_filename_enabled: false,
     min_file_size_mb: 0,
     conflict_policy: "size_desc",
+    task_concurrency: 3,
     metadata_extensions: "",
     metadata_max_size_mb: 10,
     metadata_parent_enabled: true,
@@ -92,7 +95,7 @@ const metadataSyncModeOptions = [
   { value: "bidirectional", label: "本地与云端互补" },
 ];
 
-function setNumberSetting(key: "min_file_size_mb" | "metadata_max_size_mb", raw: string) {
+function setNumberSetting(key: "min_file_size_mb" | "task_concurrency" | "metadata_max_size_mb", raw: string) {
   settings[key] = parseSettingNumber(raw);
 }
 
@@ -113,6 +116,7 @@ function applySettings(data: Awaited<ReturnType<typeof fetchStrmSettings>>) {
     iso_filename_enabled: !!data.iso_filename_enabled,
     min_file_size_mb: parseSettingNumber(data.min_file_size_mb),
     conflict_policy: data.conflict_policy || "size_desc",
+    task_concurrency: parseSettingNumber(data.task_concurrency) || 3,
     metadata_extensions: data.metadata_extensions ?? "",
     metadata_max_size_mb: parseSettingNumber(data.metadata_max_size_mb) || 10,
     metadata_parent_enabled: !!data.metadata_parent_enabled,
@@ -149,6 +153,7 @@ async function saveSettings() {
       iso_filename_enabled: settings.iso_filename_enabled,
       min_file_size_mb: settings.min_file_size_mb,
       conflict_policy: settings.conflict_policy,
+      task_concurrency: settings.task_concurrency,
       metadata_extensions: settings.metadata_extensions,
       metadata_max_size_mb: settings.metadata_max_size_mb,
       metadata_parent_enabled: settings.metadata_parent_enabled,
@@ -293,6 +298,27 @@ defineExpose(
           </template>
           <template #control>
             <AppInput v-model="settings.default_extensions" placeholder="mp4;mkv;avi;…" />
+          </template>
+        </SettingsRow>
+
+        <SettingsRow :show-changed-badge="true" :changed="isSettingChanged('task_concurrency')">
+          <template #info>
+            <div class="settings-row__label">
+              <span>任务并发数</span>
+              <SettingsHelpTooltip title="任务并发数说明">
+                <p>全局最多同时运行的 STRM 任务数，默认 3 个。</p>
+                <p>同一账号始终串行；不同账号可以并发，避免同时扫描过多任务占用服务器资源。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <AppInput
+              :model-value="settings.task_concurrency"
+              type="number"
+              min="1"
+              max="10"
+              @update:model-value="setNumberSetting('task_concurrency', $event)"
+            />
           </template>
         </SettingsRow>
 

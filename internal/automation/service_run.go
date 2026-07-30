@@ -3,6 +3,8 @@ package automation
 import (
 	"context"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -256,21 +258,74 @@ func (s *Service) runOrganize(ctx context.Context, params map[string]any) map[st
 		return map[string]any{"status": "failed", "success": false, "message": err.Error()}
 	}
 	summary := decodeMap(updated.LastRunResult)
-	failed := anyInt(summary["failed"])
-	success := !updated.LastRunAt.IsZero() && !updated.LastRunAt.Before(startedAt.Add(-time.Second)) && failed == 0 && updated.Status != domain.MediaOrganizeStatusError
-	message := "整理任务执行完成"
-	if failed > 0 {
-		message = fmt.Sprintf("整理存在失败项：%d 个", failed)
-	}
+	fresh := !updated.LastRunAt.IsZero() && !updated.LastRunAt.Before(startedAt.Add(-time.Second))
+	outcome := evaluateOrganizeAction(summary, params, fresh && updated.Status != domain.MediaOrganizeStatusError)
 	return map[string]any{
-		"status":  ternaryStatus(success),
-		"success": success,
-		"message": message,
+		"status":  ternaryStatus(outcome.success),
+		"success": outcome.success,
+		"message": outcome.message,
 		"data": map[string]any{
-			"task_id": task.ID,
-			"name":    task.TaskName,
-			"summary": summary,
+			"task_id":          task.ID,
+			"name":             task.TaskName,
+			"summary":          summary,
+			"risk_percent":     outcome.riskPercent,
+			"max_risk_percent": outcome.maxRiskPercent,
+			"abnormal_skipped": outcome.abnormalSkipped,
+			"normal_skipped":   outcome.normalSkipped,
+			"risk_total":       outcome.riskTotal,
 		},
+	}
+}
+
+type organizeActionOutcome struct {
+	success         bool
+	message         string
+	riskPercent     float64
+	maxRiskPercent  int
+	abnormalSkipped int
+	normalSkipped   int
+	riskTotal       int
+}
+
+func evaluateOrganizeAction(summary, params map[string]any, runCompleted bool) organizeActionOutcome {
+	total := max(0, anyInt(summary["total"]))
+	failed := max(0, anyInt(summary["failed"]))
+	skipped := max(0, anyInt(summary["skipped"]))
+	normalSkipped := max(0, anyInt(summary["normal_skipped"]))
+	abnormalSkipped := skipped
+	if summary["abnormal_skipped"] != nil {
+		abnormalSkipped = max(0, anyInt(summary["abnormal_skipped"]))
+	}
+	riskTotal := max(0, total-normalSkipped)
+	maxRisk := 30
+	if params["max_risk_percent"] != nil {
+		maxRisk = clampInt(anyInt(params["max_risk_percent"]), 0, 100)
+	}
+	risk := 0.0
+	if riskTotal > 0 {
+		risk = math.Round(float64(failed+abnormalSkipped)/float64(riskTotal)*10000) / 100
+	}
+	stopped, _ := summary["stopped"].(bool)
+	success := runCompleted && !stopped && failed == 0 && risk <= float64(maxRisk)
+	message := "整理完成，异常比例 " + strconv.FormatFloat(risk, 'f', -1, 64) + "%"
+	switch {
+	case !runCompleted:
+		message = "整理任务未正常完成"
+	case stopped:
+		message = "整理任务已停止"
+	case failed > 0:
+		message = fmt.Sprintf("整理存在失败项：%d 个", failed)
+	case risk > float64(maxRisk):
+		message = fmt.Sprintf("整理异常比例 %s%% 超过允许值 %d%%", strconv.FormatFloat(risk, 'f', -1, 64), maxRisk)
+	}
+	return organizeActionOutcome{
+		success:         success,
+		message:         message,
+		riskPercent:     risk,
+		maxRiskPercent:  maxRisk,
+		abnormalSkipped: abnormalSkipped,
+		normalSkipped:   normalSkipped,
+		riskTotal:       riskTotal,
 	}
 }
 

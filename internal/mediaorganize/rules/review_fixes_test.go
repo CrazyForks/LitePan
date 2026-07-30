@@ -31,6 +31,15 @@ func TestBareNumericGuard(t *testing.T) {
 	}
 }
 
+func TestParseExtensionSetAcceptsCommonForms(t *testing.T) {
+	extensions := ParseExtensionSet("vob;.VOB;*.MKV")
+	for _, extension := range []string{"vob", "mkv"} {
+		if _, ok := extensions[extension]; !ok {
+			t.Fatalf("后缀 %q 未被识别：%v", extension, extensions)
+		}
+	}
+}
+
 func TestBracketEpisodeNonAnime(t *testing.T) {
 	got := NormalizeParsedMedia(ParseFilenameStrict("Breaking.Bad.[01].mkv"))
 	if got.Episode == nil || *got.Episode != 1 {
