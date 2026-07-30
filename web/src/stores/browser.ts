@@ -14,6 +14,10 @@ export interface Crumb {
 
 const ROOT: Crumb = { id: "", name: "根目录" };
 
+function cloneCrumbs(crumbs: Crumb[]) {
+  return crumbs.map((item) => ({ id: item.id, name: item.name }));
+}
+
 export interface LoadFilesOptions {
   silent?: boolean;
   forceRefresh?: boolean;
@@ -220,7 +224,7 @@ export const useBrowserStore = defineStore("browser", () => {
 
   function primeLocation(accountId: number, crumbs: Crumb[]) {
     setCurrentAccount(accountId);
-    breadcrumb.value = crumbs.length ? crumbs : [ROOT];
+    breadcrumb.value = crumbs.length ? cloneCrumbs(crumbs) : [ROOT];
   }
 
   async function loadAccounts(opts?: { reconcile?: boolean }) {
@@ -279,7 +283,7 @@ export const useBrowserStore = defineStore("browser", () => {
         await loadFavorites(accountId, { silent: true });
       }
     }
-    breadcrumb.value = crumbs.length ? crumbs : [ROOT];
+    breadcrumb.value = crumbs.length ? cloneCrumbs(crumbs) : [ROOT];
     await loadFiles(opts);
   }
 
