@@ -25,8 +25,6 @@
 > 当前仓库是正在开发中的 **Go 版 LitePan**，首次发布可能问题较多，请谨慎测试。
 > Python 旧版已归档至 [LitePan-old](https://github.com/Ponphil/LitePan-old)。
 
-> [!NOTE]
-> 注意：官网文档还是旧版！暂未更新。
 
 <br>
 
@@ -126,27 +124,10 @@ services:
     </td>
     <td width="50%" valign="top">
       <h3>赞助致谢</h3>
+      <p>感谢每一位支持 LitePan 的朋友。</p>
+      <p>完整致谢名单见官方网站：</p>
       <p>
-        感谢 <strong>Harvey</strong> 的支持（¥6.66）
-        <img src="https://img.shields.io/badge/%E9%A6%96%E8%B5%9E-E6A817?style=flat-square&labelColor=1B1B2F" alt="首赞" height="18" align="absmiddle">
-      </p>
-      <p>
-        感谢 <strong>阿文</strong> 的支持（¥20）
-      </p>
-      <p>
-        感谢 <strong>贾如</strong> 的支持（¥6.66）
-      </p>
-      <p>
-        感谢 <strong>一叶知秋</strong> 的支持（¥20）
-      </p>
-      <p>
-        感谢 <strong>新洲方太李</strong> 的支持（¥20）
-      </p>
-      <p>
-        感谢 <strong>畅天</strong> 的支持（¥6.66）
-      </p>
-      <p>
-        感谢 <strong>多喝烫水</strong> 的支持（¥20）
+        <a href="https://www.litepan.top/sponsor.html">https://www.litepan.top/sponsor.html</a>
       </p>
     </td>
   </tr>
