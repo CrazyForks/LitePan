@@ -77,6 +77,7 @@ const { loading, runLoad } = useSettingsLoad();
 const saving = ref(false);
 const categories = ref<SettingCategory[]>([]);
 const items = ref<SettingItem[]>([]);
+const settingsLoaded = ref(false);
 const form = reactive<Record<string, string>>({});
 const original = reactive<Record<string, string>>({});
 
@@ -236,6 +237,7 @@ function applyPayload(payload: { categories: SettingCategory[]; items: SettingIt
   const filtered = filterOutCacheSettings(payload);
   categories.value = filtered.categories;
   items.value = filtered.items;
+  settingsLoaded.value = true;
   for (const it of items.value) {
     form[it.key] = it.value;
     original[it.key] = it.value;
@@ -295,8 +297,16 @@ onMounted(load);
 
 watch(
   () => props.forcePasswordChange,
-  (locked) => {
-    if (locked) activeTab.value = SECURITY_TAB;
+  async (locked, prevLocked) => {
+    if (locked) {
+      activeTab.value = SECURITY_TAB;
+      return;
+    }
+    if (prevLocked && !settingsLoaded.value) {
+      await runLoad(async () => {
+        await loadSettings();
+      }, "加载设置失败");
+    }
   },
 );
 onBeforeUnmount(() => {
