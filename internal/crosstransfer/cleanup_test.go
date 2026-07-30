@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"litepan/internal/core/driverexec"
+	"litepan/internal/cache"
 	"litepan/internal/domain"
 	"litepan/internal/driver"
 	"litepan/internal/file"
@@ -123,6 +124,44 @@ func TestProbeFallsBackToTemporaryRapidUpload(t *testing.T) {
 	}
 }
 
+func TestExecuteRapidUploadInvalidatesTargetDirCache(t *testing.T) {
+	drv := &rapidHitDriver{cleanupDriver: newCleanupDriver()}
+	exec := driverexec.New(cleanupProvider{drv: drv}, nil)
+	cacheSvc := cache.NewService(cache.Options{MaxItems: 32})
+	t.Cleanup(cacheSvc.Close)
+	files := file.NewService(exec, cacheSvc, nil, nil, nil, nil)
+	service := New(Options{Exec: exec, Files: files, DataDir: t.TempDir()})
+
+	// 先把空目录缓存住，模拟前端进入目标目录后再执行秒传。
+	items, err := files.List(context.Background(), 1, "root", false)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("预热目标目录缓存失败 items=%#v err=%v", items, err)
+	}
+
+	err = service.ExecuteStream(context.Background(), ExecuteInput{
+		TargetAccountID: 1,
+		TargetParentID:  "root",
+		MethodID:        "md5",
+		Files: []TransferFile{{
+			RelPath: "hit.bin",
+			Name:    "hit.bin",
+			Size:    1,
+			Hash:    "11111111111111111111111111111111",
+		}},
+	}, func(StreamEvent) error { return nil })
+	if err != nil {
+		t.Fatalf("秒传执行失败: %v", err)
+	}
+
+	items, err = files.List(context.Background(), 1, "root", false)
+	if err != nil {
+		t.Fatalf("秒传后列目录失败: %v", err)
+	}
+	if len(items) != 1 || items[0].Name != "hit.bin" {
+		t.Fatalf("秒传成功后应直接看到新文件，items=%#v", items)
+	}
+}
+
 func TestScanSourceDeepTreeDoesNotDeadlock(t *testing.T) {
 	drv := newCleanupDriver()
 	parentID := ""
@@ -200,6 +239,68 @@ func TestScanSourceMarksIncompleteResult(t *testing.T) {
 	}
 	if !result.Truncated || result.Total != maxScanFiles || result.TruncatedReason == "" {
 		t.Fatalf("超限扫描必须标记为不完整: %#v", result)
+	}
+}
+
+func TestScanSourcesMergesRootsAndRemovesNestedSelection(t *testing.T) {
+	drv := newCleanupDriver()
+	hash := map[domain.HashType]string{domain.HashMD5: "11111111111111111111111111111111"}
+	drv.children["movies"] = []domain.FileItem{
+		{ID: "movie-file", Name: "movie.mkv", Size: 1, Hash: hash},
+		{ID: "season", Name: "第一季", IsDir: true},
+	}
+	drv.children["season"] = []domain.FileItem{
+		{ID: "episode-file", Name: "S01E01.mkv", Size: 1, Hash: hash},
+	}
+	drv.children["music"] = []domain.FileItem{
+		{ID: "music-file", Name: "song.flac", Size: 1, Hash: hash},
+	}
+	service := newCleanupService(t, drv)
+
+	result, err := service.ScanSources(context.Background(), 1, []ScanRoot{
+		{ParentID: "movies", DisplayPath: "/媒体/电影", AncestorIDs: []string{"media"}},
+		{ParentID: "season", DisplayPath: "/媒体/电影/第一季"},
+		{ParentID: "music", DisplayPath: "/媒体/音乐", AncestorIDs: []string{"media"}},
+	}, "md5")
+	if err != nil {
+		t.Fatalf("多目录扫描失败: %v", err)
+	}
+	if result.Total != 3 || result.Directories != 3 || len(result.Tree) != 2 {
+		t.Fatalf("多目录合并结果不正确: %#v", result)
+	}
+	paths := make(map[string]struct{}, len(result.Files))
+	for _, item := range result.Files {
+		paths[item.RelPath] = struct{}{}
+	}
+	for _, path := range []string{"电影/movie.mkv", "电影/第一季/S01E01.mkv", "音乐/song.flac"} {
+		if _, ok := paths[path]; !ok {
+			t.Fatalf("缺少合并后的文件路径 %q，得到 %#v", path, result.Files)
+		}
+	}
+}
+
+func TestScanSourcesAllowsDriverRootID(t *testing.T) {
+	drv := newCleanupDriver()
+	drv.children["-11"] = []domain.FileItem{{
+		ID: "file", Name: "root.mkv", Size: 1,
+		Hash: map[domain.HashType]string{domain.HashMD5: "11111111111111111111111111111111"},
+	}}
+	result, err := newCleanupService(t, drv).ScanSources(
+		context.Background(), 1, []ScanRoot{{ParentID: "-11", DisplayPath: "/"}}, "md5",
+	)
+	if err != nil || result.Total != 1 || result.Files[0].RelPath != "root.mkv" {
+		t.Fatalf("驱动根目录扫描不正确: result=%#v err=%v", result, err)
+	}
+}
+
+func TestScanSourcesRejectsDuplicateRootNames(t *testing.T) {
+	service := newCleanupService(t, newCleanupDriver())
+	_, err := service.ScanSources(context.Background(), 1, []ScanRoot{
+		{ParentID: "a", DisplayPath: "/A/电影"},
+		{ParentID: "b", DisplayPath: "/B/电影"},
+	}, "md5")
+	if err == nil || !strings.Contains(err.Error(), "同名文件夹") {
+		t.Fatalf("同名根目录应拒绝合并，得到 %v", err)
 	}
 }
 
@@ -310,4 +411,18 @@ type rapidOnlyDriver struct {
 func (d *rapidOnlyDriver) RapidUploadByHash(context.Context, driver.RapidUploadRequest) (*driver.RapidUploadResult, error) {
 	d.uploadCalls++
 	return &driver.RapidUploadResult{Reuse: false}, nil
+}
+
+type rapidHitDriver struct {
+	*cleanupDriver
+	uploadCalls int
+}
+
+func (d *rapidHitDriver) RapidUploadByHash(_ context.Context, req driver.RapidUploadRequest) (*driver.RapidUploadResult, error) {
+	d.uploadCalls++
+	fileID := fmt.Sprintf("file-%d", d.uploadCalls)
+	item := domain.FileItem{ID: fileID, Name: req.FileName, Size: req.Size}
+	d.children[req.ParentID] = append(d.children[req.ParentID], item)
+	d.parents[fileID] = req.ParentID
+	return &driver.RapidUploadResult{Reuse: true, FileID: fileID}, nil
 }

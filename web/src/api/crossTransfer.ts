@@ -37,6 +37,20 @@ export interface CrossTransferScanResult {
   files: CrossTransferScanFile[];
 }
 
+export interface CrossTransferScanSource {
+  parent_id: string;
+  display_path: string;
+  ancestor_ids?: string[];
+}
+
+export interface CrossTransferScanRequest {
+  source_account_id: number;
+  method: string;
+  sources?: CrossTransferScanSource[];
+  source_parent_id?: string;
+  source_display_path?: string;
+}
+
 export interface CrossTransferRelayTask {
   task_id: string;
   source_account_id: number;
@@ -72,22 +86,12 @@ export function listCrossTransferRoutes() {
   return http.get<CrossTransferRoute[]>("/cross-transfer/routes");
 }
 
-export function scanCrossTransferSource(body: {
-  source_account_id: number;
-  source_parent_id: string;
-  method: string;
-  source_display_path?: string;
-}) {
+export function scanCrossTransferSource(body: CrossTransferScanRequest) {
   return http.post<CrossTransferScanResult>("/cross-transfer/scan", body);
 }
 
 export function scanCrossTransferSourceStream(
-  body: {
-    source_account_id: number;
-    source_parent_id: string;
-    method: string;
-    source_display_path?: string;
-  },
+  body: CrossTransferScanRequest,
   signal?: AbortSignal,
 ) {
   return streamCrossTransferNDJSON<Record<string, unknown>>("/cross-transfer/scan/stream", body, signal);

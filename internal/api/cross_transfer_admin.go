@@ -18,10 +18,35 @@ func (h *Handler) crossTransferRoutes(w http.ResponseWriter, r *http.Request) {
 }
 
 type crossTransferScanReq struct {
-	SourceAccountID   int64  `json:"source_account_id"`
-	SourceParentID    string `json:"source_parent_id"`
-	Method            string `json:"method"`
-	SourceDisplayPath string `json:"source_display_path"`
+	SourceAccountID   int64                     `json:"source_account_id"`
+	SourceParentID    string                    `json:"source_parent_id"`
+	Method            string                    `json:"method"`
+	SourceDisplayPath string                    `json:"source_display_path"`
+	Sources           []crossTransferScanSource `json:"sources"`
+}
+
+type crossTransferScanSource struct {
+	ParentID    string   `json:"parent_id"`
+	DisplayPath string   `json:"display_path"`
+	AncestorIDs []string `json:"ancestor_ids"`
+}
+
+func (r crossTransferScanReq) roots() []crosstransfer.ScanRoot {
+	if len(r.Sources) == 0 {
+		return []crosstransfer.ScanRoot{{
+			ParentID:    r.SourceParentID,
+			DisplayPath: r.SourceDisplayPath,
+		}}
+	}
+	roots := make([]crosstransfer.ScanRoot, 0, len(r.Sources))
+	for _, source := range r.Sources {
+		roots = append(roots, crosstransfer.ScanRoot{
+			ParentID:    source.ParentID,
+			DisplayPath: source.DisplayPath,
+			AncestorIDs: source.AncestorIDs,
+		})
+	}
+	return roots
 }
 
 func (h *Handler) crossTransferScan(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +58,7 @@ func (h *Handler) crossTransferScan(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	result, err := h.crossTransfer.ScanSource(r.Context(), req.SourceAccountID, req.SourceParentID, req.Method, req.SourceDisplayPath)
+	result, err := h.crossTransfer.ScanSources(r.Context(), req.SourceAccountID, req.roots(), req.Method)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -51,12 +76,11 @@ func (h *Handler) crossTransferScanStream(w http.ResponseWriter, r *http.Request
 		return
 	}
 	h.streamCrossTransferNDJSON(w, r, func(emit func(crosstransfer.StreamEvent) error) error {
-		return h.crossTransfer.ScanSourceStream(
+		return h.crossTransfer.ScanSourcesStream(
 			r.Context(),
 			req.SourceAccountID,
-			req.SourceParentID,
+			req.roots(),
 			req.Method,
-			req.SourceDisplayPath,
 			emit,
 		)
 	})

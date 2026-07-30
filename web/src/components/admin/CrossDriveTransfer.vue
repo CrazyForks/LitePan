@@ -125,7 +125,7 @@
         <div class="panel-pick">
           <button class="combo" @click="openPicker('src')">
             <span class="c-ic"><i class="fas fa-hdd"></i></span>
-            <span class="c-text" :class="{ placeholder: !src }">{{ src ? (src.accName + ' · ' + src.path) : '选择账号 · 目录' }}</span>
+            <span class="c-text" :class="{ placeholder: !src }" :title="srcPickerTitle">{{ srcPickerText }}</span>
             <span class="c-caret"><i class="fas fa-chevron-down"></i></span>
           </button>
         </div>
@@ -330,7 +330,10 @@
       :accounts="pickerAccounts"
       :account-id="pickerInitialAccountId"
       :initial-path="pickerInitialPath"
+      :multi-select="pickerMode === 'src'"
+      :initial-selections="pickerMode === 'src' ? pickerInitialSelections : []"
       :title="pickerMode === 'src' ? '选择源目录' : '选择目标目录'"
+      :confirm-text="pickerMode === 'src' ? '确认选择' : '选择当前目录'"
       show-refresh
       @close="pickerOpen = false"
       @resolve="onPickerResolve"
@@ -408,6 +411,7 @@ const pickerMode = ref('src')
 const pickerAccounts = ref([])
 const pickerInitialAccountId = ref(null)
 const pickerInitialPath = ref('')
+const pickerInitialSelections = ref([])
 
 const relayTasksHref = computed(() => (
   router.resolve({ path: '/', query: { taskPanel: 'relay' } }).href
@@ -418,6 +422,15 @@ const showFooterScrollTips = computed(() => !showProgressBar.value && !relayNoti
 const currentFooterTip = computed(() => footerScrollTips[footerTipIndex.value] || footerScrollTips[0])
 const isScanPhase = computed(() => phaseStatus.value.includes('扫描'))
 const isBaiduMd5Route = computed(() => curRoute.value?.method === 'md5' && srcDriver.value === 'baidu_open')
+const sourceRoots = computed(() => Array.isArray(src.value?.sources) ? src.value.sources : [])
+const srcPickerText = computed(() => {
+  if (!src.value) return '选择账号 · 目录'
+  if (sourceRoots.value.length === 1) return `${src.value.accName} · ${sourceRoots.value[0].path}`
+  return `${src.value.accName} · 已选 ${sourceRoots.value.length} 个目录`
+})
+const srcPickerTitle = computed(() => (
+  src.value ? sourceRoots.value.map(item => item.path).join('\n') : ''
+))
 
 const accounts = ref([])
 const srcTreeRef = ref(null)
@@ -687,26 +700,52 @@ async function openPicker(mode) {
   pickerMode.value = mode;
   pickerAccounts.value = accs;
   pickerInitialAccountId.value = Number(cur?.accId || accs[0]?.id || 0) || null;
-  pickerInitialPath.value = cur?.path || "";
+  pickerInitialPath.value = mode === 'src'
+    ? (cur?.sources?.length === 1 ? cur.sources[0].path : '')
+    : (cur?.path || '');
+  pickerInitialSelections.value = mode === 'src'
+    ? (cur?.sources || []).map(item => ({
+      id: item.parentId,
+      name: item.name,
+      path: item.path,
+      ancestorIds: [...(item.ancestorIds || [])],
+    }))
+    : [];
   pickerOpen.value = true;
 }
 
 function onPickerResolve(payload) {
   pickerOpen.value = false;
-  const sel = {
-    accId: payload.accountId,
-    accName: payload.accountName,
-    parentId: payload.parentId,
-    path: payload.path,
-  };
   if (pickerMode.value === "src") {
-    src.value = sel;
+    const selected = Array.isArray(payload.selections) && payload.selections.length
+      ? payload.selections
+      : [{
+        id: payload.parentId,
+        name: payload.path.split('/').filter(Boolean).pop() || '根目录',
+        path: payload.path,
+        ancestorIds: [],
+      }]
+    src.value = {
+      accId: payload.accountId,
+      accName: payload.accountName,
+      sources: selected.map(item => ({
+        parentId: item.id,
+        name: item.name,
+        path: item.path || '/',
+        ancestorIds: [...(item.ancestorIds || [])],
+      })),
+    };
     srcTree.value = null;
     probeFiles.value = [];
     scanSummary.value = null;
     scanLimitReason.value = '';
   } else {
-    dst.value = sel;
+    dst.value = {
+      accId: payload.accountId,
+      accName: payload.accountName,
+      parentId: payload.parentId,
+      path: payload.path,
+    };
   }
   dstTree.value = null;
   resetMetrics();
@@ -726,8 +765,11 @@ async function scanSource(clearTree = true) {
   try {
     for await (const msg of scanCrossTransferSourceStream({
       source_account_id: Number(src.value.accId),
-      source_parent_id: src.value.parentId,
-      source_display_path: src.value.path || "",
+      sources: sourceRoots.value.map(item => ({
+        parent_id: item.parentId,
+        display_path: item.path || '/',
+        ancestor_ids: item.ancestorIds || [],
+      })),
       method: curRoute.value.method,
     }, abortCtrl.value?.signal)) {
       if (msg.event === 'progress') {

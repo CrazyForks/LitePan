@@ -79,6 +79,12 @@ type ScanResult struct {
 	Files           []ScanFile     `json:"files"`
 }
 
+type ScanRoot struct {
+	ParentID    string   `json:"parent_id"`
+	DisplayPath string   `json:"display_path"`
+	AncestorIDs []string `json:"ancestor_ids,omitempty"`
+}
+
 type TransferFile struct {
 	SourceFileID string `json:"source_file_id"`
 	RelPath      string `json:"rel_path"`
@@ -118,7 +124,14 @@ func sourceRootPrefix(displayPath string) string {
 }
 
 func (s *Service) ScanSource(ctx context.Context, sourceAccountID int64, sourceParentID, methodID, sourceDisplayPath string) (*ScanResult, error) {
-	return s.scanSource(ctx, sourceAccountID, sourceParentID, methodID, sourceDisplayPath, nil)
+	return s.ScanSources(ctx, sourceAccountID, []ScanRoot{{
+		ParentID:    sourceParentID,
+		DisplayPath: sourceDisplayPath,
+	}}, methodID)
+}
+
+func (s *Service) ScanSources(ctx context.Context, sourceAccountID int64, roots []ScanRoot, methodID string) (*ScanResult, error) {
+	return s.scanSources(ctx, sourceAccountID, roots, methodID, nil)
 }
 
 func (s *Service) ScanSourceStream(
@@ -127,10 +140,23 @@ func (s *Service) ScanSourceStream(
 	sourceParentID, methodID, sourceDisplayPath string,
 	emit func(StreamEvent) error,
 ) error {
+	return s.ScanSourcesStream(ctx, sourceAccountID, []ScanRoot{{
+		ParentID:    sourceParentID,
+		DisplayPath: sourceDisplayPath,
+	}}, methodID, emit)
+}
+
+func (s *Service) ScanSourcesStream(
+	ctx context.Context,
+	sourceAccountID int64,
+	roots []ScanRoot,
+	methodID string,
+	emit func(StreamEvent) error,
+) error {
 	if err := emit(StreamEvent{"event": "start", "max_files": maxScanFiles}); err != nil {
 		return err
 	}
-	result, err := s.scanSource(ctx, sourceAccountID, sourceParentID, methodID, sourceDisplayPath, func(p scanProgress) error {
+	result, err := s.scanSources(ctx, sourceAccountID, roots, methodID, func(p scanProgress) error {
 		return emit(StreamEvent{
 			"event":       "progress",
 			"directories": p.directories,
@@ -171,19 +197,105 @@ type scanDirResult struct {
 	err   error
 }
 
-func (s *Service) scanSource(
+func normalizeScanRoots(roots []ScanRoot) ([]ScanRoot, error) {
+	if len(roots) == 0 {
+		return nil, domain.Errorf(domain.CodeValidation, "请选择源目录")
+	}
+	if len(roots) > 100 {
+		return nil, domain.Errorf(domain.CodeValidation, "一次最多选择 100 个源目录")
+	}
+
+	normalized := make([]ScanRoot, 0, len(roots))
+	seenIDs := make(map[string]struct{}, len(roots))
+	seenPaths := make(map[string]struct{}, len(roots))
+	for _, root := range roots {
+		root.ParentID = strings.TrimSpace(root.ParentID)
+		root.DisplayPath = "/" + strings.Trim(strings.TrimSpace(root.DisplayPath), "/")
+		for i, ancestorID := range root.AncestorIDs {
+			root.AncestorIDs[i] = strings.TrimSpace(ancestorID)
+		}
+		pathKey := strings.ToLower(root.DisplayPath)
+		if _, ok := seenPaths[pathKey]; ok {
+			continue
+		}
+		if root.ParentID != "" {
+			if _, ok := seenIDs[root.ParentID]; ok {
+				continue
+			}
+			seenIDs[root.ParentID] = struct{}{}
+		}
+		seenPaths[pathKey] = struct{}{}
+		normalized = append(normalized, root)
+	}
+
+	out := make([]ScanRoot, 0, len(normalized))
+	for i, root := range normalized {
+		nested := false
+		for j, parent := range normalized {
+			if i == j {
+				continue
+			}
+			for _, ancestorID := range root.AncestorIDs {
+				if parent.ParentID != "" && ancestorID == parent.ParentID {
+					nested = true
+					break
+				}
+			}
+			if nested {
+				break
+			}
+			if parent.DisplayPath == "/" || strings.HasPrefix(root.DisplayPath, parent.DisplayPath+"/") {
+				nested = true
+				break
+			}
+		}
+		if !nested {
+			out = append(out, root)
+		}
+	}
+	if len(out) == 0 {
+		return nil, domain.Errorf(domain.CodeValidation, "请选择源目录")
+	}
+
+	names := make(map[string]struct{}, len(out))
+	for _, root := range out {
+		name := strings.TrimSuffix(sourceRootPrefix(root.DisplayPath), "/")
+		if len(out) > 1 && name == "" {
+			return nil, domain.Errorf(domain.CodeValidation, "根目录不能与其他目录同时选择")
+		}
+		key := strings.ToLower(name)
+		if _, ok := names[key]; ok {
+			return nil, domain.Errorf(domain.CodeValidation, "所选源目录存在同名文件夹 %q，请分批传输", name)
+		}
+		names[key] = struct{}{}
+	}
+	return out, nil
+}
+
+func (s *Service) scanSources(
 	ctx context.Context,
 	sourceAccountID int64,
-	sourceParentID, methodID, sourceDisplayPath string,
+	roots []ScanRoot,
+	methodID string,
 	progress func(scanProgress) error,
 ) (*ScanResult, error) {
 	if _, ok := GetMethod(methodID); !ok {
 		return nil, domain.Errorf(domain.CodeValidation, "未知的秒传方法: %s", methodID)
 	}
-	rootPrefix := sourceRootPrefix(sourceDisplayPath)
+	roots, err := normalizeScanRoots(roots)
+	if err != nil {
+		return nil, err
+	}
 	acc := &scanAccumulator{files: make([]scanFileRec, 0, 256)}
-	root := &scanDirNode{id: sourceParentID, relPrefix: rootPrefix}
-	queue := []*scanDirNode{root}
+	rootNodes := make([]*scanDirNode, 0, len(roots))
+	for _, source := range roots {
+		rootNodes = append(rootNodes, &scanDirNode{
+			id:        source.ParentID,
+			name:      strings.TrimSuffix(sourceRootPrefix(source.DisplayPath), "/"),
+			relPrefix: sourceRootPrefix(source.DisplayPath),
+		})
+	}
+	queue := append([]*scanDirNode(nil), rootNodes...)
 
 	for len(queue) > 0 && acc.truncatedReason == "" {
 		if err := ctx.Err(); err != nil {
@@ -269,7 +381,7 @@ func (s *Service) scanSource(
 		}
 	}
 
-	tree := buildScanTree(root)
+	tree := buildScanRootsTree(rootNodes)
 	outFiles := make([]ScanFile, 0, len(acc.files))
 	for _, f := range acc.files {
 		outFiles = append(outFiles, ScanFile{
@@ -352,6 +464,22 @@ func buildScanTree(node *scanDirNode) []ScanTreeNode {
 			Size:     rec.size,
 			Hash:     rec.hash,
 			Eligible: rec.hash != "",
+		})
+	}
+	return out
+}
+
+func buildScanRootsTree(roots []*scanDirNode) []ScanTreeNode {
+	if len(roots) == 1 {
+		return buildScanTree(roots[0])
+	}
+	out := make([]ScanTreeNode, 0, len(roots))
+	for _, root := range roots {
+		out = append(out, ScanTreeNode{
+			Type:     "dir",
+			ID:       root.id,
+			Name:     root.name,
+			Children: buildScanTree(root),
 		})
 	}
 	return out
@@ -696,6 +824,9 @@ func (s *Service) executeTransferFile(ctx context.Context, in executeFileInput) 
 		return transferItemResult(base, false, "error", "", rapidErr)
 	}
 	if reuse {
+		if s.files != nil {
+			s.files.NotifyCreated(ctx, in.targetAccountID, folderID, fileID, f.Name, f.Size, false)
+		}
 		return transferItemResult(base, true, "rapid", fileID, "")
 	}
 

@@ -16,7 +16,12 @@ import "@/styles/file-list.css";
 
 type FolderSortKey = Extract<SortKey, "name" | "modified">;
 type FolderLoader = (parentId: string, opts?: { forceRefresh?: boolean }) => Promise<FileItem[]>;
-export type FolderSelection = { id: string; name: string };
+export type FolderSelection = {
+  id: string;
+  name: string;
+  path?: string;
+  ancestorIds?: string[];
+};
 
 const ROOT: Crumb = { id: "", name: "根目录" };
 
@@ -140,33 +145,56 @@ function normalizeSelectPath(id: string) {
   return String(id || "").replace(/^\/+|\/+$/g, "");
 }
 
-function isAncestorPath(ancestor: string, child: string) {
-  const a = normalizeSelectPath(ancestor);
-  const c = normalizeSelectPath(child);
-  if (!a || !c || a === c) return false;
-  return c.startsWith(`${a}/`);
+function normalizedSelectionPath(path?: string) {
+  return `/${String(path || "").split("/").filter(Boolean).join("/")}`;
 }
 
-function selectionState(id: string): SelectState {
-  const key = normalizeSelectPath(id);
-  if (!key && !id) {
-    // 根目录自身一般不出现在行内；无 key 时只看是否有任意已选
-    return activeSelections.value.length ? "partial" : "none";
-  }
+const currentAncestorIds = computed(() =>
+  breadcrumb.value.map((item) => String(item.id || "")).filter(Boolean),
+);
+
+function selectionForDir(dir: FileItem): FolderSelection {
+  const base = currentPath.value === "/" ? "" : currentPath.value;
+  return {
+    id: String(dir.id),
+    name: dir.name || String(dir.id),
+    path: normalizedSelectionPath(`${base}/${dir.name || ""}`),
+    ancestorIds: [...currentAncestorIds.value],
+  };
+}
+
+function isAncestorSelection(ancestor: FolderSelection, child: FolderSelection) {
+  if (child.ancestorIds?.some((id) => String(id) === String(ancestor.id))) return true;
+  const ancestorPath = normalizedSelectionPath(ancestor.path);
+  const childPath = normalizedSelectionPath(child.path);
+  return ancestorPath !== "/"
+    && childPath !== "/"
+    && ancestorPath !== childPath
+    && childPath.startsWith(`${ancestorPath}/`);
+}
+
+function selectionState(dir: FileItem): SelectState {
+  const item = selectionForDir(dir);
   const items = activeSelections.value;
-  if (items.some((item) => normalizeSelectPath(item.id) === key)) return "checked";
-  if (items.some((item) => isAncestorPath(item.id, key))) return "covered";
-  if (items.some((item) => isAncestorPath(key, item.id))) return "partial";
+  if (items.some((selected) => String(selected.id) === item.id)) return "checked";
+  if (items.some((selected) => isAncestorSelection(selected, item))) return "covered";
+  if (items.some((selected) => isAncestorSelection(item, selected))) return "partial";
   return "none";
 }
 
-function isSelected(id: string) {
-  const state = selectionState(id);
+function isSelected(dir: FileItem) {
+  const state = selectionState(dir);
   return state === "checked" || state === "covered";
 }
 
-function isPartialSelected(id: string) {
-  return selectionState(id) === "partial";
+function isPartialSelected(dir: FileItem) {
+  return selectionState(dir) === "partial";
+}
+
+function selectionKey(item: FolderSelection) {
+  const id = normalizeSelectPath(item.id);
+  if (id) return id;
+  return normalizedSelectionPath(item.path);
 }
 
 function commitSelections(next: FolderSelection[]) {
@@ -175,42 +203,31 @@ function commitSelections(next: FolderSelection[]) {
     return;
   }
   const map: Record<string, FolderSelection> = {};
-  for (const item of next) map[item.id] = item;
+  for (const item of next) map[selectionKey(item)] = item;
   selectedMap.value = map;
 }
 
-/** 勾选/取消时父子互斥：选父清子孙，选子清祖先。 */
-function withPathExclusive(current: FolderSelection[], item: FolderSelection, selected: boolean) {
-  const id = normalizeSelectPath(item.id);
+function withHierarchyExclusive(current: FolderSelection[], item: FolderSelection, selected: boolean) {
   const next = current.filter((entry) => {
-    const entryId = normalizeSelectPath(entry.id);
-    if (entryId === id) return false;
-    if (isAncestorPath(entryId, id) || isAncestorPath(id, entryId)) return false;
+    if (String(entry.id) === String(item.id)) return false;
+    if (isAncestorSelection(entry, item) || isAncestorSelection(item, entry)) return false;
     return true;
   });
-  if (selected) next.push({ id: item.id, name: item.name || item.id });
+  if (selected) next.push(item);
   return next;
 }
 
 function toggleSelect(dir: FileItem, checked?: boolean) {
   if (!props.multiSelect) return;
-  const id = String(dir.id);
-  const state = selectionState(id);
-  if (state === "covered") {
-    // 取消覆盖它的上级全选
-    const key = normalizeSelectPath(id);
-    commitSelections(
-      activeSelections.value.filter((item) => !isAncestorPath(item.id, key)),
-    );
-    return;
-  }
+  const state = selectionState(dir);
+  if (state === "covered") return;
+  const item = selectionForDir(dir);
   if (state === "partial") {
-    // 半选 → 全选当前目录（吸收已选子孙）
-    commitSelections(withPathExclusive(activeSelections.value, { id, name: dir.name || id }, true));
+    commitSelections(withHierarchyExclusive(activeSelections.value, item, true));
     return;
   }
   const selected = checked ?? state !== "checked";
-  commitSelections(withPathExclusive(activeSelections.value, { id, name: dir.name || id }, selected));
+  commitSelections(withHierarchyExclusive(activeSelections.value, item, selected));
 }
 
 async function listDirs(parentId: string, opts?: { forceRefresh?: boolean }): Promise<FileItem[]> {
@@ -290,7 +307,7 @@ const headerSelectState = computed<SelectState>(() => {
   let checkedOrCovered = 0;
   let partial = 0;
   for (const dir of sortedDirs.value) {
-    const state = selectionState(String(dir.id));
+    const state = selectionState(dir);
     if (state === "checked" || state === "covered") checkedOrCovered += 1;
     else if (state === "partial") partial += 1;
   }
@@ -304,13 +321,12 @@ function toggleSelectAllVisible() {
   if (headerSelectState.value === "checked") {
     let next = activeSelections.value;
     for (const dir of sortedDirs.value) {
-      const id = String(dir.id);
-      const key = normalizeSelectPath(id);
+      const item = selectionForDir(dir);
       next = next.filter(
-        (item) =>
-          normalizeSelectPath(item.id) !== key
-          && !isAncestorPath(item.id, key)
-          && !isAncestorPath(key, item.id),
+        (selected) =>
+          String(selected.id) !== item.id
+          && !isAncestorSelection(selected, item)
+          && !isAncestorSelection(item, selected),
       );
     }
     commitSelections(next);
@@ -318,7 +334,7 @@ function toggleSelectAllVisible() {
   }
   let next = activeSelections.value;
   for (const dir of sortedDirs.value) {
-    next = withPathExclusive(next, { id: String(dir.id), name: dir.name || String(dir.id) }, true);
+    next = withHierarchyExclusive(next, selectionForDir(dir), true);
   }
   commitSelections(next);
 }
@@ -570,24 +586,25 @@ watch(
               :key="dir.id"
               class="folder-table-row"
               :class="{
-                selected: multiSelect && (isSelected(String(dir.id)) || isPartialSelected(String(dir.id))),
+                selected: multiSelect && (isSelected(dir) || isPartialSelected(dir)),
               }"
               @click="openDir(dir)"
             >
               <label
                 v-if="multiSelect"
                 class="checkbox-col"
-                :title="selectionState(String(dir.id)) === 'covered'
-                  ? '已包含在上级全选中，点击取消上级全选'
-                  : selectionState(String(dir.id)) === 'partial'
+                :title="selectionState(dir) === 'covered'
+                  ? '已包含在上级目录中，请先取消上级目录'
+                  : selectionState(dir) === 'partial'
                     ? '已选部分子目录，点击改为全选此目录'
                     : `选择 ${dir.name}`"
                 @click.stop
               >
                 <input
                   type="checkbox"
-                  :checked="isSelected(String(dir.id))"
-                  :indeterminate="isPartialSelected(String(dir.id))"
+                  :checked="isSelected(dir)"
+                  :indeterminate="isPartialSelected(dir)"
+                  :disabled="selectionState(dir) === 'covered'"
                   :aria-label="`选择 ${dir.name}`"
                   @change="toggleSelect(dir, ($event.target as HTMLInputElement).checked)"
                 />

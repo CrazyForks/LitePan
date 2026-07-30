@@ -326,6 +326,20 @@ func (s *Service) UploadLocal(ctx context.Context, accountID int64, req driver.L
 	return result, nil
 }
 
+// NotifyCreated 用于绕过 file.Service 写路径完成创建时，补发标准写后失效事件。
+// 例如跨盘秒传命中后由驱动直接落文件，需要调用此方法清理目标目录缓存。
+func (s *Service) NotifyCreated(ctx context.Context, accountID int64, parentID, fileID, fileName string, fileSize int64, isDir bool) {
+	s.publishMutation(ctx, eventbus.FileMutated{
+		AccountID: accountID,
+		Op:        "create",
+		ParentID:  parentID,
+		FileID:    fileID,
+		FileName:  fileName,
+		FileSize:  fileSize,
+		IsDir:     isDir,
+	})
+}
+
 func (s *Service) recordListHit(hit bool) {
 	if s.listHits == nil {
 		return
