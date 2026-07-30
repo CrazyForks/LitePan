@@ -30,8 +30,10 @@ export interface CrossTransferScanFile {
 export interface CrossTransferScanResult {
   tree: unknown[];
   total: number;
+  directories: number;
   shallow_dirs: number;
   truncated: boolean;
+  truncated_reason?: string;
   files: CrossTransferScanFile[];
 }
 
@@ -77,6 +79,18 @@ export function scanCrossTransferSource(body: {
   source_display_path?: string;
 }) {
   return http.post<CrossTransferScanResult>("/cross-transfer/scan", body);
+}
+
+export function scanCrossTransferSourceStream(
+  body: {
+    source_account_id: number;
+    source_parent_id: string;
+    method: string;
+    source_display_path?: string;
+  },
+  signal?: AbortSignal,
+) {
+  return streamCrossTransferNDJSON<Record<string, unknown>>("/cross-transfer/scan/stream", body, signal);
 }
 
 export async function* streamCrossTransferNDJSON<T extends Record<string, unknown>>(

@@ -16,9 +16,10 @@ func GetMethod(id string) (Method, bool) {
 }
 
 const (
-	maxScanFiles        = 3000
-	maxScanDepth        = 40
-	scanDirConcurrency  = 6
-	relayConcurrency    = 2
-	maxRelayTasks       = 200
+	maxScanFiles       = 3000
+	maxScanDirs        = 10000
+	maxScanDepth       = 40
+	scanDirConcurrency = 6
+	relayConcurrency   = 2
+	maxRelayTasks      = 200
 )

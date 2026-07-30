@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"litepan/internal/core/driverexec"
 	"litepan/internal/domain"
@@ -121,6 +123,86 @@ func TestProbeFallsBackToTemporaryRapidUpload(t *testing.T) {
 	}
 }
 
+func TestScanSourceDeepTreeDoesNotDeadlock(t *testing.T) {
+	drv := newCleanupDriver()
+	parentID := ""
+	for i := 0; i < 12; i++ {
+		childID := fmt.Sprintf("level-%d", i)
+		drv.children[parentID] = []domain.FileItem{{ID: childID, Name: childID, IsDir: true}}
+		parentID = childID
+	}
+	drv.children[parentID] = []domain.FileItem{{
+		ID: "file-1", Name: "song.flac", Size: 1,
+		Hash: map[domain.HashType]string{domain.HashMD5: "11111111111111111111111111111111"},
+	}}
+	service := newCleanupService(t, drv)
+	done := make(chan struct{})
+	var result *ScanResult
+	var scanErr error
+	var progressEvents int
+
+	go func() {
+		scanErr = service.ScanSourceStream(context.Background(), 1, "root", "md5", "/music", func(event StreamEvent) error {
+			if event["event"] == "progress" {
+				progressEvents++
+			}
+			if event["event"] == "end" {
+				result, _ = event["result"].(*ScanResult)
+			}
+			return nil
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("深层目录扫描发生阻塞")
+	}
+	if scanErr != nil {
+		t.Fatalf("扫描失败: %v", scanErr)
+	}
+	if result == nil || result.Total != 1 || result.Directories != 13 || result.Truncated {
+		t.Fatalf("扫描结果不正确: %#v", result)
+	}
+	if progressEvents == 0 {
+		t.Fatal("扫描过程应持续返回进度")
+	}
+}
+
+func TestScanSourceReturnsDirectoryError(t *testing.T) {
+	drv := newCleanupDriver()
+	drv.children[""] = []domain.FileItem{{ID: "broken", Name: "损坏目录", IsDir: true}}
+	drv.listErrors["broken"] = errors.New("上游列表失败")
+	service := newCleanupService(t, drv)
+
+	_, err := service.ScanSource(context.Background(), 1, "root", "md5", "/媒体")
+	if err == nil || !strings.Contains(err.Error(), "/媒体/损坏目录") {
+		t.Fatalf("目录错误应带路径返回，得到 %v", err)
+	}
+}
+
+func TestScanSourceMarksIncompleteResult(t *testing.T) {
+	drv := newCleanupDriver()
+	items := make([]domain.FileItem, 0, maxScanFiles+1)
+	for i := 0; i <= maxScanFiles; i++ {
+		items = append(items, domain.FileItem{
+			ID: fmt.Sprintf("file-%d", i), Name: fmt.Sprintf("%d.bin", i), Size: 1,
+			Hash: map[domain.HashType]string{domain.HashMD5: "11111111111111111111111111111111"},
+		})
+	}
+	drv.children[""] = items
+	service := newCleanupService(t, drv)
+
+	result, err := service.ScanSource(context.Background(), 1, "root", "md5", "/大目录")
+	if err != nil {
+		t.Fatalf("扫描失败: %v", err)
+	}
+	if !result.Truncated || result.Total != maxScanFiles || result.TruncatedReason == "" {
+		t.Fatalf("超限扫描必须标记为不完整: %#v", result)
+	}
+}
+
 func newCleanupService(t *testing.T, drv driver.Driver) *Service {
 	t.Helper()
 	exec := driverexec.New(cleanupProvider{drv: drv}, nil)
@@ -133,13 +215,18 @@ type cleanupProvider struct{ drv driver.Driver }
 func (p cleanupProvider) Get(context.Context, int64) (driver.Driver, error) { return p.drv, nil }
 
 type cleanupDriver struct {
-	nextID   int
-	children map[string][]domain.FileItem
-	parents  map[string]string
+	nextID     int
+	children   map[string][]domain.FileItem
+	parents    map[string]string
+	listErrors map[string]error
 }
 
 func newCleanupDriver() *cleanupDriver {
-	return &cleanupDriver{children: map[string][]domain.FileItem{}, parents: map[string]string{}}
+	return &cleanupDriver{
+		children:   map[string][]domain.FileItem{},
+		parents:    map[string]string{},
+		listErrors: map[string]error{},
+	}
 }
 
 func (*cleanupDriver) Config() driver.Config      { return driver.Config{Name: "cleanup"} }
@@ -149,6 +236,9 @@ func (*cleanupDriver) Drop(context.Context) error { return nil }
 func (*cleanupDriver) Ping(context.Context) error { return nil }
 
 func (d *cleanupDriver) ListFiles(_ context.Context, parentID string) ([]domain.FileItem, error) {
+	if err := d.listErrors[parentID]; err != nil {
+		return nil, err
+	}
 	return append([]domain.FileItem(nil), d.children[parentID]...), nil
 }
 

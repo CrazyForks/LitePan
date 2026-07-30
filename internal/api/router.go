@@ -25,9 +25,9 @@ import (
 	"litepan/internal/crosstransfer"
 	"litepan/internal/domain"
 	"litepan/internal/embyproxy"
-	"litepan/internal/fnosproxy"
 	"litepan/internal/favorites"
 	"litepan/internal/file"
+	"litepan/internal/fnosproxy"
 	"litepan/internal/fusemount"
 	"litepan/internal/logx"
 	"litepan/internal/mediaorganize"
@@ -171,6 +171,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Route("/cross-transfer", func(r chi.Router) {
 				r.Get("/routes", h.crossTransferRoutes)
 				r.Post("/scan", h.crossTransferScan)
+				r.Post("/scan/stream", h.crossTransferScanStream)
 				r.Post("/probe", h.crossTransferProbe)
 				r.Post("/execute", h.crossTransferExecute)
 				r.Get("/relay/tasks", h.crossTransferRelayTasks)

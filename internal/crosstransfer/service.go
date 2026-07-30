@@ -70,11 +70,13 @@ type ScanTreeNode struct {
 }
 
 type ScanResult struct {
-	Tree        []ScanTreeNode `json:"tree"`
-	Total       int            `json:"total"`
-	ShallowDirs int            `json:"shallow_dirs"`
-	Truncated   bool           `json:"truncated"`
-	Files       []ScanFile     `json:"files"`
+	Tree            []ScanTreeNode `json:"tree"`
+	Total           int            `json:"total"`
+	Directories     int            `json:"directories"`
+	ShallowDirs     int            `json:"shallow_dirs"`
+	Truncated       bool           `json:"truncated"`
+	TruncatedReason string         `json:"truncated_reason,omitempty"`
+	Files           []ScanFile     `json:"files"`
 }
 
 type TransferFile struct {
@@ -116,19 +118,158 @@ func sourceRootPrefix(displayPath string) string {
 }
 
 func (s *Service) ScanSource(ctx context.Context, sourceAccountID int64, sourceParentID, methodID, sourceDisplayPath string) (*ScanResult, error) {
+	return s.scanSource(ctx, sourceAccountID, sourceParentID, methodID, sourceDisplayPath, nil)
+}
+
+func (s *Service) ScanSourceStream(
+	ctx context.Context,
+	sourceAccountID int64,
+	sourceParentID, methodID, sourceDisplayPath string,
+	emit func(StreamEvent) error,
+) error {
+	if err := emit(StreamEvent{"event": "start", "max_files": maxScanFiles}); err != nil {
+		return err
+	}
+	result, err := s.scanSource(ctx, sourceAccountID, sourceParentID, methodID, sourceDisplayPath, func(p scanProgress) error {
+		return emit(StreamEvent{
+			"event":       "progress",
+			"directories": p.directories,
+			"files":       p.files,
+			"current":     p.current,
+		})
+	})
+	if err != nil {
+		return err
+	}
+	return emit(StreamEvent{
+		"event":       "end",
+		"directories": result.Directories,
+		"files":       result.Total,
+		"truncated":   result.Truncated,
+		"result":      result,
+	})
+}
+
+type scanProgress struct {
+	directories int
+	files       int
+	current     string
+}
+
+type scanDirNode struct {
+	id        string
+	name      string
+	relPrefix string
+	depth     int
+	dirs      []*scanDirNode
+	files     []scanFileRec
+}
+
+type scanDirResult struct {
+	node  *scanDirNode
+	items []domain.FileItem
+	err   error
+}
+
+func (s *Service) scanSource(
+	ctx context.Context,
+	sourceAccountID int64,
+	sourceParentID, methodID, sourceDisplayPath string,
+	progress func(scanProgress) error,
+) (*ScanResult, error) {
 	if _, ok := GetMethod(methodID); !ok {
 		return nil, domain.Errorf(domain.CodeValidation, "未知的秒传方法: %s", methodID)
 	}
 	rootPrefix := sourceRootPrefix(sourceDisplayPath)
 	acc := &scanAccumulator{files: make([]scanFileRec, 0, 256)}
-	sem := make(chan struct{}, scanDirConcurrency)
-	var accMu sync.Mutex
+	root := &scanDirNode{id: sourceParentID, relPrefix: rootPrefix}
+	queue := []*scanDirNode{root}
 
-	tree, err := s.walkSource(ctx, sourceAccountID, sourceParentID, methodID, rootPrefix, 0, acc, &accMu, sem)
-	if err != nil {
-		return nil, err
+	for len(queue) > 0 && acc.truncatedReason == "" {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		remainingDirs := maxScanDirs - acc.directories
+		if remainingDirs <= 0 {
+			acc.truncatedReason = fmt.Sprintf("目录数量超过 %d 个", maxScanDirs)
+			break
+		}
+		batchSize := min(len(queue), scanDirConcurrency, remainingDirs)
+		batch := append([]*scanDirNode(nil), queue[:batchSize]...)
+		queue = queue[batchSize:]
+		results := s.listScanBatch(ctx, sourceAccountID, batch)
+
+		for _, listed := range results {
+			if listed.err != nil {
+				return nil, fmt.Errorf("扫描目录 %s 失败: %w", scanDirPath(listed.node), listed.err)
+			}
+			acc.directories++
+			var dirs []domain.FileItem
+			var files []domain.FileItem
+			for _, item := range listed.items {
+				if item.IsDir {
+					dirs = append(dirs, item)
+				} else {
+					files = append(files, item)
+				}
+			}
+
+			for _, item := range dirs {
+				child := &scanDirNode{
+					id:        item.ID,
+					name:      item.Name,
+					relPrefix: listed.node.relPrefix + item.Name + "/",
+					depth:     listed.node.depth + 1,
+				}
+				listed.node.dirs = append(listed.node.dirs, child)
+				if child.depth > maxScanDepth {
+					acc.truncatedReason = fmt.Sprintf("目录层级超过 %d 层", maxScanDepth)
+					break
+				}
+				queue = append(queue, child)
+			}
+			if acc.truncatedReason != "" {
+				break
+			}
+
+			for _, item := range files {
+				if acc.count >= maxScanFiles {
+					acc.truncatedReason = fmt.Sprintf("文件数量超过 %d 个", maxScanFiles)
+					break
+				}
+				hash, err := s.resolveHash(ctx, sourceAccountID, &item, methodID, false)
+				if err != nil {
+					return nil, fmt.Errorf("读取文件 %s 指纹失败: %w", listed.node.relPrefix+item.Name, err)
+				}
+				rec := scanFileRec{
+					id:      item.ID,
+					name:    item.Name,
+					size:    item.Size,
+					hash:    hash,
+					relPath: listed.node.relPrefix + item.Name,
+					relDir:  strings.TrimSuffix(listed.node.relPrefix, "/"),
+				}
+				listed.node.files = append(listed.node.files, rec)
+				acc.files = append(acc.files, rec)
+				acc.count++
+			}
+			if acc.truncatedReason != "" {
+				break
+			}
+		}
+
+		if acc.truncatedReason == "" && acc.count >= maxScanFiles && len(queue) > 0 {
+			acc.truncatedReason = fmt.Sprintf("文件数量达到 %d 个且仍有目录未扫描", maxScanFiles)
+		}
+		if progress != nil {
+			current := scanDirPath(batch[len(batch)-1])
+			if err := progress(scanProgress{directories: acc.directories, files: acc.count, current: current}); err != nil {
+				return nil, err
+			}
+		}
 	}
 
+	tree := buildScanTree(root)
 	outFiles := make([]ScanFile, 0, len(acc.files))
 	for _, f := range acc.files {
 		outFiles = append(outFiles, ScanFile{
@@ -143,11 +284,13 @@ func (s *Service) ScanSource(ctx context.Context, sourceAccountID int64, sourceP
 	}
 	outFiles = orderScanFilesByTree(tree, outFiles)
 	return &ScanResult{
-		Tree:        tree,
-		Total:       len(outFiles),
-		ShallowDirs: countShallowDirs(tree),
-		Truncated:   acc.count >= maxScanFiles,
-		Files:       outFiles,
+		Tree:            tree,
+		Total:           len(outFiles),
+		Directories:     acc.directories,
+		ShallowDirs:     countShallowDirs(tree),
+		Truncated:       acc.truncatedReason != "",
+		TruncatedReason: acc.truncatedReason,
+		Files:           outFiles,
 	}, nil
 }
 
@@ -157,102 +300,49 @@ type scanFileRec struct {
 }
 
 type scanAccumulator struct {
-	mu    sync.Mutex
-	count int
-	files []scanFileRec
+	count           int
+	directories     int
+	truncatedReason string
+	files           []scanFileRec
 }
 
-func (a *scanAccumulator) appendFile(rec scanFileRec) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.count >= maxScanFiles {
-		return false
-	}
-	a.files = append(a.files, rec)
-	a.count++
-	return true
-}
-
-func (a *scanAccumulator) atLimit() bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.count >= maxScanFiles
-}
-
-func (s *Service) walkSource(
-	ctx context.Context,
-	accountID int64,
-	parentID, methodID, relPrefix string,
-	depth int,
-	acc *scanAccumulator,
-	accMu *sync.Mutex,
-	sem chan struct{},
-) ([]ScanTreeNode, error) {
-	if depth > maxScanDepth || acc.atLimit() {
-		return nil, nil
-	}
-	items, err := s.files.List(ctx, accountID, parentID, false)
-	if err != nil {
-		return nil, err
-	}
-
-	var dirs []domain.FileItem
-	var files []domain.FileItem
-	for _, it := range items {
-		if it.IsDir {
-			dirs = append(dirs, it)
-		} else {
-			files = append(files, it)
-		}
-	}
-
+func (s *Service) listScanBatch(ctx context.Context, accountID int64, nodes []*scanDirNode) []scanDirResult {
+	results := make([]scanDirResult, len(nodes))
 	var wg sync.WaitGroup
-	dirNodes := make([]ScanTreeNode, len(dirs))
-	for i, dir := range dirs {
-		if acc.atLimit() {
-			break
-		}
+	for i, node := range nodes {
 		wg.Add(1)
-		go func(i int, dir domain.FileItem) {
+		go func(i int, node *scanDirNode) {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			childPrefix := relPrefix + dir.Name + "/"
-			children, err := s.walkSource(ctx, accountID, dir.ID, methodID, childPrefix, depth+1, acc, accMu, sem)
-			if err != nil || acc.atLimit() {
-				return
-			}
-			dirNodes[i] = ScanTreeNode{Type: "dir", ID: dir.ID, Name: dir.Name, Children: children}
-		}(i, dir)
+			items, err := s.files.List(ctx, accountID, node.id, false)
+			results[i] = scanDirResult{node: node, items: items, err: err}
+		}(i, node)
 	}
 	wg.Wait()
+	return results
+}
 
-	var out []ScanTreeNode
-	for _, node := range dirNodes {
-		if node.ID != "" {
-			out = append(out, node)
-		}
+func scanDirPath(node *scanDirNode) string {
+	if node == nil {
+		return "/"
 	}
+	path := strings.Trim(strings.TrimSpace(node.relPrefix), "/")
+	if path == "" {
+		return "/"
+	}
+	return "/" + path
+}
 
-	for _, it := range files {
-		if acc.atLimit() {
-			break
-		}
-		hash, err := s.resolveHash(ctx, accountID, &it, methodID, false)
-		if err != nil {
-			return nil, err
-		}
-		rec := scanFileRec{
-			id:      it.ID,
-			name:    it.Name,
-			size:    it.Size,
-			hash:    hash,
-			relPath: relPrefix + it.Name,
-			relDir:  strings.TrimSuffix(relPrefix, "/"),
-		}
-		if !acc.appendFile(rec) {
-			break
-		}
+func buildScanTree(node *scanDirNode) []ScanTreeNode {
+	out := make([]ScanTreeNode, 0, len(node.dirs)+len(node.files))
+	for _, dir := range node.dirs {
+		out = append(out, ScanTreeNode{
+			Type:     "dir",
+			ID:       dir.id,
+			Name:     dir.name,
+			Children: buildScanTree(dir),
+		})
+	}
+	for _, rec := range node.files {
 		out = append(out, ScanTreeNode{
 			Type:     "file",
 			ID:       rec.id,
@@ -264,7 +354,7 @@ func (s *Service) walkSource(
 			Eligible: rec.hash != "",
 		})
 	}
-	return out, nil
+	return out
 }
 
 func flattenTreeFilePaths(nodes []ScanTreeNode) []string {
