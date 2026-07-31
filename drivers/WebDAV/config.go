@@ -35,5 +35,5 @@ type Addition struct {
 	TLSSkip      bool       `json:"tls_skip" label:"TLS 证书校验" type:"select" options:"false:校验证书,true:不校验（自签名）" default:"false" form:"pair=opts1"`
 	CacheTTL     flexString `json:"cache_ttl" label:"缓存时间（分钟）" type:"number" default:"30" form:"pair=opts1"`
 	Timeout      flexString `json:"timeout_seconds" label:"请求超时（秒）" type:"number" default:"60" form:"pair=opts2"`
-	DownloadMode string     `json:"download_mode" label:"下载策略" type:"select" options:"proxy:本机代理" default:"proxy" form:"pair=opts2"`
+	DownloadMode string     `json:"download_mode" label:"下载模式" type:"select" options:"redirect:302重定向,proxy:本机代理" default:"proxy" form:"pair=opts2"`
 }

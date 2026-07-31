@@ -15,8 +15,9 @@ import (
 	"litepan/internal/httpx"
 )
 
+const redirectProbeExpiration = time.Minute
 
-// WebDAV GET 需要认证，无法安全 302 暴露凭据，一律走本机代理
+
 func (d *Driver) ResolveDownload(ctx context.Context, req driver.DownloadRequest) (*domain.DownloadInfo, error) {
 	c, err := d.ensureClient()
 	if err != nil {
@@ -33,17 +34,21 @@ func (d *Driver) ResolveDownload(ctx context.Context, req driver.DownloadRequest
 	}
 
 	url := d.resourceURL(p)
-	ua := strings.TrimSpace(req.UA)
-	if ua == "" {
-		ua = httpx.DefaultUserAgent
+	ua := d.downloadUA(req.UA)
+	configuredMode := strings.ToLower(strings.TrimSpace(d.add.DownloadMode))
+	if configuredMode == "redirect" {
+		if redirectURL, ok := d.resolveAnonymousRedirect(ctx, url, ua); ok {
+			return &domain.DownloadInfo{
+				URL:        redirectURL,
+				Headers:    http.Header{},
+				Mode:       domain.DownloadRedirect,
+				Expiration: redirectProbeExpiration,
+				Size:       fi.Size(),
+				FileName:   fi.Name(),
+			}, nil
+		}
 	}
-	headers := http.Header{
-		"Authorization":   []string{"Basic " + basicAuth(d.add.Username, d.add.Password)},
-		"User-Agent":      []string{ua},
-		"Accept":          []string{"*/*"},
-		"Accept-Encoding": []string{"identity"},
-		"Connection":      []string{"keep-alive"},
-	}
+	headers := d.proxyDownloadHeaders(ua)
 	return &domain.DownloadInfo{
 		URL:        url,
 		Headers:    headers,
@@ -57,6 +62,74 @@ func (d *Driver) ResolveDownload(ctx context.Context, req driver.DownloadRequest
 
 func basicAuth(user, pw string) string {
 	return base64.StdEncoding.EncodeToString([]byte(user + ":" + pw))
+}
+
+func (d *Driver) downloadUA(raw string) string {
+	ua := strings.TrimSpace(raw)
+	if ua == "" {
+		return httpx.DefaultUserAgent
+	}
+	return ua
+}
+
+func (d *Driver) proxyDownloadHeaders(ua string) http.Header {
+	return http.Header{
+		"Authorization":   []string{"Basic " + basicAuth(d.add.Username, d.add.Password)},
+		"User-Agent":      []string{ua},
+		"Accept":          []string{"*/*"},
+		"Accept-Encoding": []string{"identity"},
+		"Connection":      []string{"keep-alive"},
+	}
+}
+
+func (d *Driver) resolveAnonymousRedirect(ctx context.Context, resourceURL, ua string) (string, bool) {
+	client := &http.Client{
+		Transport: buildTransport(d.add),
+		Timeout:   secondsOr(d.add.Timeout, defaultTimeout),
+	}
+	redirectURL := d.followRedirectURL(ctx, client, resourceURL, ua, true)
+	if redirectURL == "" || redirectURL == resourceURL {
+		return "", false
+	}
+	anonymousURL := d.followRedirectURL(ctx, client, redirectURL, ua, false)
+	if anonymousURL == "" {
+		return "", false
+	}
+	return anonymousURL, true
+}
+
+func (d *Driver) followRedirectURL(ctx context.Context, client *http.Client, rawURL, ua string, withAuth bool) string {
+	if finalURL := d.probeRedirect(ctx, client, http.MethodHead, rawURL, ua, withAuth); finalURL != "" {
+		return finalURL
+	}
+	return d.probeRedirect(ctx, client, http.MethodGet, rawURL, ua, withAuth)
+}
+
+func (d *Driver) probeRedirect(ctx context.Context, client *http.Client, method, rawURL, ua string, withAuth bool) string {
+	var body io.Reader
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, body)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("User-Agent", ua)
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Encoding", "identity")
+	req.Header.Set("Connection", "keep-alive")
+	if method == http.MethodGet {
+		req.Header.Set("Range", "bytes=0-0")
+	}
+	if withAuth {
+		req.SetBasicAuth(d.add.Username, d.add.Password)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 || resp.Request == nil || resp.Request.URL == nil {
+		return ""
+	}
+	return resp.Request.URL.String()
 }
 
 func (d *Driver) CreateFolder(ctx context.Context, parentID, name string) (*domain.FileItem, error) {
