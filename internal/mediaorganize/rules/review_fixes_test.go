@@ -181,6 +181,46 @@ func TestExplicitIdentityYearFormats(t *testing.T) {
 	}
 }
 
+func TestParseSeasonDirNumberWithPrefixedNoise(t *testing.T) {
+	tests := []struct {
+		input string
+		want  int
+	}{
+		{input: "半泽直树 Season 1", want: 1},
+		{input: "半泽直树 Season 01", want: 1},
+		{input: "半泽直树 xxx发布 第1季", want: 1},
+		{input: "半泽直树 [某字幕组] S02", want: 2},
+		{input: "第1季（2016）4K", want: 1},
+		{input: "半泽直树 第三季", want: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := ParseSeasonDirNumber(tt.input)
+			if got == nil || *got != tt.want {
+				t.Fatalf("ParseSeasonDirNumber(%q) = %v, want %d", tt.input, got, tt.want)
+			}
+			if !IsSeasonDirName(tt.input) {
+				t.Fatalf("IsSeasonDirName(%q) = false, want true", tt.input)
+			}
+		})
+	}
+
+	for _, input := range []string{
+		"Hanzawa.Naoki.S01E01",
+		"Movie Season 2024",
+		"第1季第2集",
+	} {
+		t.Run("reject/"+input, func(t *testing.T) {
+			if got := ParseSeasonDirNumber(input); got != nil {
+				t.Fatalf("ParseSeasonDirNumber(%q) = %d, want nil", input, *got)
+			}
+			if IsSeasonDirName(input) {
+				t.Fatalf("IsSeasonDirName(%q) = true, want false", input)
+			}
+		})
+	}
+}
+
 func TestYirenRootScatterAmbiguous(t *testing.T) {
 	showAnc := []Ancestor{{ID: "show", Name: "一人之下"}}
 	catAnc := append(append([]Ancestor(nil), showAnc...), Ancestor{ID: "cat", Name: "前五季+番外+剧场版"})

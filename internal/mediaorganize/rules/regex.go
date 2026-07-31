@@ -60,10 +60,10 @@ var (
 		re      *regexp.Regexp
 		extract func([]string) *int
 	}{
-		{regexp.MustCompile(`(?i)^(?:season|series)\s*(\d{1,3})\b`), func(m []string) *int { n, _ := parseInt(m[1]); return intPtr(n) }},
-		{regexp.MustCompile(`(?i)^s(\d{1,3})\b`), func(m []string) *int { n, _ := parseInt(m[1]); return intPtr(n) }},
-		{regexp.MustCompile(`^第\s*(\d{1,3})\s*季`), func(m []string) *int { n, _ := parseInt(m[1]); return intPtr(n) }},
-		{regexp.MustCompile(`^第([零〇一二两三四五六七八九十百]+)季`), func(m []string) *int { return ChineseNumberToInt(m[1]) }},
+		{regexp.MustCompile(`(?i)(?:^|[^a-z0-9])(?:season|series)\s*0*(\d{1,3})\b`), func(m []string) *int { n, _ := parseInt(m[1]); return intPtr(n) }},
+		{regexp.MustCompile(`(?i)(?:^|[^a-z0-9])s0*(\d{1,3})\b`), func(m []string) *int { n, _ := parseInt(m[1]); return intPtr(n) }},
+		{regexp.MustCompile(`(?:^|[^0-9])第\s*(\d{1,3})\s*[季部](?:$|[\s._\-()（）【】\[\]])`), func(m []string) *int { n, _ := parseInt(m[1]); return intPtr(n) }},
+		{regexp.MustCompile(`(?:^|[^零〇一二两三四五六七八九十百])第([零〇一二两三四五六七八九十百]+)\s*[季部](?:$|[\s._\-()（）【】\[\]])`), func(m []string) *int { return ChineseNumberToInt(m[1]) }},
 	}
 
 	numberPattern = `(\d{1,4}|[零〇一二两三四五六七八九十百]{1,6})`
