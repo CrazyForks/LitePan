@@ -5,6 +5,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"litepan/internal/domain"
+	"litepan/internal/eventbus"
 )
 
 type reciprocalBusy struct {
@@ -74,5 +77,44 @@ func TestScheduleOnceCrossBusyCheckNoDeadlock(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("cross busy check deadlocked")
+	}
+}
+
+func TestNotifyLargeScopeThresholdAndMessage(t *testing.T) {
+	bus := eventbus.New(nil)
+	defer func() {
+		_ = bus.Close(context.Background())
+	}()
+
+	got := make(chan eventbus.NotificationCreated, 1)
+	eventbus.Subscribe(bus, func(ctx context.Context, evt eventbus.NotificationCreated) {
+		got <- evt
+	})
+
+	svc := &Service{bus: bus}
+	task := &domain.CacheRetentionTask{ID: 7, AccountID: 18, Path: "/电影"}
+
+	svc.notifyLargeScope(task, scanStats{APICalls: 499, SkipCalls: 0})
+	select {
+	case evt := <-got:
+		t.Fatalf("499 次 API 调用不应触发提醒，got=%+v", evt)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	svc.notifyLargeScope(task, scanStats{APICalls: 500, SkipCalls: 0})
+	select {
+	case evt := <-got:
+		if evt.Category != domain.NotificationCategoryCacheScopeWarn {
+			t.Fatalf("category=%q", evt.Category)
+		}
+		if evt.Title != "缓存保持任务范围过大" {
+			t.Fatalf("title=%q", evt.Title)
+		}
+		want := "该任务扫描范围过大，继续执行意义不大，还可能增加网盘访问压力，建议尽快改为常用子目录。"
+		if evt.Message != want {
+			t.Fatalf("message=%q", evt.Message)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("500 次 API 调用应触发提醒")
 	}
 }

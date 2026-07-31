@@ -233,11 +233,11 @@ func (s *Service) notifyLargeScope(task *domain.CacheRetentionTask, stats scanSt
 	if s.bus == nil || task == nil || task.IgnoreLargeScopeWarn {
 		return
 	}
-	if stats.APICalls < 50 || stats.SkipCalls*2 >= stats.APICalls {
+	if stats.APICalls < 500 || stats.SkipCalls*2 >= stats.APICalls {
 		return
 	}
 	title := "缓存保持任务范围过大"
-	msg := "缓存保持任务「" + task.Path + "」覆盖范围过大，存在风控风险，请尽快手动修改任务，只绑定常用子目录。"
+	msg := "该任务扫描范围过大，继续执行意义不大，还可能增加网盘访问压力，建议尽快改为常用子目录。"
 	s.bus.Publish(context.Background(), eventbus.NotificationCreated{
 		Level:     "warning",
 		Category:  domain.NotificationCategoryCacheScopeWarn,
