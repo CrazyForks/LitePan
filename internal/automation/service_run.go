@@ -104,9 +104,10 @@ func (s *Service) runRule(id int64, triggerSource string) {
 	rule.LastRunStatus = status
 	rule.LastRunMessage = message
 	if rule.Status == domain.AutomationStatusRunning {
-		rule.NextRunAt = computeNextRun(rule.TriggerType, decodeMap(rule.TriggerConfig), finishedAt)
 		if rule.TriggerType == domain.AutomationTriggerWebhook {
 			rule.NextRunAt = time.Time{}
+		} else if triggerSource != "schedule" && (rule.NextRunAt.IsZero() || !rule.NextRunAt.After(finishedAt)) {
+			rule.NextRunAt = computeNextRun(rule.TriggerType, decodeMap(rule.TriggerConfig), finishedAt)
 		}
 	}
 	_ = s.rules.Update(ctx, rule)

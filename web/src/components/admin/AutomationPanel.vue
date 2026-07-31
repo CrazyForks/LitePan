@@ -537,6 +537,7 @@ import {
   updateAutomationRule,
   validateAutomationRule
 } from '../../api/automation'
+import { formatTime } from '../../utils/format'
 import '@/styles/admin-table.css'
 
 const viewMode = ref('list')
@@ -1625,7 +1626,8 @@ const closeRuns = () => {
 
 const formatDate = (value) => {
   if (!value) return '-'
-  return String(value).replace('T', ' ').slice(0, 16)
+  const formatted = formatTime(value)
+  return formatted === '-' ? '-' : formatted.slice(0, 16)
 }
 
 const startPageActivity = () => {

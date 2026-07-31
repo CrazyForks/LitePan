@@ -107,6 +107,53 @@ func TestScheduleOnceQueuesDueRuleAndAdvancesNextRun(t *testing.T) {
 	}
 }
 
+func TestComputeNextRunIntervalUsesNextDayAnchorWhenTodayStartPassed(t *testing.T) {
+	t.Parallel()
+
+	loc := time.FixedZone("UTC+8", 8*3600)
+	base := time.Date(2026, 7, 31, 12, 0, 0, 0, loc)
+
+	got := computeNextRun(domain.AutomationTriggerInterval, map[string]any{
+		"start_time":     "01:00",
+		"interval_hours": 1,
+	}, base)
+	want := time.Date(2026, 8, 1, 1, 0, 0, 0, loc)
+	if !got.Equal(want) {
+		t.Fatalf("NextRunAt = %v, want %v", got, want)
+	}
+
+	got = computeNextRun(domain.AutomationTriggerInterval, map[string]any{
+		"start_time":     "13:00",
+		"interval_hours": 1,
+	}, base)
+	want = time.Date(2026, 7, 31, 13, 0, 0, 0, loc)
+	if !got.Equal(want) {
+		t.Fatalf("当日未到起点时 NextRunAt = %v, want %v", got, want)
+	}
+}
+
+func TestAdvanceNextRunIntervalKeepsSameDaySlotsThenResetsToNextAnchor(t *testing.T) {
+	t.Parallel()
+
+	loc := time.FixedZone("UTC+8", 8*3600)
+	cfg := map[string]any{
+		"start_time":     "13:00",
+		"interval_hours": 5,
+	}
+
+	got := advanceNextRun(domain.AutomationTriggerInterval, cfg, time.Date(2026, 7, 31, 13, 0, 0, 0, loc))
+	want := time.Date(2026, 7, 31, 18, 0, 0, 0, loc)
+	if !got.Equal(want) {
+		t.Fatalf("同日下一档 = %v, want %v", got, want)
+	}
+
+	got = advanceNextRun(domain.AutomationTriggerInterval, cfg, time.Date(2026, 7, 31, 23, 0, 0, 0, loc))
+	want = time.Date(2026, 8, 1, 13, 0, 0, 0, loc)
+	if !got.Equal(want) {
+		t.Fatalf("跨天后应回到次日锚点，got %v want %v", got, want)
+	}
+}
+
 func TestRunAsyncQueuesInsteadOfRejectingWhenBusy(t *testing.T) {
 	t.Parallel()
 
