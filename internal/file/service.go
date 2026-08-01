@@ -308,8 +308,9 @@ func (s *Service) UploadLocal(ctx context.Context, accountID int64, req driver.L
 	}
 	s.log.Debug("上传文件成功", "account_id", accountID, "name", result.FileName, "size", result.Size)
 	parentID := cache.NormalizeDirParentID(req.ParentID)
-	if result.ParentID != "" {
-		parentID = cache.NormalizeDirParentID(result.ParentID)
+	resolvedParentID := cache.NormalizeDirParentID(result.ParentID)
+	if s.cache != nil && resolvedParentID != "" && resolvedParentID != parentID {
+		cache.InvalidateDirKeys(s.cache, accountID, resolvedParentID)
 	}
 	mut := eventbus.FileMutated{
 		AccountID: accountID,
@@ -397,7 +398,6 @@ func (s *Service) globalDirTTL() time.Duration {
 	}
 	return time.Duration(minutes) * time.Minute
 }
-
 
 func parseCacheTTLMinutes(configJSON string) (int, bool) {
 	s := strings.TrimSpace(configJSON)

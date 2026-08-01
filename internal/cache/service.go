@@ -194,7 +194,7 @@ func (s *Service) InvalidatePrefix(prefix string) {
 	}
 }
 
-// InvalidateAccount 失效某账号的全部元数据缓存（目录/详情/直链）。
+// InvalidateAccount 失效某账号的全部元数据与 WebDAV 缓存。
 func (s *Service) InvalidateAccount(accountID int64) {
 	for _, p := range accountTypePrefixes(accountID) {
 		s.InvalidatePrefix(p)
@@ -374,4 +374,3 @@ func (s *Service) sweepExpired() {
 		s.expirations.Add(1)
 	}
 }
-
