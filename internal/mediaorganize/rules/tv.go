@@ -60,7 +60,7 @@ func LooksLikeTVFileWithName(parsed ParsedMedia, ancestors []Ancestor, fileName 
 		}
 	}
 	for _, anc := range ancestors {
-		if isSpecialContentDirName(anc.Name) {
+		if isStructuralSpecialDirName(anc.Name) {
 			reasons = append(reasons, "祖先目录是番外/特别篇: "+anc.Name)
 			score += 0.5
 			break
@@ -79,7 +79,7 @@ func PickTVShowInfo(ancestors []Ancestor, fileParsed ParsedMedia) (showDirID, sh
 	for idx := len(ancestors) - 1; idx >= 0; idx-- {
 		dir := ancestors[idx]
 		if IsGenericMediaDir(dir.Name) || IsSeasonDirName(dir.Name) || IsEpisodeRangeDirName(dir.Name) ||
-			isCollectionContainerDir(dir.Name, nil) || isSpecialContentDirName(dir.Name) {
+			isCollectionContainerDir(dir.Name, nil) || isStructuralSpecialDirName(dir.Name) {
 			continue
 		}
 		if looksLikeStandaloneMovieDir(dir.Name) {
@@ -104,7 +104,7 @@ func PickTVShowInfo(ancestors []Ancestor, fileParsed ParsedMedia) (showDirID, sh
 
 func hasSpecialContentAncestor(ancestors []Ancestor) bool {
 	for _, anc := range ancestors {
-		if isSpecialContentDirName(anc.Name) {
+		if isStructuralSpecialDirName(anc.Name) {
 			return true
 		}
 	}
@@ -113,7 +113,7 @@ func hasSpecialContentAncestor(ancestors []Ancestor) bool {
 
 func hasTVHintAncestor(ancestors []Ancestor) bool {
 	for _, anc := range ancestors {
-		if IsSeasonDirName(anc.Name) || IsEpisodeRangeDirName(anc.Name) || isSpecialContentDirName(anc.Name) {
+		if IsSeasonDirName(anc.Name) || IsEpisodeRangeDirName(anc.Name) || isStructuralSpecialDirName(anc.Name) {
 			return true
 		}
 		parsed := NormalizeParsedMedia(ParseDirName(anc.Name))
@@ -129,6 +129,10 @@ func isSpecialContentDirName(name string) bool {
 		return false
 	}
 	return specialContentDirRe.MatchString(name)
+}
+
+func isStructuralSpecialDirName(name string) bool {
+	return isSpecialContentDirName(name) && !looksLikeStandaloneMovieDir(name)
 }
 
 func isCollectionContainerDir(name string, childDirNames []string) bool {
@@ -172,12 +176,26 @@ func looksLikeStandaloneMovieDir(name string) bool {
 		return false
 	}
 	if IsGenericMediaDir(raw) || IsSeasonDirName(raw) || IsEpisodeRangeDirName(raw) ||
-		isCollectionContainerDir(raw, nil) || isSpecialContentDirName(raw) {
+		isCollectionContainerDir(raw, nil) {
 		return false
 	}
 	dirParsed := NormalizeParsedMedia(ParseDirName(raw))
 	title := strings.TrimSpace(dirParsed.Title)
-	if title == "" || dirParsed.Year == nil {
+	if title == "" {
+		return false
+	}
+	if isSpecialContentDirName(raw) {
+		id := FindTMDBIDInName(raw)
+		if dirParsed.Year == nil && id == "" {
+			return false
+		}
+		remainder := strings.TrimSpace(specialContentDirRe.ReplaceAllString(title, " "))
+		if remainder == "" && id == "" {
+			return false
+		}
+		return ScoreTitleForTMDB(title) >= 0.45
+	}
+	if dirParsed.Year == nil {
 		return false
 	}
 	if seasonOnlyTitleRe.MatchString(title) {
@@ -187,6 +205,10 @@ func looksLikeStandaloneMovieDir(name string) bool {
 		return true
 	}
 	return ScoreTitleForTMDB(title) >= 0.45
+}
+
+func IsStandaloneMovieDirName(name string) bool {
+	return looksLikeStandaloneMovieDir(name)
 }
 
 var (

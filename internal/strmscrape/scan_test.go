@@ -112,6 +112,53 @@ func TestGroupWorks_MovieFolders(t *testing.T) {
 	}
 }
 
+func TestSpecialPrefixedMovieStaysInOwnDirectory(t *testing.T) {
+	root := t.TempDir()
+	wantTitle := "特别篇 吹响吧！上低音号～合奏比赛～"
+	name := "特别篇 吹响吧！上低音号～合奏比赛～ (2023){tmdb-1108306}"
+	movie := filepath.Join(root, "电影", name)
+	mustMkdir(t, movie)
+	mustWrite(t, filepath.Join(movie, "Hibike Euphonium Ensemble Contest.strm"), "x")
+
+	works, err := scanWorks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(works) != 1 {
+		t.Fatalf("works=%d", len(works))
+	}
+	if works[0].absDir != movie {
+		t.Fatalf("work dir=%q want %q", works[0].absDir, movie)
+	}
+	item := buildItem(1, root, works[0])
+	if item.MediaType != MediaTypeMovie || item.TMDBID != "1108306" || item.Title != wantTitle {
+		t.Fatalf("item=%+v", item)
+	}
+	nfo, _ := workMetaPaths(works[0], MediaTypeMovie)
+	if filepath.Dir(nfo) != movie || filepath.Base(nfo) == "tvshow.nfo" {
+		t.Fatalf("movie nfo=%q", nfo)
+	}
+}
+
+func TestPureSpecialsDirectoryStillCollapsesIntoTVShow(t *testing.T) {
+	root := t.TempDir()
+	show := filepath.Join(root, "剧集", "测试剧 (2023)")
+	specials := filepath.Join(show, "特别篇")
+	mustMkdir(t, specials)
+	mustWrite(t, filepath.Join(specials, "S00E01.strm"), "x")
+
+	works, err := scanWorks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(works) != 1 || works[0].absDir != show {
+		t.Fatalf("works=%+v", works)
+	}
+	if got := inferMediaType(works[0]); got != MediaTypeTV {
+		t.Fatalf("media type=%q", got)
+	}
+}
+
 func TestGroupWorks_FlatFilesStaySeparate(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "A.strm"), "x")

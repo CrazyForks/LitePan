@@ -98,8 +98,7 @@ func resolveWorkDir(libraryRoot, strmAbs string) string {
 		if sameFilePath(dir, libraryRoot) {
 			return libraryRoot
 		}
-		name := filepath.Base(dir)
-		if rules.IsSeasonDirName(name) || rules.IsSpecialContentDirName(name) {
+		if isStructuralWorkSubdir(dir) {
 			parent := filepath.Dir(dir)
 			if parent == dir || (!isInside(libraryRoot, parent) && !sameFilePath(parent, libraryRoot)) {
 				return dir
@@ -116,15 +115,16 @@ func inferMediaType(g workGroup) string {
 	if g.flatFile == "" {
 		if entries, err := os.ReadDir(g.absDir); err == nil {
 			for _, d := range entries {
-				if d.IsDir() && (rules.IsSeasonDirName(d.Name()) || rules.IsSpecialContentDirName(d.Name())) {
+				if d.IsDir() && isStructuralWorkSubdir(filepath.Join(g.absDir, d.Name())) {
 					return MediaTypeTV
 				}
 			}
 		}
 	}
 	for _, e := range g.entries {
-		parent := filepath.Base(filepath.Dir(e.absPath))
-		if rules.IsSeasonDirName(parent) || rules.IsSpecialContentDirName(parent) {
+		parentDir := filepath.Dir(e.absPath)
+		parent := filepath.Base(parentDir)
+		if rules.IsSeasonDirName(parent) || (!sameFilePath(parentDir, g.absDir) && isStructuralWorkSubdir(parentDir)) {
 			return MediaTypeTV
 		}
 	}
@@ -158,7 +158,13 @@ func inferMediaType(g workGroup) string {
 
 func isLikelyMovieWorkFolder(name string) bool {
 	name = strings.TrimSpace(name)
-	if name == "" || rules.IsSeasonDirName(name) || rules.IsSpecialContentDirName(name) {
+	if name == "" || rules.IsSeasonDirName(name) {
+		return false
+	}
+	if rules.IsStandaloneMovieDirName(name) {
+		return true
+	}
+	if rules.IsSpecialContentDirName(name) {
 		return false
 	}
 	if rules.LooksLikeWorkDirName(name) {
@@ -166,6 +172,49 @@ func isLikelyMovieWorkFolder(name string) bool {
 	}
 	parsed := rules.NormalizeParsedMedia(rules.ParseDirName(name))
 	return parsed.Year != nil && strings.TrimSpace(parsed.Title) != ""
+}
+
+func isStructuralWorkSubdir(dir string) bool {
+	name := filepath.Base(dir)
+	if rules.IsSeasonDirName(name) {
+		return true
+	}
+	if !rules.IsSpecialContentDirName(name) {
+		return false
+	}
+	if !rules.IsStandaloneMovieDirName(name) {
+		return true
+	}
+	if rules.FindTMDBIDInName(name) != "" {
+		return false
+	}
+	return hasTVParentEvidence(filepath.Dir(dir), dir)
+}
+
+func hasTVParentEvidence(parentDir, currentDir string) bool {
+	if fileExists(filepath.Join(parentDir, "tvshow.nfo")) {
+		return true
+	}
+	entries, err := os.ReadDir(parentDir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		path := filepath.Join(parentDir, entry.Name())
+		if entry.IsDir() {
+			if !sameFilePath(path, currentDir) && rules.IsSeasonDirName(entry.Name()) {
+				return true
+			}
+			continue
+		}
+		if strings.EqualFold(filepath.Ext(entry.Name()), ".strm") {
+			stem := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+			if explicitSeasonEpisodeFileRe.MatchString(stem) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func workDisplayName(g workGroup) string {

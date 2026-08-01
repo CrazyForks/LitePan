@@ -379,6 +379,24 @@ func TestLooksLikeTVFileWithNameIgnoresCodecEpisodeFalsePositive(t *testing.T) {
 	}
 }
 
+func TestSpecialPrefixedMovieDirectoryKeepsExplicitIdentity(t *testing.T) {
+	name := "特别篇 吹响吧！上低音号～合奏比赛～ (2023){tmdb-1108306}"
+	if !IsStandaloneMovieDirName(name) {
+		t.Fatal("带片名、年份和 TMDB ID 的特别篇目录应识别为独立电影")
+	}
+	parsed := NormalizeParsedMedia(ParseFilenameStrict("Hibike Euphonium Ensemble Contest.2023.mkv"))
+	got := LooksLikeTVFileWithName(parsed, []Ancestor{
+		{ID: "movies", Name: "电影"},
+		{ID: "work", Name: name},
+	}, "Hibike Euphonium Ensemble Contest.2023.mkv")
+	if got.Matched {
+		t.Fatalf("特别篇电影不应仅因目录名前缀识别成剧集: %+v", got)
+	}
+	if IsStandaloneMovieDirName("特别篇") {
+		t.Fatal("纯特别篇结构目录不应识别为独立电影")
+	}
+}
+
 func intValue(v *int) int {
 	if v == nil {
 		return 0
