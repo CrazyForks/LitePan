@@ -3,6 +3,7 @@ package webdav
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -16,7 +17,6 @@ import (
 )
 
 const redirectProbeExpiration = time.Minute
-
 
 func (d *Driver) ResolveDownload(ctx context.Context, req driver.DownloadRequest) (*domain.DownloadInfo, error) {
 	c, err := d.ensureClient()
@@ -84,8 +84,9 @@ func (d *Driver) proxyDownloadHeaders(ua string) http.Header {
 
 func (d *Driver) resolveAnonymousRedirect(ctx context.Context, resourceURL, ua string) (string, bool) {
 	client := &http.Client{
-		Transport: buildTransport(d.add),
-		Timeout:   secondsOr(d.add.Timeout, defaultTimeout),
+		Transport:     buildTransport(d.add),
+		Timeout:       secondsOr(d.add.Timeout, defaultTimeout),
+		CheckRedirect: webDAVRedirectPolicy,
 	}
 	redirectURL := d.followRedirectURL(ctx, client, resourceURL, ua, true)
 	if redirectURL == "" || redirectURL == resourceURL {
@@ -96,6 +97,24 @@ func (d *Driver) resolveAnonymousRedirect(ctx context.Context, resourceURL, ua s
 		return "", false
 	}
 	return anonymousURL, true
+}
+
+func webDAVRedirectPolicy(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if len(via) == 0 {
+		return nil
+	}
+	prev := via[len(via)-1]
+	if prev.URL == nil || req.URL == nil ||
+		!strings.EqualFold(prev.URL.Scheme, req.URL.Scheme) ||
+		!strings.EqualFold(prev.URL.Host, req.URL.Host) {
+		req.Header.Del("Authorization")
+		req.Header.Del("Proxy-Authorization")
+		req.Header.Del("Cookie")
+	}
+	return nil
 }
 
 func (d *Driver) followRedirectURL(ctx context.Context, client *http.Client, rawURL, ua string, withAuth bool) string {
