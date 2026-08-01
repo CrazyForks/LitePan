@@ -10,6 +10,7 @@ import SettingsCard from "@/components/admin/SettingsCard.vue";
 import SettingsRow from "@/components/admin/SettingsRow.vue";
 import SettingsHelpTooltip from "@/components/admin/SettingsHelpTooltip.vue";
 import { useSettingsForm } from "@/composables/useSettingsForm";
+import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { useSettingsLoad } from "@/composables/useSettingsLoad";
 import { toast, copyTextToClipboard } from "@/composables/useToast";
 import "@/styles/admin-shared.css";
@@ -22,6 +23,7 @@ const props = withDefaults(
 );
 
 const { loading, runLoad } = useSettingsLoad();
+useAdminPageLoading("share", loading);
 
 const { settings, isDirty, isFieldChanged, applyBaseline, revert: revertSettings } = useSettingsForm({
   webdav_enabled: false,
@@ -77,9 +79,7 @@ defineExpose({
 <template>
   <div class="webdav-settings">
     <SettingsCard title="服务开关" :accent="props.accent">
-      <div v-if="loading" class="settings-card__loading">加载中…</div>
-
-      <template v-else>
+      <template v-if="!loading">
         <SettingsRow :show-changed-badge="true" :changed="isFieldChanged('webdav_enabled')">
           <template #info>
             <div class="settings-row__label">

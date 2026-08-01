@@ -29,7 +29,7 @@ export const router = createRouter({
   routes,
 });
 
-router.beforeEach(async (to, from) => {
+router.beforeEach(async (to) => {
   if (to.meta.title) {
     document.title = `${String(to.meta.title)} - LitePan`;
   }
@@ -37,8 +37,7 @@ router.beforeEach(async (to, from) => {
   const auth = useAuthStore();
 
   if (to.meta.requiresAuth) {
-    // 后台内部切换查询参数时复用已确认会话，首次进入仍校验权限。
-    if (to.name === "admin" && from.name === "admin" && auth.loaded && auth.sessionAdmin) {
+    if (auth.loaded && auth.sessionAdmin) {
       return true;
     }
     try {
@@ -54,6 +53,7 @@ router.beforeEach(async (to, from) => {
   }
 
   if (to.meta.guestOnly) {
+    if (auth.loaded && auth.sessionAdmin) return "/admin";
     try {
       const status = await fetchAuthStatus();
       if (status.is_admin) {
@@ -66,6 +66,7 @@ router.beforeEach(async (to, from) => {
   }
 
   if (to.name === "home") {
+    if (auth.loaded && auth.sessionAdmin) return true;
     try {
       const status = await fetchAuthStatus();
       auth.applyStatus(status);

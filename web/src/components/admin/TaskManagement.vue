@@ -71,6 +71,7 @@ const MediaOrganizeSettings = defineAsyncComponent(() => import("@/components/ad
 import CacheRuntimeStats from "@/components/admin/CacheRuntimeStats.vue";
 import AdminSettingsDrawer from "@/components/admin/AdminSettingsDrawer.vue";
 import { useAccountPathLabel } from "@/composables/useAccountPathLabel";
+import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { useConditionalPolling } from "@/composables/useConditionalPolling";
 import { liveElapsedMs, useLiveElapsedClock } from "@/composables/useLiveElapsedClock";
 import {
@@ -172,6 +173,10 @@ const { activeTab, setActiveTab } = useSectionTabRoute(
     return true;
   },
 });
+useAdminPageLoading(
+  "tasks",
+  computed(() => activeTab.value === STRM_TAB && (!strmListReady.value || refreshing.value) && !tasks.value.length),
+);
 
   // 面板首次激活后保持挂载，避免初次进入时并发加载全部接口。
 const tabsVisited = reactive<Record<string, boolean>>({});
@@ -1076,15 +1081,8 @@ watch(activeTab, (tab) => {
 
       <AdminStartupBanner :seconds="startupRemainingDisplay" />
 
-      <AppStateBlock
-        v-if="(!strmListReady || refreshing) && !tasks.length"
-        message="加载中…"
-        loading
-        min-height="160px"
-      />
-
       <AdminEmptyState
-        v-else-if="!tasks.length"
+        v-if="strmListReady && !refreshing && !tasks.length"
         icon="🎬"
         title="还没有 STRM 任务"
         description="添加任务后，系统会定期扫描网盘目录并生成本地 .strm 播放链接文件。"
@@ -1092,7 +1090,7 @@ watch(activeTab, (tab) => {
         <AppButton type="button" variant="primary" @click="openCreate">添加第一个任务</AppButton>
       </AdminEmptyState>
 
-      <div v-else class="admin-panel-table-wrap strm-task-table-wrap">
+      <div v-else-if="tasks.length" class="admin-panel-table-wrap strm-task-table-wrap">
         <table class="admin-table strm-task-table">
           <thead>
             <tr>

@@ -23,7 +23,6 @@ import AppCardActionButton from "@/components/base/AppCardActionButton.vue";
 import AppInput from "@/components/base/AppInput.vue";
 import AppSelect from "@/components/base/AppSelect.vue";
 import AppModal from "@/components/base/AppModal.vue";
-import AppStateBlock from "@/components/base/AppStateBlock.vue";
 import StatCard from "@/components/base/StatCard.vue";
 import FormField from "@/components/base/FormField.vue";
 import AccountFolderField from "@/components/admin/AccountFolderField.vue";
@@ -42,6 +41,7 @@ import AdminTableActionBtn from "@/components/admin/AdminTableActionBtn.vue";
 import AdminRowActions from "@/components/admin/AdminRowActions.vue";
 import FolderPickerModal from "@/components/file/FolderPickerModal.vue";
 import { useAccountPathLabel } from "@/composables/useAccountPathLabel";
+import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { confirm } from "@/composables/useConfirm";
 import { useSettingsForm } from "@/composables/useSettingsForm";
 import { useSettingsPageDirty } from "@/composables/useSettingsPageDirty";
@@ -60,6 +60,7 @@ const listLoading = ref(false);
 const submitting = ref(false);
 const togglingAutoMountId = ref<number | null>(null);
 const mounts = ref<FuseMount[]>([]);
+useAdminPageLoading("share", computed(() => listLoading.value && !mounts.value.length));
 const status = ref<FuseStatus | null>(null);
 const settingsDrawerOpen = ref(false);
 const drawerSaving = ref(false);
@@ -528,10 +529,8 @@ defineExpose({
       </StatCard>
     </AdminTaskTabHeader>
 
-    <AppStateBlock v-if="listLoading && !mounts.length" message="加载中…" loading min-height="160px" />
-
     <AdminEmptyState
-      v-else-if="!mounts.length"
+      v-if="!listLoading && !mounts.length"
       icon="📂"
       title="还没有挂载点"
       description="将云盘目录映射到容器内路径，宿主机 volume 映射后即可本地访问。"
@@ -539,7 +538,7 @@ defineExpose({
       <AppButton type="button" variant="primary" @click="openCreate">添加第一个挂载点</AppButton>
     </AdminEmptyState>
 
-    <div v-else class="admin-panel-table-wrap fuse-mount-table-wrap">
+    <div v-else-if="mounts.length" class="admin-panel-table-wrap fuse-mount-table-wrap">
       <table class="admin-table fuse-mount-table">
         <thead>
           <tr>

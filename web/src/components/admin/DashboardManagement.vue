@@ -20,6 +20,7 @@ import AppCardActionButton from "@/components/base/AppCardActionButton.vue";
 // 日志面板非默认 tab，按需加载,减小仪表盘首包。
 const SystemLogs = defineAsyncComponent(() => import("@/components/admin/SystemLogs.vue"));
 import { useSectionTabRoute } from "@/composables/useSectionTabRoute";
+import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { toast } from "@/composables/useToast";
 import { formatRelativeTimeAgo, formatSize } from "@/utils/format";
 import "@/styles/admin-shared.css";
@@ -49,6 +50,7 @@ const loading = ref(false);
 const refreshing = ref(false);
 const clearingCache = ref(false);
 const loadError = ref("");
+useAdminPageLoading("dashboard", computed(() => activeTab.value === OVERVIEW_TAB && loading.value));
 
 type OverviewResult =
   | Account[]
@@ -399,7 +401,7 @@ onMounted(() => {
   <div class="dashboard-page admin-tabbed-page">
     <SectionTabBar :model-value="activeTab" :tabs="tabs" @update:model-value="setActiveTab" />
 
-    <div v-if="activeTab === OVERVIEW_TAB" class="dashboard-overview">
+    <div v-if="activeTab === OVERVIEW_TAB && !loading" class="dashboard-overview">
       <section class="dashboard-hero" :class="`dashboard-hero--${systemStatus.tone}`">
         <div class="dashboard-hero__main">
           <div class="dashboard-hero__icon">
@@ -485,8 +487,6 @@ onMounted(() => {
           </div>
         </article>
       </section>
-
-      <div v-if="loading" class="overview-loading">正在加载运行概况...</div>
 
       <section class="dashboard-layout">
         <article class="dashboard-panel dashboard-panel--accounts">
@@ -855,14 +855,6 @@ onMounted(() => {
 
 .overview-card__action-layout {
   justify-self: end;
-}
-
-.overview-loading {
-  padding: 12px 16px;
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--brand) 8%, var(--surface));
-  color: var(--brand);
-  font-size: 13px;
 }
 
 .dashboard-layout {

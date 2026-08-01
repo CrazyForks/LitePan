@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { useAccountsStore } from "@/stores/accounts";
 import { getApiErrorMessage } from "@/api/client";
 import type { Account } from "@/api/types";
 import { toast } from "@/composables/useToast";
 import { confirm } from "@/composables/useConfirm";
+import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import AccountCard from "./AccountCard.vue";
 import AddAccountDialog from "./AddAccountDialog.vue";
 
@@ -14,6 +15,8 @@ const { accounts, loading } = storeToRefs(store);
 
 const dialogOpen = ref(false);
 const editing = ref<Account | null>(null);
+const initialLoading = computed(() => loading.value && !accounts.value.length);
+useAdminPageLoading("accounts", initialLoading);
 
 function openCreate() {
   editing.value = null;
@@ -73,9 +76,7 @@ onMounted(() => {
 
 <template>
   <section class="accounts">
-    <div v-if="loading && !accounts.length" class="accounts__loading">加载中…</div>
-
-    <div class="accounts__grid">
+    <div v-if="!initialLoading" class="accounts__grid">
       <AccountCard
         v-for="acc in accounts"
         :key="acc.id"
@@ -103,10 +104,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.accounts__loading {
-  color: var(--text-muted);
-  padding: 20px 0;
-}
 .accounts__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));

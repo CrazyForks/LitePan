@@ -542,6 +542,7 @@ const fnosEndpoint = computed(() =>
 <style scoped>
 .proxy-tools {
   padding-bottom: 8px;
+  color: var(--text);
 }
 .proxy-tools.is-loading {
   opacity: 0.72;
@@ -567,7 +568,7 @@ const fnosEndpoint = computed(() =>
 }
 .proxy-card:hover {
   box-shadow: var(--shadow-pop);
-  border-color: #dbe4f0;
+  border-color: color-mix(in srgb, var(--brand) 28%, var(--border));
 }
 .proxy-card.is-on {
   border-color: color-mix(in srgb, var(--brand) 35%, var(--border));
@@ -630,19 +631,19 @@ const fnosEndpoint = computed(() =>
   height: 22px;
   padding: 0 9px;
   border-radius: 999px;
-  background: #f1f5f9;
+  background: var(--surface-muted);
   color: var(--text-muted);
 }
 .pill .dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #94a3b8;
+  background: var(--text-muted);
   flex-shrink: 0;
 }
 .pill.live {
-  background: #ecfdf5;
-  color: #047857;
+  background: color-mix(in srgb, var(--success) 14%, var(--surface));
+  color: color-mix(in srgb, var(--success) 78%, var(--text));
 }
 .pill.live .dot {
   background: var(--success);
@@ -660,8 +661,8 @@ const fnosEndpoint = computed(() =>
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  background: #e2e8f0;
-  color: #94a3b8;
+  background: var(--border);
+  color: var(--text-muted);
   transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
 }
 .check-toggle svg {
@@ -669,7 +670,7 @@ const fnosEndpoint = computed(() =>
   height: 14px;
 }
 .check-toggle:hover {
-  background: #d7dee8;
+  background: var(--surface-hover);
 }
 .check-toggle.on {
   background: var(--success);
@@ -716,7 +717,7 @@ const fnosEndpoint = computed(() =>
   text-overflow: ellipsis;
 }
 .endpoint-url.muted {
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 .ghost-btn {
   appearance: none;
@@ -731,8 +732,8 @@ const fnosEndpoint = computed(() =>
   white-space: nowrap;
 }
 .ghost-btn:hover:not(:disabled) {
-  border-color: #cbd5e1;
-  background: #fff;
+  border-color: color-mix(in srgb, var(--brand) 35%, var(--border));
+  background: var(--surface-hover);
 }
 .ghost-btn:disabled {
   opacity: 0.45;
@@ -800,7 +801,7 @@ const fnosEndpoint = computed(() =>
   box-shadow: 0 0 0 3px rgba(76, 116, 223, 0.15);
 }
 .path-maps::placeholder {
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 .card-error {
   margin: 0;
@@ -816,7 +817,11 @@ const fnosEndpoint = computed(() =>
   justify-content: flex-end;
   gap: 8px;
   border-top: 1px solid var(--border-soft);
-  background: linear-gradient(180deg, transparent, rgba(248, 250, 252, 0.9));
+  background: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in srgb, var(--surface-muted) 90%, transparent)
+  );
 }
 
 @media (max-width: 980px) {

@@ -32,7 +32,6 @@ import AppIconButton from "@/components/base/AppIconButton.vue";
 import AppInput from "@/components/base/AppInput.vue";
 import AppModal from "@/components/base/AppModal.vue";
 import AppSelect from "@/components/base/AppSelect.vue";
-import AppStateBlock from "@/components/base/AppStateBlock.vue";
 import StatCard from "@/components/base/StatCard.vue";
 import TimeWheelPicker from "@/components/base/TimeWheelPicker.vue";
 import AdminStatsGrid from "@/components/admin/AdminStatsGrid.vue";
@@ -48,6 +47,7 @@ import type { AdminRunStatusVariant } from "@/components/admin/adminRunStatus";
 import { normalizeRunStatusVariant } from "@/components/admin/adminRunStatus";
 import FolderPickerModal from "@/components/file/FolderPickerModal.vue";
 import { useAccountPathLabel } from "@/composables/useAccountPathLabel";
+import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { useConditionalPolling } from "@/composables/useConditionalPolling";
 import { liveElapsedMs, useLiveElapsedClock } from "@/composables/useLiveElapsedClock";
 import {
@@ -77,6 +77,10 @@ const { accounts } = storeToRefs(accountsStore);
 const tasks = ref<CacheRetentionTask[]>([]);
 const refreshing = ref(false);
 const listReady = ref(false);
+useAdminPageLoading(
+  "tasks",
+  computed(() => (!listReady.value || refreshing.value) && !tasks.value.length),
+);
 const { remainingDisplay: startupRemainingDisplay, applyStartupRemaining } = useStartupCountdown();
 const executingIds = ref<number[]>([]);
 const pendingIds = ref<number[]>([]);
@@ -538,15 +542,8 @@ defineExpose({
       </StatCard>
     </AdminStatsGrid>
 
-    <AppStateBlock
-      v-if="(!listReady || refreshing) && !tasks.length"
-      message="加载中…"
-      loading
-      min-height="160px"
-    />
-
     <AdminEmptyState
-      v-else-if="!tasks.length"
+      v-if="listReady && !refreshing && !tasks.length"
       icon="🔥"
       title="还没有缓存任务"
       description="添加目录后，系统会定期预热列表缓存，减少浏览时的 API 请求。"
@@ -554,7 +551,7 @@ defineExpose({
       <AppButton type="button" variant="primary" @click="openCreate">添加第一个任务</AppButton>
     </AdminEmptyState>
 
-    <template v-else>
+    <template v-else-if="tasks.length">
       <div class="admin-panel-table-wrap retention-table-wrap">
         <table class="admin-table retention-table">
           <colgroup>

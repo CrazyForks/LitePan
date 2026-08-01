@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import AdminAccountChip from "@/components/admin/AdminAccountChip.vue";
 import AdminGlobalActions from "@/components/admin/AdminGlobalActions.vue";
 import AdminNavIcon from "@/components/admin/AdminNavIcon.vue";
+import { useAdminLoadingBar } from "@/composables/useAdminLoadingBar";
 
 interface NavItem {
   key: string;
@@ -23,11 +24,17 @@ withDefaults(
   }>(),
   { homeReturnMode: "top_icon" },
 );
-const emit = defineEmits<{ "update:modelValue": [string]; logout: []; goHome: [] }>();
+const emit = defineEmits<{
+  "update:modelValue": [string];
+  preload: [string];
+  logout: [];
+  goHome: [];
+}>();
 
 const sidebarCollapsed = ref(false);
 const mobileDrawerOpen = ref(false);
 const isMobile = ref(false);
+const { visible: pageLoadingVisible } = useAdminLoadingBar();
 
 const sidebarCompact = computed(() => !isMobile.value && sidebarCollapsed.value);
 
@@ -148,6 +155,8 @@ onBeforeUnmount(() => {
             'nav-item--locked': lockedKeys?.includes(item.key),
           }"
           :disabled="lockedKeys?.includes(item.key)"
+          @pointerenter="emit('preload', item.key)"
+          @focus="emit('preload', item.key)"
           @click="selectNav(item.key)"
         >
           <AdminNavIcon :name="item.icon" class="nav-item__icon" />
@@ -202,6 +211,11 @@ onBeforeUnmount(() => {
         :show-home-return="homeReturnMode === 'top_icon'"
         @go-home="emit('goHome')"
       />
+      <Transition name="admin-loading-bar">
+        <div v-if="pageLoadingVisible" class="global-loading-bar" aria-hidden="true">
+          <span />
+        </div>
+      </Transition>
     </header>
 
     <main class="admin__body">
@@ -468,6 +482,54 @@ onBeforeUnmount(() => {
   min-width: 12px;
 }
 
+.global-loading-bar {
+  position: absolute;
+  left: var(--sidebar-width);
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.global-loading-bar span {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--brand-start) 45%,
+    var(--brand-end) 55%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: admin-loading-slide 0.9s ease-in-out infinite;
+}
+
+.admin-loading-bar-enter-active,
+.admin-loading-bar-leave-active {
+  transition: opacity 0.16s ease;
+}
+
+.admin-loading-bar-enter-from,
+.admin-loading-bar-leave-to {
+  opacity: 0;
+}
+
+@keyframes admin-loading-slide {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .global-loading-bar span {
+    animation: none;
+    transform: none;
+    background: var(--brand);
+  }
+}
+
 .admin__body {
   grid-column: 2;
   grid-row: 2;
@@ -519,6 +581,10 @@ onBeforeUnmount(() => {
 
   .global-chrome__context {
     display: none;
+  }
+
+  .global-loading-bar {
+    left: 0;
   }
 
   .admin__body {

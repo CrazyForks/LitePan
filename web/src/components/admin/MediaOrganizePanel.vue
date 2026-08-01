@@ -36,7 +36,6 @@ import {
 } from "@/api/mediaOrganize";
 import AccountFolderField from "@/components/admin/AccountFolderField.vue";
 import AdminEmptyState from "@/components/admin/AdminEmptyState.vue";
-import AppStateBlock from "@/components/base/AppStateBlock.vue";
 import AdminRunStatusCell from "@/components/admin/AdminRunStatusCell.vue";
 import AdminTableActionBtn from "@/components/admin/AdminTableActionBtn.vue";
 import AdminRowActions from "@/components/admin/AdminRowActions.vue";
@@ -53,6 +52,7 @@ import StatCard from "@/components/base/StatCard.vue";
 import SettingsHelpTooltip from "@/components/admin/SettingsHelpTooltip.vue";
 import FolderPickerModal from "@/components/file/FolderPickerModal.vue";
 import { useAccountPathLabel } from "@/composables/useAccountPathLabel";
+import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { useConditionalPolling } from "@/composables/useConditionalPolling";
 import { useOrganizePlanPreview, planActionMeta, type PlanGroup } from "@/composables/useOrganizePlanPreview";
 import { confirm } from "@/composables/useConfirm";
@@ -114,6 +114,10 @@ const emptyForm = (): TaskForm => ({
 const tasks = ref<MediaOrganizeTask[]>([]);
 const refreshing = ref(false);
 const listReady = ref(false);
+useAdminPageLoading(
+  "tasks",
+  computed(() => (!listReady.value || refreshing.value) && !tasks.value.length),
+);
 const dialogOpen = ref(false);
 const editingId = ref<string | null>(null);
 const submitting = ref(false);
@@ -722,15 +726,8 @@ defineExpose({
       </StatCard>
     </AdminStatsGrid>
 
-    <AppStateBlock
-      v-if="(!listReady || refreshing) && !tasks.length"
-      message="加载中…"
-      loading
-      min-height="160px"
-    />
-
     <AdminEmptyState
-      v-else-if="!tasks.length"
+      v-if="listReady && !refreshing && !tasks.length"
       icon="📁"
       title="还没有整理任务"
       description="添加整理任务后，可以预览整理目标，并在确认无误后手动执行。"
@@ -738,7 +735,7 @@ defineExpose({
       <AppButton type="button" variant="primary" @click="openCreate">添加第一个任务</AppButton>
     </AdminEmptyState>
 
-    <div v-else class="admin-panel-table-wrap">
+    <div v-else-if="tasks.length" class="admin-panel-table-wrap">
       <table class="admin-table organize-table">
         <thead>
           <tr>

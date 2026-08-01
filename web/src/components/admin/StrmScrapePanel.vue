@@ -26,8 +26,8 @@ import AppIconButton from "@/components/base/AppIconButton.vue";
 import AppInput from "@/components/base/AppInput.vue";
 import AppModal from "@/components/base/AppModal.vue";
 import AppSelect from "@/components/base/AppSelect.vue";
-import AppStateBlock from "@/components/base/AppStateBlock.vue";
 import BusySpinner from "@/components/base/BusySpinner.vue";
+import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { useConditionalPolling } from "@/composables/useConditionalPolling";
 import { confirm } from "@/composables/useConfirm";
 import { useVirtualPosterWall } from "@/composables/useVirtualPosterWall";
@@ -63,6 +63,7 @@ const items = ref<StrmScrapeItem[]>([]);
 const itemsCache = new Map<number, StrmScrapeItem[]>();
 let loadItemsSeq = 0;
 const loading = ref(false);
+useAdminPageLoading("tools", loading);
 const refreshing = ref(false);
 const filter = ref<FilterKey>("all");
 const typeFilter = ref<TypeFilter>("all");
@@ -747,16 +748,14 @@ defineExpose({
       <span class="scrape-progress__nums">{{ progress.done }}/{{ progress.total }}</span>
     </div>
 
-    <AppStateBlock v-if="loading" message="加载中…" loading min-height="200px" />
-
     <AdminEmptyState
-      v-else-if="!tasks.length"
+      v-if="!loading && !tasks.length"
       icon="🎬"
       title="还没有 STRM 任务"
       description="请先在「STRM 任务」里创建任务，再回来刮削其输出目录。"
     />
 
-    <template v-else>
+    <template v-else-if="!loading">
       <div class="scrape-toolbar">
         <div class="scrape-filters">
           <button

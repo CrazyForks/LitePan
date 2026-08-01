@@ -13,6 +13,7 @@ import {
 } from "@/api/settings";
 import { toast } from "@/composables/useToast";
 import { useSettingsLoad } from "@/composables/useSettingsLoad";
+import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { useSectionTabRoute } from "@/composables/useSectionTabRoute";
 import { useSettingsPageDirty } from "@/composables/useSettingsPageDirty";
 import { useAuthStore } from "@/stores/auth";
@@ -74,6 +75,7 @@ const ACCENTS = ["var(--brand)", "#f59e0b", "#10b981", "#6366f1", "#ec4899"];
 const auth = useAuthStore();
 
 const { loading, runLoad } = useSettingsLoad();
+useAdminPageLoading("settings", loading);
 const saving = ref(false);
 const categories = ref<SettingCategory[]>([]);
 const items = ref<SettingItem[]>([]);
@@ -432,9 +434,7 @@ async function submit() {
       </template>
     </SectionTabBar>
 
-    <div v-if="loading" class="settings__loading">加载中…</div>
-
-    <template v-else>
+    <template v-if="!loading">
       <SettingsCard v-if="isSecurityTab" title="账号安全" :accent="accentColor">
         <SettingsRow
           :show-changed-badge="true"

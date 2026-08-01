@@ -1,21 +1,38 @@
 <script setup lang="ts">
 import "@fortawesome/fontawesome-free/css/all.min.css";
-import { computed, defineAsyncComponent, onMounted, ref, watch, type Component } from "vue";
+import {
+  computed,
+  defineAsyncComponent,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+  type Component,
+} from "vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import AdminShell from "@/components/admin/AdminShell.vue";
 import WarningBanner from "@/components/admin/WarningBanner.vue";
 import AdminEmptyState from "@/components/admin/AdminEmptyState.vue";
 
-// 后台面板按需加载并缓存，避免首屏下载全部页面。
-const AccountManagement = defineAsyncComponent(() => import("@/components/admin/AccountManagement.vue"));
-const DashboardManagement = defineAsyncComponent(() => import("@/components/admin/DashboardManagement.vue"));
-const SystemSettings = defineAsyncComponent(() => import("@/components/admin/SystemSettings.vue"));
-const TaskManagement = defineAsyncComponent(() => import("@/components/admin/TaskManagement.vue"));
-const AuxToolsManagement = defineAsyncComponent(() => import("@/components/admin/AuxToolsManagement.vue"));
-const FileShareManagement = defineAsyncComponent(() => import("@/components/admin/FileShareManagement.vue"));
-const CrossDriveTransfer = defineAsyncComponent(() => import("@/components/admin/CrossDriveTransfer.vue"));
+const adminPageLoaders = {
+  dashboard: () => import("@/components/admin/DashboardManagement.vue"),
+  accounts: () => import("@/components/admin/AccountManagement.vue"),
+  settings: () => import("@/components/admin/SystemSettings.vue"),
+  tasks: () => import("@/components/admin/TaskManagement.vue"),
+  tools: () => import("@/components/admin/AuxToolsManagement.vue"),
+  "cross-transfer": () => import("@/components/admin/CrossDriveTransfer.vue"),
+  share: () => import("@/components/admin/FileShareManagement.vue"),
+};
+const DashboardManagement = defineAsyncComponent(adminPageLoaders.dashboard);
+const AccountManagement = defineAsyncComponent(adminPageLoaders.accounts);
+const SystemSettings = defineAsyncComponent(adminPageLoaders.settings);
+const TaskManagement = defineAsyncComponent(adminPageLoaders.tasks);
+const AuxToolsManagement = defineAsyncComponent(adminPageLoaders.tools);
+const CrossDriveTransfer = defineAsyncComponent(adminPageLoaders["cross-transfer"]);
+const FileShareManagement = defineAsyncComponent(adminPageLoaders.share);
 import { logout, fetchSystemConfig } from "@/api/auth";
 import { useAuthStore } from "@/stores/auth";
+import { provideAdminPageContext } from "@/composables/useAdminLoadingBar";
 import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
 import { toast } from "@/composables/useToast";
 
@@ -39,6 +56,9 @@ const router = useRouter();
 const auth = useAuthStore();
 const { dirty, confirmLeave, discardChanges } = useUnsavedChanges();
 let resetBrowserLocationOnLeave = false;
+let preloadTimer: number | null = null;
+let preloadIdleHandle: number | null = null;
+const preloadedPages = new Set<string>();
 
 const mustChangePassword = computed(() => auth.mustChangePassword);
 const passwordChangeReason = computed(() => auth.passwordChangeReason);
@@ -61,6 +81,7 @@ function normalize(value: unknown): string {
 }
 
 const page = ref(normalize(route.query.page));
+provideAdminPageContext(page);
 const adminHomeReturnMode = ref<"sidebar" | "top_icon">("top_icon");
 const cachedPageComponents: Record<string, Component> = {
   dashboard: DashboardManagement,
@@ -71,6 +92,28 @@ const cachedPageComponents: Record<string, Component> = {
 const cachedPageComponent = computed(() => cachedPageComponents[page.value] ?? null);
 
 const pageTitle = computed(() => nav.find((n) => n.key === page.value)?.label ?? "后台");
+
+function preloadAdminPage(key: string) {
+  const loader = adminPageLoaders[key as keyof typeof adminPageLoaders];
+  if (!loader || preloadedPages.has(key)) return;
+  preloadedPages.add(key);
+  void loader().catch(() => preloadedPages.delete(key));
+}
+
+function preloadAdminPages() {
+  navKeys.forEach(preloadAdminPage);
+}
+
+function scheduleAdminPagePreload() {
+  preloadTimer = window.setTimeout(() => {
+    preloadTimer = null;
+    if ("requestIdleCallback" in window) {
+      preloadIdleHandle = window.requestIdleCallback(preloadAdminPages, { timeout: 1500 });
+      return;
+    }
+    preloadAdminPages();
+  }, 300);
+}
 
 async function loadAdminUiConfig() {
   try {
@@ -185,6 +228,14 @@ onMounted(async () => {
     page.value = "settings";
     router.replace({ query: buildPageQuery("settings") });
   }
+  scheduleAdminPagePreload();
+});
+
+onBeforeUnmount(() => {
+  if (preloadTimer !== null) window.clearTimeout(preloadTimer);
+  if (preloadIdleHandle !== null && "cancelIdleCallback" in window) {
+    window.cancelIdleCallback(preloadIdleHandle);
+  }
 });
 </script>
 
@@ -196,6 +247,7 @@ onMounted(async () => {
     :home-return-mode="adminHomeReturnMode"
     :locked-keys="mustChangePassword ? navKeys.filter((k) => k !== 'settings') : []"
     @update:model-value="changePage"
+    @preload="preloadAdminPage"
     @go-home="goHome"
     @logout="handleLogout"
   >
@@ -204,22 +256,22 @@ onMounted(async () => {
       <span>{{ passwordChangeMessage }}</span>
     </WarningBanner>
 
-    <SystemSettings
-      v-if="page === 'settings'"
-      :force-password-change="mustChangePassword"
-      :password-change-reason="passwordChangeReason"
-      @password-updated="handlePasswordUpdated"
-      @admin-ui-updated="loadAdminUiConfig"
-    />
-    <CrossDriveTransfer v-else-if="page === 'cross-transfer'" />
-    <FileShareManagement v-else-if="page === 'share'" />
     <AdminEmptyState
-      v-else-if="!cachedPageComponent"
+      v-if="!cachedPageComponent && !['settings', 'cross-transfer', 'share'].includes(page)"
       icon="🚧"
       :title="`「${nav.find((n) => n.key === page)?.label}」功能开发中`"
     />
     <KeepAlive>
-      <component :is="cachedPageComponent" v-if="cachedPageComponent" :key="page" />
+      <SystemSettings
+        v-if="page === 'settings'"
+        :force-password-change="mustChangePassword"
+        :password-change-reason="passwordChangeReason"
+        @password-updated="handlePasswordUpdated"
+        @admin-ui-updated="loadAdminUiConfig"
+      />
+      <CrossDriveTransfer v-else-if="page === 'cross-transfer'" />
+      <FileShareManagement v-else-if="page === 'share'" />
+      <component :is="cachedPageComponent" v-else-if="cachedPageComponent" :key="page" />
     </KeepAlive>
   </AdminShell>
 </template>

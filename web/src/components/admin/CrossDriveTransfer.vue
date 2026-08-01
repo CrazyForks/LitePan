@@ -344,7 +344,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from "vue";
+import {
+  ref,
+  reactive,
+  computed,
+  onMounted,
+  onUnmounted,
+  onActivated,
+  onDeactivated,
+  nextTick,
+  watch,
+} from "vue";
 import { useRouter } from "vue-router";
 import CrossTransferTree from "./CrossTransferTree.vue";
 import BusySpinner from "@/components/base/BusySpinner.vue";
@@ -398,6 +408,7 @@ const settingsDropdownStyle = ref({})
 const SETTINGS_DROPDOWN_WIDTH = 304
 const footerTipIndex = ref(0)
 let footerTipTimer = null
+let uiActive = false
 const running = ref('')
 const abortCtrl = ref(null)
 const barWidth = ref(0)
@@ -1246,33 +1257,52 @@ watch(targetRenameUnsupported, (unsupported) => {
   if (unsupported && conflict.value === 'rename') conflict.value = 'overwrite'
 })
 watch(showFooterScrollTips, (show) => {
+  if (!uiActive) return
   if (show) startFooterTipTimer()
   else stopFooterTipTimer()
-}, { immediate: true })
+})
+
+function activateUi() {
+  if (uiActive) return
+  uiActive = true
+  document.addEventListener('click', onDocClick)
+  window.addEventListener('scroll', onSettingsReposition, true)
+  window.addEventListener('resize', onSettingsReposition)
+  window.addEventListener('resize', updateFlowScrollState)
+  if (showFooterScrollTips.value) startFooterTipTimer()
+  nextTick(() => {
+    updateFlowScrollState()
+    if (typeof ResizeObserver === 'undefined' || !flowGridRef.value) return
+    flowResizeObserver?.disconnect()
+    flowResizeObserver = new ResizeObserver(updateFlowScrollState)
+    flowResizeObserver.observe(flowGridRef.value)
+  })
+}
+
+function deactivateUi() {
+  if (!uiActive) return
+  uiActive = false
+  settingsOpen.value = false
+  pickerOpen.value = false
+  stopFooterTipTimer()
+  flowResizeObserver?.disconnect()
+  flowResizeObserver = null
+  document.removeEventListener('click', onDocClick)
+  window.removeEventListener('scroll', onSettingsReposition, true)
+  window.removeEventListener('resize', onSettingsReposition)
+  window.removeEventListener('resize', updateFlowScrollState)
+}
 
 onMounted(() => {
   loadCtSettings()
   loadRoutes()
   loadAccounts()
-  document.addEventListener('click', onDocClick)
-  window.addEventListener('scroll', onSettingsReposition, true)
-  window.addEventListener('resize', onSettingsReposition)
-  window.addEventListener('resize', updateFlowScrollState)
-  nextTick(() => {
-    updateFlowScrollState()
-    if (typeof ResizeObserver === 'undefined' || !flowGridRef.value) return
-    flowResizeObserver = new ResizeObserver(updateFlowScrollState)
-    flowResizeObserver.observe(flowGridRef.value)
-  })
 })
+onActivated(activateUi)
+onDeactivated(deactivateUi)
 onUnmounted(() => {
   abortCtrl.value?.abort()
-  stopFooterTipTimer()
-  flowResizeObserver?.disconnect()
-  document.removeEventListener('click', onDocClick)
-  window.removeEventListener('scroll', onSettingsReposition, true)
-  window.removeEventListener('resize', onSettingsReposition)
-  window.removeEventListener('resize', updateFlowScrollState)
+  deactivateUi()
 })
 </script>
 
