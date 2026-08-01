@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, ref, watchEffect } from "vue";
+import { computed, defineAsyncComponent, nextTick, onDeactivated, ref, watchEffect } from "vue";
 import AppButton from "@/components/base/AppButton.vue";
 import SectionTabBar from "@/components/admin/SectionTabBar.vue";
 import AdminSettingsDrawer from "@/components/admin/AdminSettingsDrawer.vue";
@@ -69,6 +69,12 @@ async function closeSettingsDrawer() {
   if (!(await confirmDiscardChanges(() => scrapePanelDirty.value))) return;
   settingsDrawerOpen.value = false;
 }
+
+onDeactivated(() => {
+  if (!settingsDrawerOpen.value) return;
+  if (scrapePanelDirty.value) revertDrawerSettings();
+  settingsDrawerOpen.value = false;
+});
 
 async function handleDrawerSave() {
   await scrapeSettingsRef.value?.save?.();
