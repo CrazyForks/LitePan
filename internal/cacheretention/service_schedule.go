@@ -38,41 +38,7 @@ func (s *Service) scheduleOnce(ctx context.Context) {
 	strmBusy := s.snapshotBusyAccounts()
 
 	s.mu.Lock()
-	if len(s.runningAccounts) > 0 {
-		s.mu.Unlock()
-		return
-	}
-	var pick *domain.CacheRetentionTask
-	for _, t := range tasks {
-		if t.Status != domain.RetentionStatusRunning {
-			continue
-		}
-		if s.running[t.ID] {
-			continue
-		}
-		if !IsInTimeWindow(t, now) {
-			continue
-		}
-		if accountBusy(strmBusy, t.AccountID) {
-			continue
-		}
-		if s.accountCacheDisabled(ctx, t.AccountID) {
-			continue
-		}
-		ttl := s.accountCacheTTL(ctx, t.AccountID)
-		_, pending := s.pendingRun[t.ID]
-		if !pending {
-			if last, ok := s.accountLastDone[t.AccountID]; ok && ttl > 0 && now.Sub(last) < ttl {
-				continue
-			}
-		}
-		next, hasNext := s.nextRun[t.ID]
-		if !pending && (!hasNext || next.After(now)) {
-			continue
-		}
-		pick = t
-		break
-	}
+	pick := s.pickScheduledTaskLocked(ctx, tasks, now, strmBusy)
 	if pick == nil {
 		s.mu.Unlock()
 		return
@@ -80,6 +46,36 @@ func (s *Service) scheduleOnce(ctx context.Context) {
 	delete(s.pendingRun, pick.ID)
 	s.mu.Unlock()
 	s.runTaskAsync(pick)
+}
+
+func (s *Service) pickScheduledTaskLocked(ctx context.Context, tasks []*domain.CacheRetentionTask, now time.Time, busyAccounts map[int64]struct{}) *domain.CacheRetentionTask {
+	for _, t := range tasks {
+		if t == nil || t.Status != domain.RetentionStatusRunning {
+			continue
+		}
+		if s.running[t.ID] {
+			continue
+		}
+		if _, running := s.runningAccounts[t.AccountID]; running {
+			continue
+		}
+		if !IsInTimeWindow(t, now) {
+			continue
+		}
+		if accountBusy(busyAccounts, t.AccountID) {
+			continue
+		}
+		if s.accountCacheDisabled(ctx, t.AccountID) {
+			continue
+		}
+		_, pending := s.pendingRun[t.ID]
+		next, hasNext := s.nextRun[t.ID]
+		if !pending && (!hasNext || next.After(now)) {
+			continue
+		}
+		return t
+	}
+	return nil
 }
 
 func (s *Service) isAccountBusy(accountID int64) bool {

@@ -118,3 +118,55 @@ func TestNotifyLargeScopeThresholdAndMessage(t *testing.T) {
 		t.Fatal("500 次 API 调用应触发提醒")
 	}
 }
+
+func TestPickScheduledTaskLockedAllowsOtherAccountWhileOneAccountRunning(t *testing.T) {
+	now := time.Now()
+	svc := &Service{
+		running:         make(map[int64]bool),
+		runningAccounts: map[int64]struct{}{1: {}},
+		runningTaskAcct: make(map[int64]int64),
+		taskCancels:     make(map[int64]context.CancelFunc),
+		nextRun: map[int64]time.Time{
+			1: now.Add(-time.Minute),
+			2: now.Add(-time.Minute),
+		},
+		accountLastDone: make(map[int64]time.Time),
+		pendingRun:      make(map[int64]struct{}),
+		liveStats:       make(map[int64]scanStats),
+	}
+
+	tasks := []*domain.CacheRetentionTask{
+		{ID: 1, AccountID: 1, Status: domain.RetentionStatusRunning},
+		{ID: 2, AccountID: 2, Status: domain.RetentionStatusRunning},
+	}
+	got := svc.pickScheduledTaskLocked(context.Background(), tasks, now, nil)
+	if got == nil || got.ID != 2 {
+		t.Fatalf("应挑选未占用账号的任务 2，got=%+v", got)
+	}
+}
+
+func TestPickScheduledTaskLockedDoesNotBlockSiblingTasksByAccountCooldown(t *testing.T) {
+	now := time.Now()
+	svc := &Service{
+		running:         make(map[int64]bool),
+		runningAccounts: make(map[int64]struct{}),
+		runningTaskAcct: make(map[int64]int64),
+		taskCancels:     make(map[int64]context.CancelFunc),
+		nextRun: map[int64]time.Time{
+			1: now.Add(time.Hour),
+			2: now.Add(-time.Minute),
+		},
+		accountLastDone: map[int64]time.Time{9: now},
+		pendingRun:      make(map[int64]struct{}),
+		liveStats:       make(map[int64]scanStats),
+	}
+
+	tasks := []*domain.CacheRetentionTask{
+		{ID: 1, AccountID: 9, Status: domain.RetentionStatusRunning},
+		{ID: 2, AccountID: 9, Status: domain.RetentionStatusRunning},
+	}
+	got := svc.pickScheduledTaskLocked(context.Background(), tasks, now, nil)
+	if got == nil || got.ID != 2 {
+		t.Fatalf("同账号其他任务不应被账号级冷却误伤，got=%+v", got)
+	}
+}
