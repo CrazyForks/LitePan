@@ -53,10 +53,22 @@ func (s *Service) scheduleOnce(ctx context.Context) {
 		cfg := decodeMap(rule.TriggerConfig)
 		computed := computeNextRun(rule.TriggerType, cfg, now)
 		nextRun := computed
+		corrected := false
 		if !rule.NextRunAt.IsZero() {
 			nextRun = rule.NextRunAt
+			if rule.TriggerType == domain.AutomationTriggerDaily {
+				normalized := normalizeDailyRun(cfg, nextRun)
+				corrected = !normalized.Equal(nextRun)
+				nextRun = normalized
+			}
 		}
 		if nextRun.IsZero() || nextRun.After(now) {
+			if corrected {
+				rule.NextRunAt = nextRun
+				if err := s.rules.Update(ctx, rule); err != nil {
+					s.log.Warn("automation schedule correct next run failed", "rule_id", rule.ID, "err", err)
+				}
+			}
 			continue
 		}
 		rule.NextRunAt = advanceNextRun(rule.TriggerType, cfg, nextRun)
@@ -90,14 +102,34 @@ func advanceNextRun(triggerType string, cfg map[string]any, current time.Time) t
 	}
 	switch triggerType {
 	case domain.AutomationTriggerDaily:
-		h, m := parseClock(anyString(cfg["time"]))
-		nextDay := current.AddDate(0, 0, 1)
-		return time.Date(nextDay.Year(), nextDay.Month(), nextDay.Day(), h, m, 0, 0, nextDay.Location())
+		return advanceDailyRun(cfg, current)
 	case domain.AutomationTriggerInterval:
 		return advanceIntervalRun(cfg, current)
 	default:
 		return time.Time{}
 	}
+}
+
+func advanceDailyRun(cfg map[string]any, current time.Time) time.Time {
+	return advanceDailyRunAt(wallClockTime(current), cfg)
+}
+
+func advanceDailyRunAt(current time.Time, cfg map[string]any) time.Time {
+	h, m := parseClock(anyString(cfg["time"]))
+	nextDay := current.AddDate(0, 0, 1)
+	return time.Date(nextDay.Year(), nextDay.Month(), nextDay.Day(), h, m, 0, 0, nextDay.Location())
+}
+
+func normalizeDailyRun(cfg map[string]any, scheduled time.Time) time.Time {
+	return normalizeDailyRunAt(cfg, wallClockTime(scheduled))
+}
+
+func normalizeDailyRunAt(cfg map[string]any, scheduled time.Time) time.Time {
+	h, m := parseClock(anyString(cfg["time"]))
+	if scheduled.Hour() == h && scheduled.Minute() == m {
+		return scheduled
+	}
+	return time.Date(scheduled.Year(), scheduled.Month(), scheduled.Day(), h, m, 0, 0, scheduled.Location())
 }
 
 func computeIntervalStartRun(cfg map[string]any, base time.Time) time.Time {

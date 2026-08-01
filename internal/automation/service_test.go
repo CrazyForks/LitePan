@@ -169,6 +169,28 @@ func TestAdvanceNextRunIntervalUsesLocalDayBoundaryForPersistedUTCTime(t *testin
 	}
 }
 
+func TestAdvanceNextRunDailyUsesLocalClockForPersistedUTCTime(t *testing.T) {
+	loc := time.FixedZone("UTC+8", 8*3600)
+	currentUTC := time.Date(2026, 7, 31, 17, 0, 0, 0, time.UTC)
+
+	got := advanceDailyRunAt(wallClockTimeIn(currentUTC, loc), map[string]any{"time": "01:00"})
+	want := time.Date(2026, 8, 2, 1, 0, 0, 0, loc)
+	if !got.Equal(want) {
+		t.Fatalf("persisted UTC daily next run = %v, want %v", got, want)
+	}
+}
+
+func TestNormalizeDailyRunCorrectsShiftedPersistedTime(t *testing.T) {
+	loc := time.FixedZone("UTC+8", 8*3600)
+	shifted := time.Date(2026, 8, 2, 9, 0, 0, 0, loc)
+
+	got := normalizeDailyRunAt(map[string]any{"time": "01:00"}, shifted)
+	want := time.Date(2026, 8, 2, 1, 0, 0, 0, loc)
+	if !got.Equal(want) {
+		t.Fatalf("shifted daily next run = %v, want %v", got, want)
+	}
+}
+
 func TestRunAsyncQueuesInsteadOfRejectingWhenBusy(t *testing.T) {
 	t.Parallel()
 
