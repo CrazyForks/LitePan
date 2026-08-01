@@ -49,7 +49,6 @@ func TestScheduleOnceCrossBusyCheckNoDeadlock(t *testing.T) {
 		runningTaskAcct: make(map[int64]int64),
 		taskCancels:     make(map[int64]context.CancelFunc),
 		nextRun:         make(map[int64]time.Time),
-		accountLastDone: make(map[int64]time.Time),
 		pendingRun:      make(map[int64]struct{}),
 		liveStats:       make(map[int64]scanStats),
 	}
@@ -130,9 +129,8 @@ func TestPickScheduledTaskLockedAllowsOtherAccountWhileOneAccountRunning(t *test
 			1: now.Add(-time.Minute),
 			2: now.Add(-time.Minute),
 		},
-		accountLastDone: make(map[int64]time.Time),
-		pendingRun:      make(map[int64]struct{}),
-		liveStats:       make(map[int64]scanStats),
+		pendingRun: make(map[int64]struct{}),
+		liveStats:  make(map[int64]scanStats),
 	}
 
 	tasks := []*domain.CacheRetentionTask{
@@ -145,7 +143,7 @@ func TestPickScheduledTaskLockedAllowsOtherAccountWhileOneAccountRunning(t *test
 	}
 }
 
-func TestPickScheduledTaskLockedDoesNotBlockSiblingTasksByAccountCooldown(t *testing.T) {
+func TestPickScheduledTaskLockedAllowsDueSiblingTask(t *testing.T) {
 	now := time.Now()
 	svc := &Service{
 		running:         make(map[int64]bool),
@@ -156,9 +154,8 @@ func TestPickScheduledTaskLockedDoesNotBlockSiblingTasksByAccountCooldown(t *tes
 			1: now.Add(time.Hour),
 			2: now.Add(-time.Minute),
 		},
-		accountLastDone: map[int64]time.Time{9: now},
-		pendingRun:      make(map[int64]struct{}),
-		liveStats:       make(map[int64]scanStats),
+		pendingRun: make(map[int64]struct{}),
+		liveStats:  make(map[int64]scanStats),
 	}
 
 	tasks := []*domain.CacheRetentionTask{
@@ -168,5 +165,46 @@ func TestPickScheduledTaskLockedDoesNotBlockSiblingTasksByAccountCooldown(t *tes
 	got := svc.pickScheduledTaskLocked(context.Background(), tasks, now, nil)
 	if got == nil || got.ID != 2 {
 		t.Fatalf("同账号其他任务不应被账号级冷却误伤，got=%+v", got)
+	}
+}
+
+func TestPickScheduledTaskLockedSerializesSameAccount(t *testing.T) {
+	now := time.Now()
+	svc := &Service{
+		running:         make(map[int64]bool),
+		runningAccounts: map[int64]struct{}{9: {}},
+		runningTaskAcct: make(map[int64]int64),
+		taskCancels:     make(map[int64]context.CancelFunc),
+		nextRun:         map[int64]time.Time{2: now.Add(-time.Minute)},
+		pendingRun:      make(map[int64]struct{}),
+		liveStats:       make(map[int64]scanStats),
+	}
+
+	got := svc.pickScheduledTaskLocked(context.Background(), []*domain.CacheRetentionTask{{
+		ID: 2, AccountID: 9, Status: domain.RetentionStatusRunning,
+	}}, now, nil)
+	if got != nil {
+		t.Fatalf("same account task should wait, got=%+v", got)
+	}
+}
+
+func TestManualRunBlockedUsesOwnTaskCompletionTime(t *testing.T) {
+	task := &domain.CacheRetentionTask{
+		ID:              2,
+		AccountID:       9,
+		ParentID:        "movies",
+		UpdatedAt:       time.Now().Add(-2 * time.Hour),
+		LastRunConfigFP: "",
+	}
+	lastRefresh := time.Now().Add(-30 * time.Minute)
+
+	blocked, retryAfter, _ := manualRunBlockedAt(task, time.Hour, lastRefresh)
+	if !blocked || retryAfter <= 0 || retryAfter > 31*time.Minute {
+		t.Fatalf("blocked=%v retryAfter=%v", blocked, retryAfter)
+	}
+
+	blocked, _, _ = manualRunBlockedAt(task, time.Hour, time.Now().Add(-2*time.Hour))
+	if blocked {
+		t.Fatal("task should be runnable after its own cooldown")
 	}
 }

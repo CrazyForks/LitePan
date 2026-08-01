@@ -12,13 +12,7 @@ func (s *Service) manualRunBlocked(ctx context.Context, task *domain.CacheRetent
 		return false, 0, 0
 	}
 	ttl = s.accountCacheTTL(ctx, task.AccountID)
-	accountDone := time.Time{}
-	if s != nil {
-		s.mu.Lock()
-		accountDone = s.accountLastDone[task.AccountID]
-		s.mu.Unlock()
-	}
-	return manualRunBlockedAt(task, accountDone, ttl, *task.LastRefresh)
+	return manualRunBlockedAt(task, ttl, *task.LastRefresh)
 }
 
 func configUnchangedSinceLastRun(task *domain.CacheRetentionTask, lastRefresh time.Time) bool {
@@ -33,7 +27,7 @@ func configUnchangedSinceLastRun(task *domain.CacheRetentionTask, lastRefresh ti
 	return !task.UpdatedAt.After(lastRefresh)
 }
 
-func manualRunBlockedAt(task *domain.CacheRetentionTask, accountLastDone time.Time, ttl time.Duration, lastRefresh time.Time) (blocked bool, retryAfter time.Duration, gotTTL time.Duration) {
+func manualRunBlockedAt(task *domain.CacheRetentionTask, ttl time.Duration, lastRefresh time.Time) (blocked bool, retryAfter time.Duration, gotTTL time.Duration) {
 	if task == nil || lastRefresh.IsZero() {
 		return false, 0, ttl
 	}
@@ -43,11 +37,7 @@ func manualRunBlockedAt(task *domain.CacheRetentionTask, accountLastDone time.Ti
 	if ttl <= 0 {
 		return true, 0, ttl
 	}
-	cooldownStart := lastRefresh
-	if accountLastDone.After(cooldownStart) {
-		cooldownStart = accountLastDone
-	}
-	elapsed := time.Since(cooldownStart)
+	elapsed := time.Since(lastRefresh)
 	if elapsed >= ttl {
 		return false, 0, ttl
 	}

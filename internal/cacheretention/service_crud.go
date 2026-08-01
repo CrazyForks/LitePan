@@ -163,6 +163,17 @@ func (s *Service) RunNow(ctx context.Context, id int64) RunNowResult {
 	}
 	s.clearPendingRun(id)
 	if !s.startTaskImmediate(task) {
+		s.mu.Lock()
+		running := s.running[id]
+		_, accountRunning := s.runningAccounts[task.AccountID]
+		if !running && accountRunning {
+			s.pendingRun[id] = struct{}{}
+			s.nextRun[id] = time.Now()
+		}
+		s.mu.Unlock()
+		if !running && accountRunning {
+			return RunNowResult{State: "queued_account", StartupRemaining: s.StartupRemaining()}
+		}
 		return RunNowResult{State: "already_running", StartupRemaining: s.StartupRemaining()}
 	}
 	return RunNowResult{State: "running", StartupRemaining: 0}

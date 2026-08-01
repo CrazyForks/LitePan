@@ -36,22 +36,6 @@ func (s *Service) pendingIDs() []int64 {
 	return out
 }
 
-// startTaskImmediate 手动触发时立刻开跑；返回 false 表示已在跑或同账号占用。
 func (s *Service) startTaskImmediate(task *domain.CacheRetentionTask) bool {
-	if task == nil {
-		return false
-	}
-	s.mu.Lock()
-	if s.running[task.ID] {
-		s.mu.Unlock()
-		return false
-	}
-	if _, ok := s.runningAccounts[task.AccountID]; ok {
-		s.mu.Unlock()
-		return false
-	}
-	delete(s.pendingRun, task.ID)
-	s.mu.Unlock()
-	s.runTaskAsync(task)
-	return true
+	return s.runTaskAsync(task)
 }

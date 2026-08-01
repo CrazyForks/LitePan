@@ -33,7 +33,6 @@ type Service struct {
 	runningTaskAcct map[int64]int64
 	taskCancels     map[int64]context.CancelFunc
 	nextRun         map[int64]time.Time
-	accountLastDone map[int64]time.Time
 	pendingRun      map[int64]struct{}
 	liveStats       map[int64]scanStats
 	strmBusy        RunningAccountLister
@@ -72,7 +71,6 @@ func NewService(opts Options) *Service {
 		runningTaskAcct: make(map[int64]int64),
 		taskCancels:     make(map[int64]context.CancelFunc),
 		nextRun:         make(map[int64]time.Time),
-		accountLastDone: make(map[int64]time.Time),
 		pendingRun:      make(map[int64]struct{}),
 		liveStats:       make(map[int64]scanStats),
 	}
@@ -215,11 +213,6 @@ func (s *Service) loadNextRuns(ctx context.Context) {
 	for _, t := range tasks {
 		if t.Status != domain.RetentionStatusRunning {
 			continue
-		}
-		if t.LastRefresh != nil {
-			if prev, ok := s.accountLastDone[t.AccountID]; !ok || t.LastRefresh.After(prev) {
-				s.accountLastDone[t.AccountID] = *t.LastRefresh
-			}
 		}
 		if t.LastRefresh != nil && t.RefreshInterval > 0 {
 			s.nextRun[t.ID] = t.LastRefresh.Add(time.Duration(t.RefreshInterval) * time.Minute)

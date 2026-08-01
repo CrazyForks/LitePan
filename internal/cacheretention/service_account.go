@@ -20,8 +20,5 @@ func (s *Service) RemoveTasksByAccount(ctx context.Context, accountID int64) (in
 		}
 		removed++
 	}
-	s.mu.Lock()
-	delete(s.accountLastDone, accountID)
-	s.mu.Unlock()
 	return removed, nil
 }

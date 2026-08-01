@@ -15,6 +15,8 @@ func (r RunNowResult) Message() string {
 		return "任务已在执行中"
 	case "blocked_by_strm":
 		return "同账号有其他任务正在占用（STRM 或媒体整理），已加入队列，占用结束后自动执行"
+	case "queued_account":
+		return "同账号的缓存任务正在执行，已加入队列，前一个任务完成后自动执行"
 	case "cache_disabled":
 		return "该账号目录缓存已关闭（TTL=0），缓存保持任务无法生效，请在账号或全局设置中开启缓存"
 	case "too_soon":

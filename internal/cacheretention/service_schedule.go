@@ -43,7 +43,6 @@ func (s *Service) scheduleOnce(ctx context.Context) {
 		s.mu.Unlock()
 		return
 	}
-	delete(s.pendingRun, pick.ID)
 	s.mu.Unlock()
 	s.runTaskAsync(pick)
 }
@@ -116,14 +115,18 @@ func accountBusy(set map[int64]struct{}, accountID int64) bool {
 	return ok
 }
 
-func (s *Service) runTaskAsync(task *domain.CacheRetentionTask) {
+func (s *Service) runTaskAsync(task *domain.CacheRetentionTask) bool {
 	if task == nil {
-		return
+		return false
 	}
 	s.mu.Lock()
 	if s.running[task.ID] {
 		s.mu.Unlock()
-		return
+		return false
+	}
+	if _, running := s.runningAccounts[task.AccountID]; running {
+		s.mu.Unlock()
+		return false
 	}
 	runCtx, cancel := context.WithCancel(s.appCtx)
 	s.running[task.ID] = true
@@ -131,6 +134,7 @@ func (s *Service) runTaskAsync(task *domain.CacheRetentionTask) {
 	s.runningTaskAcct[task.ID] = task.AccountID
 	s.taskCancels[task.ID] = cancel
 	s.liveStats[task.ID] = scanStats{}
+	delete(s.pendingRun, task.ID)
 	s.mu.Unlock()
 	s.log.Info("缓存任务开始执行",
 		"task_id", task.ID,
@@ -158,7 +162,6 @@ func (s *Service) runTaskAsync(task *domain.CacheRetentionTask) {
 		delete(s.taskCancels, task.ID)
 		delete(s.runningAccounts, task.AccountID)
 		delete(s.runningTaskAcct, task.ID)
-		s.accountLastDone[task.AccountID] = time.Now()
 		delete(s.liveStats, task.ID)
 		s.nextRun[task.ID] = time.Now().Add(time.Duration(task.RefreshInterval) * time.Minute)
 		s.mu.Unlock()
@@ -190,6 +193,7 @@ func (s *Service) runTaskAsync(task *domain.CacheRetentionTask) {
 		})
 		s.notifyLargeScope(task, stats)
 	}()
+	return true
 }
 
 func (s *Service) handleRunError(ctx context.Context, task *domain.CacheRetentionTask, err error, durationMS int) {
