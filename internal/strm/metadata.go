@@ -510,34 +510,39 @@ func alignMetadataItems(outputFolder string, media []mediaCandidate, items []met
 	for i, item := range items {
 		out[i] = item
 		for _, stem := range isoStems[dirKey(item.relDirs)] {
-			if !hasMetadataStemPrefix(item.fileName, stem) {
+			alignedName, changed := alignISOMetadataName(item.fileName, stem)
+			if !changed {
 				continue
 			}
-			alignedName, changed := alignISOMetadataName(item.fileName, stem)
-			if changed {
-				out[i].legacyRelPath = item.relPath
-				out[i].relPath = metadataRelPath(outputFolder, item.relDirs, alignedName)
-				out[i].direct = false
-			}
+			out[i].legacyRelPath = item.relPath
+			out[i].relPath = metadataRelPath(outputFolder, item.relDirs, alignedName)
+			out[i].direct = false
 			break
 		}
 	}
 	return out
 }
 
-func hasMetadataStemPrefix(name, stem string) bool {
-	prefix := stem + "."
-	return len(name) > len(prefix) && strings.EqualFold(name[:len(prefix)], prefix)
-}
-
 func alignISOMetadataName(name, stem string) (string, bool) {
-	prefix := stem + "."
-	if len(name) <= len(prefix) || !strings.EqualFold(name[:len(prefix)], prefix) {
+	if len(name) <= len(stem) || !strings.EqualFold(name[:len(stem)], stem) {
 		return name, false
 	}
-	isoPrefix := stem + ".iso."
-	if strings.HasPrefix(strings.ToLower(name), strings.ToLower(isoPrefix)) {
+	suffix := name[len(stem):]
+	lowerSuffix := strings.ToLower(suffix)
+	if strings.HasPrefix(lowerSuffix, ".iso.") || strings.HasPrefix(lowerSuffix, ".iso-") {
 		return name, false
 	}
-	return name[:len(stem)] + ".iso" + name[len(stem):], true
+	if strings.HasPrefix(suffix, ".") {
+		return name[:len(stem)] + ".iso" + suffix, true
+	}
+	for _, prefix := range []string{
+		"-poster.", "-cover.", "-default.", "-movie.",
+		"-clearart.", "-banner.", "-disc.", "-cdart.",
+		"-clearlogo.", "-logo.", "-thumb.", "-landscape.",
+	} {
+		if strings.HasPrefix(lowerSuffix, prefix) {
+			return name[:len(stem)] + ".iso" + suffix, true
+		}
+	}
+	return name, false
 }

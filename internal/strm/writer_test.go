@@ -26,9 +26,12 @@ func TestAlignMetadataItemsForISO(t *testing.T) {
 	items := []metadataItem{
 		newMetadataItem("nfo", "电影.nfo", "影音库", []string{"电影"}),
 		newMetadataItem("sub", "电影.zh-CN.srt", "影音库", []string{"电影"}),
-		newMetadataItem("poster", "poster.jpg", "影音库", []string{"电影"}),
+		newMetadataItem("poster", "电影-poster.jpg", "影音库", []string{"电影"}),
+		newMetadataItem("thumb", "电影-thumb.jpg", "影音库", []string{"电影"}),
+		newMetadataItem("folder-poster", "poster.jpg", "影音库", []string{"电影"}),
 		newMetadataItem("other", "电影2.nfo", "影音库", []string{"电影"}),
 		newMetadataItem("direct", "电影.iso.nfo", "影音库", []string{"电影"}),
+		newMetadataItem("direct-poster", "电影.iso-poster.jpg", "影音库", []string{"电影"}),
 	}
 	media := []mediaCandidate{{fileID: "iso", fileName: "电影.iso", relDirs: []string{"电影"}}}
 
@@ -36,9 +39,12 @@ func TestAlignMetadataItemsForISO(t *testing.T) {
 	want := []string{
 		"影音库/电影/电影.iso.nfo",
 		"影音库/电影/电影.iso.zh-CN.srt",
+		"影音库/电影/电影.iso-poster.jpg",
+		"影音库/电影/电影.iso-thumb.jpg",
 		"影音库/电影/poster.jpg",
 		"影音库/电影/电影2.nfo",
 		"影音库/电影/电影.iso.nfo",
+		"影音库/电影/电影.iso-poster.jpg",
 	}
 	for i, item := range got {
 		if item.relPath != want[i] {
@@ -48,7 +54,7 @@ func TestAlignMetadataItemsForISO(t *testing.T) {
 	if got[0].legacyRelPath != "影音库/电影/电影.nfo" {
 		t.Fatalf("legacyRelPath = %q, want original metadata path", got[0].legacyRelPath)
 	}
-	if got[4].legacyRelPath != "" {
+	if got[6].legacyRelPath != "" || got[7].legacyRelPath != "" {
 		t.Fatalf("direct ISO metadata should not be rewritten")
 	}
 }
