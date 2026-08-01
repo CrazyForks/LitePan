@@ -154,6 +154,21 @@ func TestAdvanceNextRunIntervalKeepsSameDaySlotsThenResetsToNextAnchor(t *testin
 	}
 }
 
+func TestAdvanceNextRunIntervalUsesLocalDayBoundaryForPersistedUTCTime(t *testing.T) {
+	loc := time.FixedZone("UTC+8", 8*3600)
+	cfg := map[string]any{
+		"start_time":     "12:42",
+		"interval_hours": 1,
+	}
+
+	currentUTC := time.Date(2026, 7, 31, 23, 42, 0, 0, time.UTC)
+	got := advanceIntervalRunAt(wallClockTimeIn(currentUTC, loc), cfg)
+	want := time.Date(2026, 8, 1, 8, 42, 0, 0, loc)
+	if !got.Equal(want) {
+		t.Fatalf("持久化 UTC 时间恢复后下一档 = %v, want %v", got, want)
+	}
+}
+
 func TestRunAsyncQueuesInsteadOfRejectingWhenBusy(t *testing.T) {
 	t.Parallel()
 

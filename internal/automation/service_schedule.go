@@ -101,6 +101,11 @@ func advanceNextRun(triggerType string, cfg map[string]any, current time.Time) t
 }
 
 func computeIntervalStartRun(cfg map[string]any, base time.Time) time.Time {
+	base = wallClockTime(base)
+	return computeIntervalStartRunAt(base, cfg)
+}
+
+func computeIntervalStartRunAt(base time.Time, cfg map[string]any) time.Time {
 	h, m := parseClock(anyString(cfg["start_time"]))
 	next := time.Date(base.Year(), base.Month(), base.Day(), h, m, 0, 0, base.Location())
 	if next.After(base) {
@@ -111,6 +116,11 @@ func computeIntervalStartRun(cfg map[string]any, base time.Time) time.Time {
 }
 
 func advanceIntervalRun(cfg map[string]any, current time.Time) time.Time {
+	current = wallClockTime(current)
+	return advanceIntervalRunAt(current, cfg)
+}
+
+func advanceIntervalRunAt(current time.Time, cfg map[string]any) time.Time {
 	h, m := parseClock(anyString(cfg["start_time"]))
 	interval := clampInt(anyInt(cfg["interval_hours"]), 1, 24*365)
 	candidate := current.Add(time.Duration(interval) * time.Hour)
@@ -125,6 +135,24 @@ func sameLocalDay(a, b time.Time) bool {
 	ay, am, ad := a.Date()
 	by, bm, bd := b.Date()
 	return ay == by && am == bm && ad == bd
+}
+
+func wallClockTime(t time.Time) time.Time {
+	return wallClockTimeIn(t, time.Local)
+}
+
+func wallClockTimeIn(t time.Time, fallback *time.Location) time.Time {
+	if t.IsZero() {
+		return t
+	}
+	loc := t.Location()
+	if loc == nil || loc == time.UTC {
+		loc = fallback
+	}
+	if loc == nil {
+		loc = time.UTC
+	}
+	return t.In(loc)
 }
 
 func parseClock(text string) (int, int) {
