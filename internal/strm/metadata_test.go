@@ -25,6 +25,22 @@ type metadataResolverStub struct {
 	resolveDelay time.Duration
 }
 
+type metadataLocalResolverStub struct {
+	localPath string
+	size      int64
+}
+
+func (s *metadataLocalResolverStub) Resolve(
+	context.Context,
+	int64,
+	string, string,
+	bool,
+) (playback.Resolved, error) {
+	return playback.Resolved{
+		Link: domain.DownloadInfo{LocalPath: s.localPath, Size: s.size},
+	}, nil
+}
+
 func (s *metadataResolverStub) Resolve(
 	ctx context.Context,
 	_ int64,
@@ -176,6 +192,33 @@ func TestMetadataSyncerDeduplicatesFileIDAndPreservesExistingFiles(t *testing.T)
 	}
 	if body, err := os.ReadFile(existing); err != nil || string(body) != "scraped" {
 		t.Fatalf("已有刮削文件被改写：%q, err=%v", body, err)
+	}
+}
+
+func TestMetadataSyncerReadsLocalMetadataFile(t *testing.T) {
+	body := []byte("[Script Info]\nTitle: Local subtitle\n")
+	source := filepath.Join(t.TempDir(), "movie.zh.ass")
+	if err := os.WriteFile(source, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	resolver := &metadataLocalResolverStub{localPath: source, size: int64(len(body))}
+	created, err := (&metadataSyncer{playback: resolver}).syncFiles(t.Context(), 1, root, []metadataItem{
+		{fileID: "subtitle", relPath: "Movie (2026)/Movie (2026).zh.ass"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != 1 {
+		t.Fatalf("新增数=%d，期望=1", created)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "Movie (2026)", "Movie (2026).zh.ass"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(body) {
+		t.Fatalf("本地元数据内容=%q，期望=%q", got, body)
 	}
 }
 

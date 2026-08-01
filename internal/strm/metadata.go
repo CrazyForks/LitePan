@@ -314,13 +314,20 @@ func (m *metadataSyncer) downloadResolvedWithRetry(
 			}
 			res = refreshed
 		}
-		if res.Link.URL == "" {
-			lastErr = fmt.Errorf("无下载地址")
-			continue
-		}
 		size := res.File.Size
 		if size <= 0 && res.Link.Size > 0 {
 			size = res.Link.Size
+		}
+		if localPath := strings.TrimSpace(res.Link.LocalPath); localPath != "" {
+			body, err := readMetadataLocalFile(ctx, localPath, size)
+			if err != nil {
+				return nil, fmt.Errorf("读取本地元数据失败: %w", err)
+			}
+			return body, nil
+		}
+		if res.Link.URL == "" {
+			lastErr = fmt.Errorf("无下载地址")
+			continue
 		}
 		body, err := fetchMetadataURLWithRetry(ctx, client, res.Link.URL, res.Link.Headers, size)
 		if err == nil {
@@ -332,6 +339,23 @@ func (m *metadataSyncer) downloadResolvedWithRetry(
 		lastErr = fmt.Errorf("元数据下载失败")
 	}
 	return nil, lastErr
+}
+
+func readMetadataLocalFile(ctx context.Context, localPath string, expectedSize int64) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	body, err := os.ReadFile(localPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if expectedSize > 0 && int64(len(body)) != expectedSize {
+		return nil, fmt.Errorf("文件大小不一致: expected=%d, got=%d", expectedSize, len(body))
+	}
+	return body, nil
 }
 
 func (m *metadataSyncer) downloadWithRetry(ctx context.Context, client *http.Client, accountID int64, fileID string, expectedSize int64) ([]byte, error) {
