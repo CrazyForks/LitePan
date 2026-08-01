@@ -331,7 +331,6 @@
       :account-id="pickerInitialAccountId"
       :initial-path="pickerInitialPath"
       :multi-select="pickerMode === 'src'"
-      :initial-selections="pickerMode === 'src' ? pickerInitialSelections : []"
       :initial-location-mode="pickerMode === 'src' ? 'root' : 'preserve'"
       :selection-restore-mode="pickerMode === 'src' ? 'reset' : 'preserve'"
       :title="pickerMode === 'src' ? '选择源目录' : '选择目标目录'"
@@ -413,7 +412,6 @@ const pickerMode = ref('src')
 const pickerAccounts = ref([])
 const pickerInitialAccountId = ref(null)
 const pickerInitialPath = ref('')
-const pickerInitialSelections = ref([])
 
 const relayTasksHref = computed(() => (
   router.resolve({ path: '/', query: { taskPanel: 'relay' } }).href
@@ -702,17 +700,7 @@ async function openPicker(mode) {
   pickerMode.value = mode;
   pickerAccounts.value = accs;
   pickerInitialAccountId.value = Number(cur?.accId || accs[0]?.id || 0) || null;
-  pickerInitialPath.value = mode === 'src'
-    ? (cur?.sources?.length === 1 ? cur.sources[0].path : '')
-    : (cur?.path || '');
-  pickerInitialSelections.value = mode === 'src'
-    ? (cur?.sources || []).map(item => ({
-      id: item.parentId,
-      name: item.name,
-      path: item.path,
-      ancestorIds: [...(item.ancestorIds || [])],
-    }))
-    : [];
+  pickerInitialPath.value = mode === 'src' ? '' : (cur?.path || '');
   pickerOpen.value = true;
 }
 

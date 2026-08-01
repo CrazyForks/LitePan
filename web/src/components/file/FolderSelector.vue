@@ -125,8 +125,9 @@ const canCreateFolder = computed(() => props.allowCreateFolder && !props.loader)
 const selectedCount = computed(() => activeSelections.value.length);
 const primaryActionText = computed(() => {
   if (!props.multiSelect) return props.confirmText;
-  // 受控模式由父组件决定文案（可汇总跨任务已选数量）。
-  if (controlled.value) return props.confirmText;
+  if (controlled.value) {
+    return selectedCount.value > 0 ? `${props.confirmText}（${selectedCount.value}）` : "选择当前目录";
+  }
   if (selectedCount.value > 0) return `添加所选 (${selectedCount.value})`;
   return props.confirmText;
 });
