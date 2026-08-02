@@ -6,7 +6,7 @@ require (
 	github.com/alde/go-fish v0.0.0-20260611152328-df695ecc9fbf
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/google/uuid v1.6.0
-	github.com/hanwen/go-fuse/v2 v2.9.0
+	github.com/hanwen/go-fuse/v2 v2.11.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/studio-b12/gowebdav v0.12.0
 	golang.org/x/crypto v0.53.0
