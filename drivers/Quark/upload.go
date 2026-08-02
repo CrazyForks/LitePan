@@ -426,7 +426,7 @@ func (d *Driver) completeUpload(ctx context.Context, pre *uploadPreData, etags [
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n<CompleteMultipartUpload>")
 	for i, etag := range etags {
-		b.WriteString(fmt.Sprintf("\n<Part>\n<PartNumber>%d</PartNumber>\n<ETag>%s</ETag>\n</Part>", i+1, etag))
+		fmt.Fprintf(&b, "\n<Part>\n<PartNumber>%d</PartNumber>\n<ETag>%s</ETag>\n</Part>", i+1, etag)
 	}
 	b.WriteString("\n</CompleteMultipartUpload>")
 	body := b.String()

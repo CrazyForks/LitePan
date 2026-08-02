@@ -60,7 +60,7 @@ func buildItem(taskID int64, root string, g workGroup) Item {
 		}
 	}
 
-	relDir := g.relKey
+	var relDir string
 	if g.flatFile == "" {
 		relDir = filepath.ToSlash(relUnder(root, g.absDir))
 	} else {

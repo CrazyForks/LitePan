@@ -79,7 +79,7 @@ func (h *Handler) prepareOfflineTorrent(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, domain.Errorf(domain.CodeValidation, "解析 BT 种子失败，文件不能超过 16 MiB"))
 		return
 	}
-	defer r.MultipartForm.RemoveAll()
+	defer func() { _ = r.MultipartForm.RemoveAll() }()
 	accountID, err := strconv.ParseInt(strings.TrimSpace(r.FormValue("account_id")), 10, 64)
 	if err != nil || accountID <= 0 {
 		writeErr(w, domain.Errorf(domain.CodeValidation, "非法 account_id"))

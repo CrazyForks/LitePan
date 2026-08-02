@@ -349,7 +349,8 @@ func (r *remoteWindowReader) readRangeOnce(ctx context.Context, off int64, dest 
 			link = newLink
 			continue
 		}
-		if resp.StatusCode != http.StatusPartialContent && !(resp.StatusCode == http.StatusOK && off == 0 && r.size == int64(len(dest))) {
+		validFullResponse := resp.StatusCode == http.StatusOK && off == 0 && r.size == int64(len(dest))
+		if resp.StatusCode != http.StatusPartialContent && !validFullResponse {
 			_ = resp.Body.Close()
 			return 0, domain.Errorf(domain.CodeDriverError, "上游 Range 返回 %d", resp.StatusCode)
 		}

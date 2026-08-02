@@ -641,7 +641,8 @@ func filterMetadataItems(items []metadataItem, dirHasMedia, subtreeHasMedia map[
 	seen := make(map[string]int)
 	for _, item := range items {
 		key := dirKey(item.relDirs)
-		if dirHasMedia != nil && !dirHasMedia[key] && !(parentEnabled && subtreeHasMedia[key]) {
+		includedByParent := parentEnabled && subtreeHasMedia[key]
+		if dirHasMedia != nil && !dirHasMedia[key] && !includedByParent {
 			continue
 		}
 		if index, ok := seen[item.relPath]; ok {

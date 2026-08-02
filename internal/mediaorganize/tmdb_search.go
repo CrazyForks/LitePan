@@ -81,7 +81,7 @@ func parseTMDBQueryID(query string) string {
 }
 
 func lookupTMDBSearchResults(ctx context.Context, client *tmdb.Client, id, mediaType string) ([]json.RawMessage, error) {
-	types := []string{}
+	var types []string
 	switch mediaType {
 	case "movie":
 		types = []string{"movie"}

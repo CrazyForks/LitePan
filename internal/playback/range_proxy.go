@@ -221,8 +221,8 @@ func (s *Service) pipeUpstreamRange(ctx context.Context, w io.Writer, lh *linkHo
 			continue
 		}
 		want := end - start + 1
-		if resp.StatusCode != http.StatusPartialContent &&
-			!(resp.StatusCode == http.StatusOK && start == 0 && resp.ContentLength == want) {
+		validFullResponse := resp.StatusCode == http.StatusOK && start == 0 && resp.ContentLength == want
+		if resp.StatusCode != http.StatusPartialContent && !validFullResponse {
 			resp.Body.Close()
 			return domain.Errorf(domain.CodeDriverError, "上游 Range 返回 %d", resp.StatusCode)
 		}

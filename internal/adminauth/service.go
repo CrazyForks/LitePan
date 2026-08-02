@@ -481,7 +481,8 @@ func validateAdminUsername(username string) error {
 		return domain.Errorf(domain.CodeValidation, "用户名不能为空")
 	}
 	for _, ch := range username {
-		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_') {
+		valid := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_'
+		if !valid {
 			return domain.Errorf(domain.CodeValidation, "用户名只能包含字母、数字和下划线")
 		}
 	}
