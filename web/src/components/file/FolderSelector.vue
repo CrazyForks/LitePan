@@ -99,6 +99,12 @@ const columns: { key: FolderSortKey; label: string }[] = [
   { key: "modified", label: "修改时间" },
 ];
 
+function formatFolderTimeShort(value?: string) {
+  const full = formatTime(value);
+  const matched = full.match(/^\d{4}-(\d{2})-(\d{2}) (\d{2}):(\d{2})/);
+  return matched ? `${matched[1]}/${matched[2]} ${matched[3]}:${matched[4]}` : full;
+}
+
 const currentParentId = computed(() => breadcrumb.value[breadcrumb.value.length - 1]?.id ?? "");
 const currentPath = computed(() => {
   if (props.rootAnchor) {
@@ -537,7 +543,10 @@ watch(
             :class="[`col-${col.key}`, { active: sortKey === col.key }]"
             @click="toggleSort(col.key)"
           >
-            <span>{{ col.label }}</span>
+            <span class="folder-table-heading-label folder-table-heading-label--full">{{ col.label }}</span>
+            <span class="folder-table-heading-label folder-table-heading-label--compact">
+              {{ col.key === "modified" ? "时间" : col.label }}
+            </span>
             <span class="sort-indicator" :class="sortClass(col.key)" />
           </button>
         </div>
@@ -614,7 +623,10 @@ watch(
                 <span class="folder-name-icon"><SvgIcon name="folder" :size="18" /></span>
                 <span class="folder-name-text" :title="dir.name">{{ dir.name }}</span>
               </div>
-              <span class="folder-time-cell">{{ formatTime(dir.mod_time) }}</span>
+              <span class="folder-time-cell">
+                <span class="folder-time-cell__full">{{ formatTime(dir.mod_time) }}</span>
+                <span class="folder-time-cell__compact">{{ formatFolderTimeShort(dir.mod_time) }}</span>
+              </span>
             </div>
           </template>
         </div>
@@ -828,6 +840,13 @@ watch(
 .folder-table-heading.active {
   color: var(--text-regular);
 }
+.folder-table-heading-label {
+  white-space: nowrap;
+}
+.folder-table-heading-label--compact,
+.folder-time-cell__compact {
+  display: none;
+}
 
 .folder-table-body {
   flex: 1;
@@ -953,8 +972,21 @@ watch(
   }
   .folder-table-header,
   .folder-table-row {
-    grid-template-columns: minmax(0, 1fr) 140px;
-    column-gap: 10px;
+    grid-template-columns: minmax(0, 1fr) 82px;
+    column-gap: 6px;
+  }
+  .folder-selector__list.folder-selector__table--multi .folder-table-header,
+  .folder-selector__list.folder-selector__table--multi .folder-table-row {
+    grid-template-columns: 36px minmax(0, 1fr) 82px;
+    column-gap: 6px;
+  }
+  .folder-table-heading-label--full,
+  .folder-time-cell__full {
+    display: none;
+  }
+  .folder-table-heading-label--compact,
+  .folder-time-cell__compact {
+    display: inline;
   }
   .folder-selector__footer {
     padding: 0 18px 20px;
