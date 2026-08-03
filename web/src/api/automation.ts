@@ -1,6 +1,6 @@
 import { http } from "./client";
 
-export type AutomationTriggerType = "daily" | "interval" | "webhook";
+export type AutomationTriggerType = "daily" | "interval" | "webhook" | "offline_download";
 export type AutomationStatus = "running" | "paused";
 export type AutomationCondition = "always" | "prev_success" | "prev_failed";
 export type AutomationActionType = "cache_clear" | "organize" | "strm" | "strm_scrape" | "delay" | "emby_refresh";
@@ -83,6 +83,10 @@ export interface AutomationTriggerConfig {
   source: string;
   path_prefix: string;
   require_path: boolean;
+  account_id: number;
+  account_name: string;
+  parent_id: string;
+  path: string;
 }
 
 export function normalizeAutomationTriggerConfig(
@@ -96,6 +100,10 @@ export function normalizeAutomationTriggerConfig(
     source: String(config.source ?? ""),
     path_prefix: String(config.path_prefix ?? ""),
     require_path: config.require_path === true,
+    account_id: Number(config.account_id || 0),
+    account_name: String(config.account_name ?? ""),
+    parent_id: String(config.parent_id ?? ""),
+    path: String(config.path ?? ""),
   };
 }
 
@@ -110,6 +118,10 @@ export function serializeAutomationTriggerConfig(
     source: String(config.source || "").trim(),
     path_prefix: String(config.path_prefix || "").trim(),
     require_path: config.require_path === true,
+    account_id: Number(config.account_id || 0),
+    account_name: String(config.account_name || "").trim(),
+    parent_id: String(config.parent_id || "").trim(),
+    path: String(config.path || "").trim(),
   };
 }
 

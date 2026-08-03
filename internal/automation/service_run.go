@@ -491,9 +491,9 @@ type submitRunResult struct {
 
 func (s *Service) submitRun(ruleID int64, triggerSource string, dedupe bool) submitRunResult {
 	s.mu.Lock()
-	if dedupe && (s.runningRuleID == ruleID || s.pendingCount[ruleID] > 0) {
+	if dedupe && s.pendingCount[ruleID] > 0 {
 		s.mu.Unlock()
-		return submitRunResult{queued: s.runningRuleID != 0}
+		return submitRunResult{queued: true}
 	}
 	if s.runningRuleID != 0 {
 		s.pendingRuns = append(s.pendingRuns, queuedRun{ruleID: ruleID, triggerSource: triggerSource})

@@ -125,7 +125,9 @@ func TestAddAndRefreshOfflineTask(t *testing.T) {
 	bus := eventbus.New(nil)
 	t.Cleanup(func() { _ = bus.Close(context.Background()) })
 	mutations := make(chan eventbus.FileMutated, 1)
+	completions := make(chan eventbus.OfflineDownloadCompleted, 1)
 	eventbus.Subscribe(bus, func(_ context.Context, event eventbus.FileMutated) { mutations <- event })
+	eventbus.Subscribe(bus, func(_ context.Context, event eventbus.OfflineDownloadCompleted) { completions <- event })
 	svc := New(Options{
 		Exec:     driverexec.New(offlineTestProvider{drv: drv}, nil),
 		Accounts: offlineAccountRepo{account: &domain.Account{ID: 7, Name: "测试盘", DriverType: "offline-test"}},
@@ -160,6 +162,14 @@ func TestAddAndRefreshOfflineTask(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("任务完成后没有发布文件变更事件")
+	}
+	select {
+	case event := <-completions:
+		if event.TaskID != created[0].TaskID || event.AccountID != 7 || event.TargetParentID != "folder" || event.TargetDisplayPath != "/电影" || event.FileID != "file-1" {
+			t.Fatalf("离线下载完成事件不正确: %#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("任务完成后没有发布离线下载完成事件")
 	}
 }
 

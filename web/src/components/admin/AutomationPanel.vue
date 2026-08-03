@@ -382,6 +382,14 @@
             </span>
             <i class="fas fa-chevron-right"></i>
           </button>
+          <button class="pick-option" type="button" @click="chooseTrigger('offline_download')">
+            <span class="pick-ico offline_download"><i class="fas fa-cloud-arrow-down"></i></span>
+            <span>
+              <b>离线下载完成</b>
+              <em>指定目录或其子目录中的离线任务完成后触发</em>
+            </span>
+            <i class="fas fa-chevron-right"></i>
+          </button>
         </div>
         <div v-else class="pick-list">
           <button v-for="item in actionTypeOptions" :key="item.value" class="pick-option" type="button" @click="chooseAction(item.value)">
@@ -419,6 +427,16 @@
               <code>POST http://你的LitePan地址:5211/api/open/automation/events</code>
               <code>Authorization: Bearer lpk_api_xxx</code>
               <pre>{{ externalEventJsonExample }}</pre>
+            </div>
+          </template>
+          <template v-else-if="form.trigger_type === 'offline_download'">
+            <div class="cfg-row">
+              <label>监控目录</label>
+              <button class="time-btn" type="button" @click="openOfflineFolderPicker">
+                <i class="fas fa-folder-tree"></i>
+                {{ offlineDownloadDirectoryLabel }}
+              </button>
+              <div class="field-tip">该账号中，目标为此目录或其任意子目录的离线任务完成后触发。</div>
             </div>
           </template>
           <template v-else>
@@ -496,6 +514,18 @@
         </div>
       </div>
     </AppModal>
+
+    <FolderPickerModal
+      :open="offlineFolderPickerVisible"
+      title="选择离线下载监控目录"
+      confirm-text="选择当前目录"
+      :selectable-account="true"
+      :account-id="offlineFolderPickerAccountId"
+      :accounts="accounts"
+      :initial-path="form.trigger_config.path"
+      @close="offlineFolderPickerVisible = false"
+      @resolve="selectOfflineDownloadDirectory"
+    />
   </div>
 </template>
 
@@ -515,6 +545,7 @@ import AppButton from '@/components/base/AppButton.vue'
 import AppBadge from '@/components/base/AppBadge.vue'
 import AppModal from '@/components/base/AppModal.vue'
 import AppSelect from '@/components/base/AppSelect.vue'
+import FolderPickerModal from '@/components/file/FolderPickerModal.vue'
 import AdminEnableToggle from '@/components/admin/AdminEnableToggle.vue'
 import AdminRowActions from '@/components/admin/AdminRowActions.vue'
 import AdminRunStatusCell from '@/components/admin/AdminRunStatusCell.vue'
@@ -523,6 +554,7 @@ import TimeWheelPicker from '../base/TimeWheelPicker.vue'
 import { confirm } from '../../composables/useConfirm'
 import { toast } from '../../composables/useToast'
 import { getApiErrorMessage } from '../../api/client'
+import { accountsApi } from '../../api/accounts'
 import {
   clearAutomationRuns,
   createAutomationRule,
@@ -549,12 +581,14 @@ const runs = ref([])
 const expandedRunIds = ref(new Set())
 const runsDrawerVisible = ref(false)
 const runsLoading = ref(false)
+const accounts = ref([])
 const emptyOptions = () => ({ organize_tasks: [], strm_tasks: [], emby: { enabled: false, emby_url: '' } })
 const options = ref(emptyOptions())
 const validationIssues = ref([])
 const validationOk = ref(false)
 const timePickerVisible = ref(false)
 const timePickerValue = ref('03:00')
+const offlineFolderPickerVisible = ref(false)
 const pickerVisible = ref(false)
 const pickerKind = ref('trigger')
 const configVisible = ref(false)
@@ -749,6 +783,9 @@ const triggerNodeTitle = computed(() => {
   if (form.trigger_type === 'external_event') {
     return form.trigger_config.event ? `收到通知：${form.trigger_config.event}` : '第三方通知'
   }
+  if (form.trigger_type === 'offline_download') {
+    return triggerReady.value ? `离线下载完成：${offlineDownloadDirectoryLabel.value}` : '离线下载完成'
+  }
   return form.trigger_config.time ? `每天 ${form.trigger_config.time}` : '每天定时'
 })
 
@@ -759,8 +796,22 @@ const triggerNodeSub = computed(() => (
     ? '从指定时间开始按间隔轮询执行'
     : form.trigger_type === 'external_event'
     ? externalEventSubtitle.value
+    : form.trigger_type === 'offline_download'
+    ? '任务目标位于所选目录或其子目录时触发'
     : '每天到点自动启动联动'
 ))
+
+const offlineDownloadDirectoryLabel = computed(() => {
+  const path = String(form.trigger_config.path || '').trim()
+  if (!path) return '请选择账号和目录'
+  const accountName = String(form.trigger_config.account_name || '').trim() || '网盘'
+  return `${accountName} · ${path}`
+})
+
+const offlineFolderPickerAccountId = computed(() => {
+  const accountId = Number(form.trigger_config.account_id || 0)
+  return accountId > 0 ? accountId : null
+})
 
 const externalEventSubtitle = computed(() => {
   const parts = ['外部程序发来同名通知时触发']
@@ -787,6 +838,9 @@ const triggerReady = computed(() => {
   if (form.trigger_type === 'daily') return Boolean(form.trigger_config.time)
   if (form.trigger_type === 'interval') return Boolean(form.trigger_config.start_time) && Number(form.trigger_config.interval_hours || 0) > 0
   if (form.trigger_type === 'external_event') return Boolean(String(form.trigger_config.event || '').trim())
+  if (form.trigger_type === 'offline_download') {
+    return Number(form.trigger_config.account_id || 0) > 0 && Boolean(String(form.trigger_config.path || '').trim())
+  }
   return false
 })
 const primaryActionReady = computed(() => Boolean(form.actions[0]))
@@ -795,6 +849,9 @@ const configAction = computed(() => pendingConfigAction.value || form.actions[co
 const configCanApply = computed(() => {
   if (configMode.value === 'trigger' && form.trigger_type === 'external_event') {
     return Boolean(String(form.trigger_config.event || '').trim())
+  }
+  if (configMode.value === 'trigger' && form.trigger_type === 'offline_download') {
+    return triggerReady.value
   }
   if (configMode.value === 'action' && configAction.value) {
     return actionDefinition(configAction.value.type).canApply(configAction.value)
@@ -805,6 +862,7 @@ const configTitle = computed(() => {
   if (configMode.value === 'trigger') {
     if (form.trigger_type === 'daily') return '每天定时'
     if (form.trigger_type === 'external_event') return '第三方通知'
+    if (form.trigger_type === 'offline_download') return '离线下载完成'
     return '本次触发时间 + 间隔'
   }
   return configAction.value ? actionLabel(configAction.value) : '配置动作'
@@ -856,12 +914,14 @@ const flowPreviewItems = computed(() => {
 const loadAll = async () => {
   loading.value = true
   try {
-    const [rulesData, optionsData] = await Promise.all([
+    const [rulesData, optionsData, accountsData] = await Promise.all([
       fetchAutomationRules(),
-      fetchAutomationOptions()
+      fetchAutomationOptions(),
+      accountsApi.list()
     ])
     rules.value = rulesData || []
     options.value = { ...emptyOptions(), ...(optionsData || {}) }
+    accounts.value = accountsData || []
     scheduleCenterRunningFlowSteps('auto')
   } catch (error) {
     toast.error('加载自动联动失败: ' + getApiErrorMessage(error, '请稍后重试'))
@@ -880,8 +940,12 @@ const refreshRulesOnly = async () => {
 }
 
 const loadOptionsOnly = async () => {
-  const data = await fetchAutomationOptions()
+  const [data, accountsData] = await Promise.all([
+    fetchAutomationOptions(),
+    accountsApi.list()
+  ])
   options.value = { ...emptyOptions(), ...(data || {}) }
+  accounts.value = accountsData || []
 }
 
 const resetForm = () => {
@@ -927,7 +991,22 @@ const setTriggerType = (type) => {
   } else if (type === 'external_event') {
     form.trigger_config.time = ''
     form.trigger_config.start_time = ''
+  } else if (type === 'offline_download') {
+    form.trigger_config.time = ''
+    form.trigger_config.start_time = ''
   }
+}
+
+const openOfflineFolderPicker = () => {
+  offlineFolderPickerVisible.value = true
+}
+
+const selectOfflineDownloadDirectory = (selection) => {
+  form.trigger_config.account_id = Number(selection.accountId || 0)
+  form.trigger_config.account_name = String(selection.accountName || '')
+  form.trigger_config.parent_id = String(selection.parentId || '')
+  form.trigger_config.path = String(selection.path || '/')
+  offlineFolderPickerVisible.value = false
 }
 
 // 触发器未确认前不落地：进入选择/配置前快照，确认才提交，取消则还原（与执行动作的待确认机制对齐）
@@ -1163,6 +1242,8 @@ const applyConfig = () => {
   if (!configCanApply.value) {
     if (configMode.value === 'trigger' && form.trigger_type === 'external_event') {
       toast.warning('请输入通知名称')
+    } else if (configMode.value === 'trigger' && form.trigger_type === 'offline_download') {
+      toast.warning('请选择离线下载监控目录')
     } else if (configMode.value === 'action') {
       toast.warning('请完善动作配置')
     }
@@ -1432,6 +1513,10 @@ const triggerLabel = (rule) => {
   if (rule.trigger_type === 'external_event' || rule.trigger_type === 'webhook') {
     return `收到通知：${config.event || '-'}`
   }
+  if (rule.trigger_type === 'offline_download') {
+    const accountName = String(config.account_name || '').trim() || '网盘'
+    return `离线下载完成：${accountName} · ${config.path || '/'}`
+  }
   return `每天 ${config.time || '00:00'}`
 }
 
@@ -1560,6 +1645,7 @@ const runStatusText = (status) => {
 const runSourceLabel = (source) => {
   if (source === 'manual') return '手动'
   if (source === 'external_event' || source === 'webhook') return '第三方'
+  if (source === 'offline_download') return '离线下载'
   return '定时'
 }
 

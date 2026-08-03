@@ -521,6 +521,14 @@ func (s *Service) applyUpdates(accountID int64, updates []driver.OfflineTaskUpda
 				FileID:    task.FileID,
 				FileName:  task.Name,
 			})
+			s.bus.Publish(context.Background(), eventbus.OfflineDownloadCompleted{
+				TaskID:            task.TaskID,
+				AccountID:         task.AccountID,
+				TargetParentID:    task.TargetParentID,
+				TargetDisplayPath: task.TargetDisplayPath,
+				FileID:            task.FileID,
+				FileName:          task.Name,
+			})
 		}
 	}
 }

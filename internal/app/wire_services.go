@@ -147,6 +147,7 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		Files:      fileSvc,
 		Log:        logs.For(logx.ModuleSystem),
 	})
+	automationSvc.Register(core.bus)
 	strmSvc.SetAutomationManagedChecker(automationSvc.IsStrmTaskManaged)
 	return &servicesBundle{
 		files:            fileSvc,
