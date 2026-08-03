@@ -45,7 +45,7 @@ var config = driver.Config{
 	TokenLifetime:          7200 * time.Second,
 	RefreshAdvance:         15 * time.Minute,
 	ProvideHashes:          []string{"md5"},
-	RapidUploadHashes:      []string{"md5"},
+	RapidUploadHashes:      nil,
 	UploadConflictPolicies: []string{"rename"},
 }
 
