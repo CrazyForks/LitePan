@@ -112,3 +112,35 @@ func TestTaskStartLimitMatchesLegacyScheduler(t *testing.T) {
 	}
 	svc.mu.Unlock()
 }
+
+func TestShouldRunUsesGlobalIntervalForLegacyTasks(t *testing.T) {
+	svc, _ := testService(t)
+	if err := svc.settings.Update(context.Background(), map[string]string{
+		settings.KeyStrmDefaultScanInterval: "360",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	task := &domain.StrmTask{
+		ID:           1,
+		AccountID:    1,
+		ScanInterval: 10, // 历史任务里固化过的旧值
+		LastScan:     time.Now().Add(-20 * time.Minute),
+	}
+	if svc.shouldRun(task, time.Now()) {
+		t.Fatal("全局扫描间隔应优先于历史任务级间隔，20 分钟后不应触发")
+	}
+}
+
+func TestShouldRunFallsBackToLegacyTaskIntervalWhenGlobalMissing(t *testing.T) {
+	svc, _ := testService(t)
+	svc.settings = nil
+	task := &domain.StrmTask{
+		ID:           1,
+		AccountID:    1,
+		ScanInterval: 10,
+		LastScan:     time.Now().Add(-20 * time.Minute),
+	}
+	if !svc.shouldRun(task, time.Now()) {
+		t.Fatal("全局配置缺失时应回退历史任务级间隔，避免升级后停调度")
+	}
+}

@@ -68,13 +68,7 @@ func (s *Service) shouldRun(task *domain.StrmTask, now time.Time) bool {
 		delete(s.dirtyAccounts, task.AccountID)
 		return true
 	}
-	interval := task.ScanInterval
-	if interval <= 0 {
-		interval = s.settings.Int(settings.KeyStrmDefaultScanInterval)
-	}
-	if interval <= 0 {
-		interval = defaultScanIntervalMinutes
-	}
+	interval := s.effectiveScanIntervalMinutes(task)
 	if task.LastScan.IsZero() {
 		return true
 	}

@@ -580,6 +580,19 @@ func (s *Service) configuredBaseURL() string {
 	return NormalizeBaseURL(s.settings.String(settings.KeyStrmBaseURL))
 }
 
+func (s *Service) effectiveScanIntervalMinutes(task *domain.StrmTask) int {
+	if s != nil && s.settings != nil {
+		if interval := s.settings.Int(settings.KeyStrmDefaultScanInterval); interval > 0 {
+			return interval
+		}
+	}
+	// 兼容极端场景：如果历史库里还保留了任务级间隔，而全局设置缺失，则继续回退旧值，避免升级后停调度。
+	if task != nil && task.ScanInterval > 0 {
+		return task.ScanInterval
+	}
+	return defaultScanIntervalMinutes
+}
+
 func (s *Service) scanBaseURL() string {
 	return EffectiveBaseURL(s.configuredBaseURL(), ListenBaseURL(s.listenAddr))
 }
