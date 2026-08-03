@@ -294,25 +294,48 @@ func (s *Service) upsertIndexItem(ctx context.Context, strmTaskID int64, root st
 	})
 }
 
-func (s *Service) listIndexItems(strmTaskID int64) ([]Item, error) {
-	db, err := openTaskIndexDB(s.indexPath(strmTaskID))
-	if err != nil {
-		return nil, err
+func buildItemListWhere(query ItemListQuery) (string, []any) {
+	clauses := make([]string, 0, 4)
+	args := make([]any, 0, 8)
+	if query.Keyword != "" {
+		kw := "%" + strings.ToLower(query.Keyword) + "%"
+		clauses = append(clauses, `(LOWER(title) LIKE ? OR LOWER(folder_name) LIKE ? OR LOWER(strm_name) LIKE ?)`)
+		args = append(args, kw, kw, kw)
 	}
-	defer db.Close()
-
-	rows, err := db.Query(`
-SELECT id, rel_dir, strm_name, title, year, media_type, status,
-       has_nfo, has_poster, has_pending, tmdb_id, poster_rel, folder_name,
-       file_count, ep_local, ep_tmdb, ep_scraped, tv_state, added_at
-FROM items
-ORDER BY added_at DESC, title COLLATE NOCASE ASC
-`)
-	if err != nil {
-		return nil, err
+	if query.Status != "" {
+		clauses = append(clauses, `status = ?`)
+		args = append(args, query.Status)
 	}
-	defer rows.Close()
+	if query.MediaType != "" {
+		clauses = append(clauses, `media_type = ?`)
+		args = append(args, query.MediaType)
+	}
+	if query.TVState != "" {
+		clauses = append(clauses, `tv_state = ?`)
+		args = append(args, query.TVState)
+	}
+	if len(clauses) == 0 {
+		return "", nil
+	}
+	return "WHERE " + strings.Join(clauses, " AND "), args
+}
 
+func itemListOrderBy(sort ItemListSort) string {
+	switch sort {
+	case ItemListSortTitleAsc:
+		return "ORDER BY title COLLATE NOCASE ASC, added_at DESC"
+	case ItemListSortYearDesc:
+		return "ORDER BY CASE WHEN year IS NULL THEN 1 ELSE 0 END ASC, year DESC, title COLLATE NOCASE ASC"
+	case ItemListSortYearAsc:
+		return "ORDER BY CASE WHEN year IS NULL THEN 1 ELSE 0 END ASC, year ASC, title COLLATE NOCASE ASC"
+	case ItemListSortAddedAsc:
+		return "ORDER BY added_at ASC, title COLLATE NOCASE ASC"
+	default:
+		return "ORDER BY added_at DESC, title COLLATE NOCASE ASC"
+	}
+}
+
+func scanIndexItems(rows *sql.Rows, strmTaskID int64) ([]Item, error) {
 	out := make([]Item, 0, 128)
 	for rows.Next() {
 		var it Item
@@ -337,6 +360,69 @@ ORDER BY added_at DESC, title COLLATE NOCASE ASC
 		out = append(out, it)
 	}
 	return out, rows.Err()
+}
+
+func readIndexStats(db *sql.DB) (ItemListStats, error) {
+	var stats ItemListStats
+	err := db.QueryRow(`
+SELECT
+  COUNT(*),
+  SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END),
+  SUM(CASE WHEN status = 'miss' THEN 1 ELSE 0 END),
+  SUM(CASE WHEN status = 'doubt' THEN 1 ELSE 0 END)
+FROM items
+`).Scan(&stats.Total, &stats.OK, &stats.Miss, &stats.Doubt)
+	return stats, err
+}
+
+func (s *Service) listIndexItems(strmTaskID int64, query ItemListQuery) (ItemListResult, error) {
+	db, err := openTaskIndexDB(s.indexPath(strmTaskID))
+	if err != nil {
+		return ItemListResult{}, err
+	}
+	defer db.Close()
+
+	stats, err := readIndexStats(db)
+	if err != nil {
+		return ItemListResult{}, err
+	}
+	whereSQL, whereArgs := buildItemListWhere(query)
+	countSQL := `SELECT COUNT(*) FROM items`
+	if whereSQL != "" {
+		countSQL += "\n" + whereSQL
+	}
+	var total int
+	if err := db.QueryRow(countSQL, whereArgs...).Scan(&total); err != nil {
+		return ItemListResult{}, err
+	}
+	querySQL := `
+SELECT id, rel_dir, strm_name, title, year, media_type, status,
+       has_nfo, has_poster, has_pending, tmdb_id, poster_rel, folder_name,
+       file_count, ep_local, ep_tmdb, ep_scraped, tv_state, added_at
+FROM items
+`
+	if whereSQL != "" {
+		querySQL += whereSQL + "\n"
+	}
+	querySQL += itemListOrderBy(query.Sort) + "\nLIMIT ? OFFSET ?"
+	args := append(append(make([]any, 0, len(whereArgs)+2), whereArgs...), query.Limit, query.Offset)
+	rows, err := db.Query(querySQL, args...)
+	if err != nil {
+		return ItemListResult{}, err
+	}
+	defer rows.Close()
+	items, err := scanIndexItems(rows, strmTaskID)
+	if err != nil {
+		return ItemListResult{}, err
+	}
+	return ItemListResult{
+		Items:   items,
+		Total:   total,
+		Offset:  query.Offset,
+		Limit:   query.Limit,
+		HasMore: query.Offset+len(items) < total,
+		Stats:   stats,
+	}, nil
 }
 
 func (s *Service) ensureIndexLocked(ctx context.Context, strmTaskID int64, root string) error {

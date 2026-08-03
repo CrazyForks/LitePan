@@ -148,7 +148,7 @@ export function useVirtualPosterWall<T>(items: Ref<readonly T[]>) {
   watch(
     () => items.value.length,
     () => {
-      resetScroll();
+      requestAnimationFrame(measure);
     },
   );
 

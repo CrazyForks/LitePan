@@ -3,6 +3,12 @@ import { http } from "./client";
 export type StrmScrapeWriteMode = "missing_only" | "overwrite";
 export type StrmScrapeItemStatus = "ok" | "miss" | "doubt";
 export type StrmScrapeTVState = "ended" | "updating";
+export type StrmScrapeItemListSort =
+  | "title_asc"
+  | "year_desc"
+  | "year_asc"
+  | "added_desc"
+  | "added_asc";
 
 export interface StrmScrapeItem {
   id: string;
@@ -58,6 +64,32 @@ export interface StrmScrapeSettings {
   proxy_password: string;
 }
 
+export interface StrmScrapeItemListQuery {
+  offset?: number;
+  limit?: number;
+  keyword?: string;
+  status?: StrmScrapeItemStatus | "";
+  media_type?: "movie" | "tv" | "";
+  tv_state?: StrmScrapeTVState | "";
+  sort?: StrmScrapeItemListSort;
+}
+
+export interface StrmScrapeItemListStats {
+  total: number;
+  ok: number;
+  miss: number;
+  doubt: number;
+}
+
+export interface StrmScrapeItemListResult {
+  items: StrmScrapeItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  has_more: boolean;
+  stats: StrmScrapeItemListStats;
+}
+
 export function fetchStrmScrapeSettings() {
   return http.get<StrmScrapeSettings>("/admin/strm-scrape/settings");
 }
@@ -81,15 +113,17 @@ export function fetchStrmScrapeProgress() {
   return http.get<StrmScrapeProgress>("/admin/strm-scrape/progress");
 }
 
-export function fetchStrmScrapeItems(strmTaskId: number) {
-  return http.get<{ items: StrmScrapeItem[] }>("/admin/strm-scrape/items", {
+export function fetchStrmScrapeItems(strmTaskId: number, query: StrmScrapeItemListQuery = {}) {
+  return http.get<StrmScrapeItemListResult>("/admin/strm-scrape/items", {
     strm_task_id: strmTaskId,
+    ...query,
   });
 }
 
-export function refreshStrmScrapeIndex(strmTaskId: number) {
-  return http.post<{ items: StrmScrapeItem[] }>("/admin/strm-scrape/refresh-index", {
+export function refreshStrmScrapeIndex(strmTaskId: number, query: StrmScrapeItemListQuery = {}) {
+  return http.post<StrmScrapeItemListResult>("/admin/strm-scrape/refresh-index", {
     strm_task_id: strmTaskId,
+    ...query,
   });
 }
 

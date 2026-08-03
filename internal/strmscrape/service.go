@@ -17,6 +17,11 @@ import (
 	"litepan/internal/strm"
 )
 
+const (
+	defaultItemListLimit = 120
+	maxItemListLimit     = 200
+)
+
 type Options struct {
 	Strm     *strm.Service
 	Settings *settings.Service
@@ -75,20 +80,53 @@ func (s *Service) Stop() {
 	}
 }
 
-func (s *Service) ListItems(ctx context.Context, strmTaskID int64) ([]Item, error) {
+func normalizeItemListQuery(in ItemListQuery) ItemListQuery {
+	out := in
+	if out.Offset < 0 {
+		out.Offset = 0
+	}
+	switch {
+	case out.Limit <= 0:
+		out.Limit = defaultItemListLimit
+	case out.Limit > maxItemListLimit:
+		out.Limit = maxItemListLimit
+	}
+	out.Keyword = strings.TrimSpace(out.Keyword)
+	out.Status = strings.TrimSpace(out.Status)
+	out.MediaType = strings.TrimSpace(out.MediaType)
+	out.TVState = strings.TrimSpace(out.TVState)
+	switch out.Sort {
+	case ItemListSortTitleAsc, ItemListSortYearDesc, ItemListSortYearAsc, ItemListSortAddedAsc, ItemListSortAddedDesc:
+	default:
+		out.Sort = ItemListSortAddedDesc
+	}
+	if out.Status != "" && out.Status != ItemStatusOK && out.Status != ItemStatusMiss && out.Status != ItemStatusDoubt {
+		out.Status = ""
+	}
+	if out.MediaType != "" && out.MediaType != MediaTypeMovie && out.MediaType != MediaTypeTV {
+		out.MediaType = ""
+	}
+	if out.TVState != "" && out.TVState != TVStateEnded && out.TVState != TVStateUpdating {
+		out.TVState = ""
+	}
+	return out
+}
+
+func (s *Service) ListItems(ctx context.Context, strmTaskID int64, query ItemListQuery) (ItemListResult, error) {
+	query = normalizeItemListQuery(query)
 	_, root, err := s.resolveTask(ctx, strmTaskID)
 	if err != nil {
-		return nil, err
+		return ItemListResult{}, err
 	}
 	if abs, aerr := filepath.Abs(root); aerr == nil {
 		root = abs
 	}
-	var out []Item
+	var out ItemListResult
 	err = s.withTaskIndexLock(strmTaskID, func() error {
 		if err := s.ensureIndexLocked(ctx, strmTaskID, root); err != nil {
 			return err
 		}
-		items, err := s.listIndexItems(strmTaskID)
+		items, err := s.listIndexItems(strmTaskID, query)
 		if err != nil {
 			return err
 		}
@@ -99,11 +137,12 @@ func (s *Service) ListItems(ctx context.Context, strmTaskID int64) ([]Item, erro
 }
 
 // RefreshIndex 扫盘重建索引并返回列表（海报墙刷新按钮）。
-func (s *Service) RefreshIndex(ctx context.Context, strmTaskID int64) ([]Item, error) {
+func (s *Service) RefreshIndex(ctx context.Context, strmTaskID int64, query ItemListQuery) (ItemListResult, error) {
+	query = normalizeItemListQuery(query)
 	if err := s.RebuildIndex(ctx, strmTaskID); err != nil {
-		return nil, err
+		return ItemListResult{}, err
 	}
-	return s.listIndexItems(strmTaskID)
+	return s.listIndexItems(strmTaskID, query)
 }
 
 func (s *Service) RunAsync(ctx context.Context, req RunRequest) error {

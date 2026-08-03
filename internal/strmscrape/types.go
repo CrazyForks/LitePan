@@ -35,6 +35,42 @@ type Item struct {
 	AddedAt    string `json:"added_at,omitempty"`
 }
 
+type ItemListSort string
+
+const (
+	ItemListSortTitleAsc  ItemListSort = "title_asc"
+	ItemListSortYearDesc  ItemListSort = "year_desc"
+	ItemListSortYearAsc   ItemListSort = "year_asc"
+	ItemListSortAddedAsc  ItemListSort = "added_asc"
+	ItemListSortAddedDesc ItemListSort = "added_desc"
+)
+
+type ItemListQuery struct {
+	Offset    int          `json:"offset"`
+	Limit     int          `json:"limit"`
+	Keyword   string       `json:"keyword,omitempty"`
+	Status    string       `json:"status,omitempty"`
+	MediaType string       `json:"media_type,omitempty"`
+	TVState   string       `json:"tv_state,omitempty"`
+	Sort      ItemListSort `json:"sort,omitempty"`
+}
+
+type ItemListStats struct {
+	Total int `json:"total"`
+	OK    int `json:"ok"`
+	Miss  int `json:"miss"`
+	Doubt int `json:"doubt"`
+}
+
+type ItemListResult struct {
+	Items   []Item        `json:"items"`
+	Total   int           `json:"total"`
+	Offset  int           `json:"offset"`
+	Limit   int           `json:"limit"`
+	HasMore bool          `json:"has_more"`
+	Stats   ItemListStats `json:"stats"`
+}
+
 type Progress struct {
 	Running       bool   `json:"running"`
 	TaskID        int64  `json:"strm_task_id"`

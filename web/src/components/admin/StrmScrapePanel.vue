@@ -16,6 +16,10 @@ import {
   runStrmScrape,
   stopStrmScrape,
   type StrmScrapeItem,
+  type StrmScrapeItemListQuery,
+  type StrmScrapeItemListResult,
+  type StrmScrapeItemListSort,
+  type StrmScrapeItemListStats,
   type StrmScrapeItemStatus,
   type StrmScrapeProgress,
 } from "@/api/strmScrape";
@@ -38,10 +42,16 @@ const emit = defineEmits<{ "open-settings": [] }>();
 type FilterKey = "all" | StrmScrapeItemStatus;
 type TypeFilter = "all" | "movie" | "tv";
 type TVSubFilter = "all" | "ended" | "updating";
-type SortKey = "title_asc" | "year_desc" | "year_asc" | "added_desc" | "added_asc";
+type SortKey = StrmScrapeItemListSort;
 
 const SORT_STORAGE_KEY = "litepan:strm-scrape:sort";
 const SORT_KEYS: SortKey[] = ["title_asc", "year_desc", "year_asc", "added_desc", "added_asc"];
+const PAGE_LIMIT = 120;
+const MAX_RELOAD_LIMIT = 200;
+
+function emptyStats(): StrmScrapeItemListStats {
+  return { total: 0, ok: 0, miss: 0, doubt: 0 };
+}
 
 function loadSavedSortKey(): SortKey {
   try {
@@ -60,17 +70,23 @@ function saveSortKey(key: SortKey) {
 const tasks = ref<StrmTask[]>([]);
 const selectedTaskId = ref<number | null>(null);
 const items = ref<StrmScrapeItem[]>([]);
-const itemsCache = new Map<number, StrmScrapeItem[]>();
+const stats = ref<StrmScrapeItemListStats>(emptyStats());
+const totalMatched = ref(0);
+const hasMore = ref(false);
 let loadItemsSeq = 0;
+let loadMoreObserver: IntersectionObserver | null = null;
 const loading = ref(false);
 useAdminPageLoading("tools", loading);
 const refreshing = ref(false);
+const loadingMore = ref(false);
+const booted = ref(false);
 const filter = ref<FilterKey>("all");
 const typeFilter = ref<TypeFilter>("all");
 const tvSubFilter = ref<TVSubFilter>("all");
 const sortKey = ref<SortKey>(loadSavedSortKey());
 const keyword = ref("");
 const progress = ref<StrmScrapeProgress | null>(null);
+const loadMoreSentinelEl = ref<HTMLElement | null>(null);
 
 const matchOpen = ref(false);
 const matchItem = ref<StrmScrapeItem | null>(null);
@@ -111,6 +127,28 @@ const searchInputEl = ref<HTMLInputElement | null>(null);
 const currentSortLabel = computed(
   () => sortOptions.find((o) => o.value === sortKey.value)?.label ?? "排序",
 );
+const currentListQuery = computed<StrmScrapeItemListQuery>(() => ({
+  keyword: keyword.value.trim(),
+  status: filter.value === "all" ? "" : filter.value,
+  media_type: typeFilter.value === "all" ? "" : typeFilter.value,
+  tv_state: typeFilter.value === "tv" && tvSubFilter.value !== "all" ? tvSubFilter.value : "",
+  sort: sortKey.value,
+}));
+const currentListQueryKey = computed(() =>
+  JSON.stringify({
+    task_id: selectedTaskId.value ?? 0,
+    ...currentListQuery.value,
+  }),
+);
+const hasActiveFilters = computed(
+  () =>
+    Boolean(
+      currentListQuery.value.keyword ||
+        currentListQuery.value.status ||
+        currentListQuery.value.media_type ||
+        currentListQuery.value.tv_state,
+    ),
+);
 
 function applySort(key: SortKey) {
   sortKey.value = key;
@@ -128,46 +166,15 @@ async function toggleSearch() {
   }
 }
 
-const scrapedCount = computed(() => items.value.filter((i) => i.status === "ok").length);
-const missCount = computed(() => items.value.filter((i) => i.status === "miss").length);
-const doubtCount = computed(() => items.value.filter((i) => i.status === "doubt").length);
-const totalCount = computed(() => items.value.length);
+const scrapedCount = computed(() => stats.value.ok);
+const missCount = computed(() => stats.value.miss);
+const doubtCount = computed(() => stats.value.doubt);
+const totalCount = computed(() => stats.value.total);
+const loadedCount = computed(() => items.value.length);
 const taskCount = computed(() => tasks.value.length);
 const running = computed(() => Boolean(progress.value?.running));
 const markingNormalId = ref("");
 const rescrapingId = ref("");
-
-const filteredItems = computed(() => {
-  const q = keyword.value.trim().toLowerCase();
-  const list = items.value.filter((item) => {
-    if (filter.value !== "all" && item.status !== filter.value) return false;
-    if (typeFilter.value === "movie" && item.media_type !== "movie") return false;
-    if (typeFilter.value === "tv") {
-      if (item.media_type !== "tv") return false;
-      if (tvSubFilter.value === "ended" && item.tv_state !== "ended") return false;
-      if (tvSubFilter.value === "updating" && item.tv_state !== "updating") return false;
-    }
-    if (!q) return true;
-    return item.title.toLowerCase().includes(q);
-  });
-  const sorted = [...list];
-  sorted.sort((a, b) => {
-    switch (sortKey.value) {
-      case "title_asc":
-        return a.title.localeCompare(b.title, "zh");
-      case "year_asc":
-        return (a.year || 0) - (b.year || 0) || a.title.localeCompare(b.title, "zh");
-      case "year_desc":
-        return (b.year || 0) - (a.year || 0) || a.title.localeCompare(b.title, "zh");
-      case "added_asc":
-        return (a.added_at || "").localeCompare(b.added_at || "") || a.title.localeCompare(b.title, "zh");
-      case "added_desc":
-      default:
-        return (b.added_at || "").localeCompare(a.added_at || "") || a.title.localeCompare(b.title, "zh");
-    }
-  });
-  return sorted;
-});
 
 const {
   rootEl: wallRootEl,
@@ -177,11 +184,7 @@ const {
   offsetY: wallOffsetY,
   visibleItems: wallVisibleItems,
   gridStyle: wallGridStyle,
-} = useVirtualPosterWall(filteredItems);
-
-watch([filter, typeFilter, tvSubFilter, keyword, sortKey], () => {
-  resetWallScroll();
-});
+} = useVirtualPosterWall(items);
 
 function setWallRootEl(el: unknown) {
   wallRootEl.value = el instanceof HTMLElement ? el : null;
@@ -195,6 +198,129 @@ function setTypeFilter(next: TypeFilter) {
 function setTVSubFilter(next: TVSubFilter) {
   typeFilter.value = "tv";
   tvSubFilter.value = tvSubFilter.value === next ? "all" : next;
+}
+
+function clearItemList() {
+  items.value = [];
+  stats.value = emptyStats();
+  totalMatched.value = 0;
+  hasMore.value = false;
+}
+
+function currentFetchLimit(preserveLoaded = false) {
+  if (!preserveLoaded) return PAGE_LIMIT;
+  return Math.min(Math.max(items.value.length || PAGE_LIMIT, PAGE_LIMIT), MAX_RELOAD_LIMIT);
+}
+
+function buildListQuery(offset: number, limit: number): StrmScrapeItemListQuery {
+  return {
+    ...currentListQuery.value,
+    offset,
+    limit,
+  };
+}
+
+function applyListResult(data: StrmScrapeItemListResult, append: boolean) {
+  const nextItems = Array.isArray(data.items) ? data.items : [];
+  items.value = append ? items.value.concat(nextItems) : nextItems;
+  totalMatched.value = Number(data.total || 0);
+  hasMore.value = Boolean(data.has_more);
+  stats.value = data.stats ? { ...emptyStats(), ...data.stats } : emptyStats();
+}
+
+function replaceItem(updated: StrmScrapeItem) {
+  const idx = items.value.findIndex((item) => item.id === updated.id);
+  if (idx < 0) return false;
+  const next = items.value.slice();
+  next[idx] = updated;
+  items.value = next;
+  void nextTick(() => measureWall());
+  return true;
+}
+
+async function requestItems(
+  taskId: number,
+  query: StrmScrapeItemListQuery,
+  refreshIndex = false,
+) {
+  return refreshIndex ? refreshStrmScrapeIndex(taskId, query) : fetchStrmScrapeItems(taskId, query);
+}
+
+function disconnectLoadMoreObserver() {
+  loadMoreObserver?.disconnect();
+  loadMoreObserver = null;
+}
+
+function setupLoadMoreObserver() {
+  disconnectLoadMoreObserver();
+  if (typeof IntersectionObserver === "undefined") return;
+  if (!hasMore.value || !loadMoreSentinelEl.value) return;
+  loadMoreObserver = new IntersectionObserver(
+    (entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      void loadItems({ append: true, silent: true });
+    },
+    { root: null, rootMargin: "320px 0px" },
+  );
+  loadMoreObserver.observe(loadMoreSentinelEl.value);
+}
+
+async function loadItems(opts?: {
+  append?: boolean;
+  silent?: boolean;
+  preserveLoaded?: boolean;
+  refreshIndex?: boolean;
+}) {
+  const taskId = selectedTaskId.value;
+  if (!taskId) {
+    clearItemList();
+    return false;
+  }
+  const append = Boolean(opts?.append);
+  if (append && (!hasMore.value || loadingMore.value || loading.value || refreshing.value)) {
+    return false;
+  }
+  const seq = ++loadItemsSeq;
+  const limit = append ? PAGE_LIMIT : currentFetchLimit(Boolean(opts?.preserveLoaded));
+  const offset = append ? items.value.length : 0;
+  if (append) {
+    loadingMore.value = true;
+  } else if (opts?.silent || opts?.refreshIndex) {
+    refreshing.value = true;
+  } else {
+    loading.value = true;
+    clearItemList();
+  }
+  try {
+    const data = await requestItems(taskId, buildListQuery(offset, limit), Boolean(opts?.refreshIndex));
+    if (seq !== loadItemsSeq || selectedTaskId.value !== taskId) return false;
+    applyListResult(data, append);
+    await nextTick();
+    if (!append) {
+      resetWallScroll();
+    }
+    measureWall();
+    setupLoadMoreObserver();
+    return true;
+  } catch (e) {
+    if (seq !== loadItemsSeq || selectedTaskId.value !== taskId) return false;
+    const fallback = append
+      ? "加载更多失败"
+      : opts?.refreshIndex
+        ? "重建索引失败"
+        : "加载海报墙失败";
+    toast.error(getApiErrorMessage(e, fallback));
+    return false;
+  } finally {
+    if (append) {
+      loadingMore.value = false;
+    } else {
+      if (seq === loadItemsSeq) {
+        loading.value = false;
+      }
+      refreshing.value = false;
+    }
+  }
 }
 
 const progressPolling = useConditionalPolling({
@@ -214,60 +340,6 @@ async function loadTasks() {
   }
 }
 
-async function loadItems(opts?: { silent?: boolean; force?: boolean }) {
-  const taskId = selectedTaskId.value;
-  if (!taskId) {
-    items.value = [];
-    return;
-  }
-  const seq = ++loadItemsSeq;
-  const cached = !opts?.force ? itemsCache.get(taskId) : undefined;
-
-  if (!opts?.silent && cached) {
-    items.value = cached;
-    refreshing.value = true;
-  } else if (!opts?.silent) {
-    loading.value = true;
-    items.value = [];
-  } else {
-    refreshing.value = true;
-  }
-
-  try {
-    const data = await fetchStrmScrapeItems(taskId);
-    if (seq !== loadItemsSeq || selectedTaskId.value !== taskId) return;
-    const next = data.items || [];
-    itemsCache.set(taskId, next);
-    items.value = next;
-  } catch (e) {
-    if (seq !== loadItemsSeq || selectedTaskId.value !== taskId) return;
-    toast.error(getApiErrorMessage(e, "加载海报墙失败"));
-  } finally {
-    if (seq === loadItemsSeq) {
-      loading.value = false;
-      refreshing.value = false;
-    }
-  }
-  await nextTick();
-  if (seq === loadItemsSeq) measureWall();
-}
-
-function syncItemsCache() {
-  const taskId = selectedTaskId.value;
-  if (taskId) itemsCache.set(taskId, items.value.slice());
-}
-
-function replaceItem(updated: StrmScrapeItem) {
-  const idx = items.value.findIndex((item) => item.id === updated.id);
-  if (idx < 0) return false;
-  const next = items.value.slice();
-  next[idx] = updated;
-  items.value = next;
-  syncItemsCache();
-  void nextTick(() => measureWall());
-  return true;
-}
-
 async function syncProgress() {
   try {
     const p = await fetchStrmScrapeProgress();
@@ -282,12 +354,12 @@ async function syncProgress() {
     if (sameTask && p.running && Number(p.item_revision || 0) > previousRevision) {
       const revisionDelta = Number(p.item_revision || 0) - previousRevision;
       if (revisionDelta !== 1 || !p.updated_item || !replaceItem(p.updated_item)) {
-        await loadItems({ silent: true, force: true });
+        await loadItems({ silent: true, preserveLoaded: true });
       }
     }
     if (wasRunning && !p.running) {
       progressPolling.sync();
-      await loadItems({ silent: true });
+      await loadItems({ silent: true, preserveLoaded: true });
       if (p.error) toast.error(p.error);
       else if (p.failed > 0) toast.warning(`刮削完成，失败 ${p.failed} 项，请在通知中查看详情`);
       else if (p.message) toast.success(p.message);
@@ -323,28 +395,13 @@ async function stopScrape() {
 
 async function refreshAll() {
   await loadTasks();
-  const taskId = selectedTaskId.value;
-  if (!taskId) {
+  if (!selectedTaskId.value) {
+    clearItemList();
     await syncProgress();
     return;
   }
-  const seq = ++loadItemsSeq;
-  refreshing.value = true;
-  try {
-    const data = await refreshStrmScrapeIndex(taskId);
-    if (seq !== loadItemsSeq || selectedTaskId.value !== taskId) return;
-    const next = data.items || [];
-    itemsCache.set(taskId, next);
-    items.value = next;
-    toast.success("索引已重建");
-  } catch (e) {
-    if (seq !== loadItemsSeq || selectedTaskId.value !== taskId) return;
-    toast.error(getApiErrorMessage(e, "重建索引失败"));
-  } finally {
-    if (seq === loadItemsSeq) refreshing.value = false;
-  }
-  await nextTick();
-  if (seq === loadItemsSeq) measureWall();
+  const ok = await loadItems({ refreshIndex: true });
+  if (ok) toast.success("索引已重建");
   await syncProgress();
 }
 
@@ -365,7 +422,6 @@ function episodeProgressText(item: StrmScrapeItem) {
     if (tmdb > 0) return `${local || 0}/${tmdb}集`;
     return local > 0 ? `${local}集 · 更新中` : "更新中";
   }
-  // 缺失中的短剧等：本地多于 TMDB，提示集数对比
   if (item.has_pending && tmdb > 0 && local > tmdb) return `${local}/${tmdb}集`;
   if (tmdb > 0) return `${local}/${tmdb}集`;
   if (local > 0) return `${local}集`;
@@ -531,7 +587,7 @@ async function applyMatch() {
       closeRematch();
       return;
     }
-    if (!replaceItem(result.item)) await loadItems({ silent: true });
+    if (!replaceItem(result.item)) await loadItems({ silent: true, preserveLoaded: true });
     toast.success("已确认当前匹配");
     closeRematch();
   } catch (e) {
@@ -585,7 +641,9 @@ async function applyNormalState(item: StrmScrapeItem) {
     strm_task_id: selectedTaskId.value,
     item_id: item.id,
   });
-  replaceItem(updated);
+  if (!replaceItem(updated)) {
+    await loadItems({ silent: true, preserveLoaded: true });
+  }
 }
 
 async function rescrapeItem(item: StrmScrapeItem) {
@@ -602,7 +660,7 @@ async function rescrapeItem(item: StrmScrapeItem) {
       toast.success("已开始后台重新刮削");
       return;
     }
-    if (!replaceItem(result.item)) await loadItems({ silent: true });
+    if (!replaceItem(result.item)) await loadItems({ silent: true, preserveLoaded: true });
     toast.success("已重新刮削");
   } catch (e) {
     toast.error(getApiErrorMessage(e, "重新刮削失败"));
@@ -612,11 +670,24 @@ async function rescrapeItem(item: StrmScrapeItem) {
 }
 
 watch(selectedTaskId, () => {
+  if (!booted.value) return;
   filter.value = "all";
   typeFilter.value = "all";
   tvSubFilter.value = "all";
   keyword.value = "";
+});
+
+watch(currentListQueryKey, () => {
+  if (!booted.value) return;
+  if (!selectedTaskId.value) {
+    clearItemList();
+    return;
+  }
   void loadItems();
+});
+
+watch([loadMoreSentinelEl, hasMore], () => {
+  void nextTick(() => setupLoadMoreObserver());
 });
 
 onMounted(async () => {
@@ -625,7 +696,12 @@ onMounted(async () => {
   try {
     await loadTasks();
     await syncProgress();
-    await loadItems();
+    if (selectedTaskId.value) {
+      await loadItems();
+    } else {
+      clearItemList();
+    }
+    booted.value = true;
     progressPolling.sync();
   } finally {
     loading.value = false;
@@ -633,6 +709,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  disconnectLoadMoreObserver();
   window.removeEventListener("keydown", onPosterPreviewKeydown, true);
   progressPolling.stop?.();
 });
@@ -824,6 +901,7 @@ defineExpose({
           </span>
         </div>
         <div class="scrape-toolbar__right">
+          <span v-if="totalMatched > 0" class="scrape-toolbar__count">已加载 {{ loadedCount }} / {{ totalMatched }}</span>
           <AppDropdown v-model:open="namingTipOpen" trigger="click" align="right" :min-width="340">
             <template #trigger="{ open, toggle }">
               <button
@@ -857,16 +935,21 @@ defineExpose({
       </div>
 
       <AdminEmptyState
-        v-if="!filteredItems.length"
+        v-if="!items.length"
         icon="🖼️"
-        :title="totalCount === 0 ? '这个库还没有刮削结果' : '没有符合筛选的条目'"
+        :title="totalCount === 0 && !hasActiveFilters ? '这个库还没有刮削结果' : '没有符合筛选的条目'"
         :description="
-          totalCount === 0
+          totalCount === 0 && !hasActiveFilters
             ? '点击右上角「开始刮削」，系统会扫描该 STRM 输出目录并写入 nfo / 海报。'
             : '试试切换筛选或清空搜索。'
         "
       >
-        <AppButton v-if="totalCount === 0 && !running" type="button" variant="primary" @click="startScrape">
+        <AppButton
+          v-if="totalCount === 0 && !hasActiveFilters && !running"
+          type="button"
+          variant="primary"
+          @click="startScrape"
+        >
           开始刮削
         </AppButton>
       </AdminEmptyState>
@@ -983,6 +1066,17 @@ defineExpose({
               </div>
             </article>
           </div>
+        </div>
+        <div class="scrape-wall-foot">
+          <span v-if="loadingMore" class="scrape-wall-foot__hint">正在加载更多…</span>
+          <span
+            v-else-if="hasMore"
+            ref="loadMoreSentinelEl"
+            class="scrape-wall-foot__hint scrape-wall-foot__hint--more"
+          >
+            继续下滑加载更多（{{ loadedCount }} / {{ totalMatched }}）
+          </span>
+          <span v-else-if="totalMatched > 0" class="scrape-wall-foot__hint">已加载全部 {{ totalMatched }} 项</span>
         </div>
       </div>
     </template>
@@ -1284,6 +1378,11 @@ defineExpose({
   flex: 0 0 auto;
   min-width: 0;
 }
+.scrape-toolbar__count {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
 .scrape-filters {
   display: flex;
   gap: 2px;
@@ -1395,6 +1494,19 @@ defineExpose({
 }
 .scrape-wall-root {
   width: 100%;
+}
+.scrape-wall-foot {
+  display: flex;
+  justify-content: center;
+  padding: 12px 16px 16px;
+}
+.scrape-wall-foot__hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.scrape-wall-foot__hint--more {
+  min-height: 24px;
 }
 .scrape-wall-phantom {
   position: relative;

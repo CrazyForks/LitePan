@@ -10,6 +10,24 @@ import (
 	"litepan/internal/strmscrape"
 )
 
+func parseStrmScrapeListQuery(r *http.Request) strmscrape.ItemListQuery {
+	q := r.URL.Query()
+	return strmscrape.ItemListQuery{
+		Offset:    parseInt(q.Get("offset")),
+		Limit:     parseInt(q.Get("limit")),
+		Keyword:   strings.TrimSpace(q.Get("keyword")),
+		Status:    strings.TrimSpace(q.Get("status")),
+		MediaType: strings.TrimSpace(q.Get("media_type")),
+		TVState:   strings.TrimSpace(q.Get("tv_state")),
+		Sort:      strmscrape.ItemListSort(strings.TrimSpace(q.Get("sort"))),
+	}
+}
+
+func parseInt(raw string) int {
+	v, _ := strconv.Atoi(strings.TrimSpace(raw))
+	return v
+}
+
 func (h *Handler) getStrmScrapeSettings(w http.ResponseWriter, r *http.Request) {
 	if !ensureServiceReady(w, h.strmScrape != nil) {
 		return
@@ -73,12 +91,12 @@ func (h *Handler) listStrmScrapeItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	taskID, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("strm_task_id")), 10, 64)
-	items, err := h.strmScrape.ListItems(r.Context(), taskID)
+	items, err := h.strmScrape.ListItems(r.Context(), taskID, parseStrmScrapeListQuery(r))
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	writeOK(w, map[string]any{"items": items})
+	writeOK(w, items)
 }
 
 func (h *Handler) refreshStrmScrapeIndex(w http.ResponseWriter, r *http.Request) {
@@ -86,18 +104,33 @@ func (h *Handler) refreshStrmScrapeIndex(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var req struct {
-		StrmTaskID int64 `json:"strm_task_id"`
+		StrmTaskID int64                   `json:"strm_task_id"`
+		Offset     int                     `json:"offset"`
+		Limit      int                     `json:"limit"`
+		Keyword    string                  `json:"keyword"`
+		Status     string                  `json:"status"`
+		MediaType  string                  `json:"media_type"`
+		TVState    string                  `json:"tv_state"`
+		Sort       strmscrape.ItemListSort `json:"sort"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeErr(w, err)
 		return
 	}
-	items, err := h.strmScrape.RefreshIndex(r.Context(), req.StrmTaskID)
+	items, err := h.strmScrape.RefreshIndex(r.Context(), req.StrmTaskID, strmscrape.ItemListQuery{
+		Offset:    req.Offset,
+		Limit:     req.Limit,
+		Keyword:   strings.TrimSpace(req.Keyword),
+		Status:    strings.TrimSpace(req.Status),
+		MediaType: strings.TrimSpace(req.MediaType),
+		TVState:   strings.TrimSpace(req.TVState),
+		Sort:      req.Sort,
+	})
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	writeOK(w, map[string]any{"items": items})
+	writeOK(w, items)
 }
 
 func (h *Handler) rematchStrmScrapeItem(w http.ResponseWriter, r *http.Request) {
