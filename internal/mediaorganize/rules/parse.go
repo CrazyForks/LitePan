@@ -288,14 +288,12 @@ func FixGuessitAbsoluteEpisodeSplit(name string, parsed map[string]any) map[stri
 	out := copyMap(parsed)
 	gSeason := asFirstInt(out["season"])
 	gEpisode := asFirstInt(out["episode"])
-	if gSeason != nil && gEpisode != nil && *gSeason*100+*gEpisode == *absEp {
-		out["episode"] = *absEp
-		delete(out, "season")
-	} else {
-		out["episode"] = *absEp
-		if gSeason != nil && gEpisode != nil {
-			delete(out, "season")
-		}
+	out["episode"] = *absEp
+	if gSeason != nil && gEpisode != nil {
+		// Guessit 把 157 这类绝对集号拆成 S01E57/S02E12 时，仍应回到长篇剧集的默认 Season 1。
+		out["season"] = 1
+	} else if out["season"] == nil {
+		out["season"] = 1
 	}
 	out["type"] = "episode"
 	return out

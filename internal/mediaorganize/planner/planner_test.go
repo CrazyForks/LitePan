@@ -1505,6 +1505,79 @@ func TestPlanEpisodeRangeDirectories(t *testing.T) {
 	}
 }
 
+func TestPlanFlatAbsoluteEpisodesBeyond99(t *testing.T) {
+	files := make([]domain.FileItem, 0, 157)
+	for i := 1; i <= 157; i++ {
+		files = append(files, domain.FileItem{
+			ID:   fmt.Sprintf("e%03d", i),
+			Name: fmt.Sprintf("%03d.mp4", i),
+		})
+	}
+	fs := &mockFS{dirs: map[string][]domain.FileItem{
+		"root": {{ID: "show", Name: "猫和老鼠（五十周年纪念版）157集 (1965)", IsDir: true}},
+		"show": files,
+	}}
+	p := planner.New(
+		context.Background(),
+		fs,
+		1,
+		planner.TaskConfig{
+			TargetDirectoryID: "root",
+			ActionType:        "rename",
+			MediaType:         "tv",
+			RenameMarker:      "off",
+			Recursive:         true,
+		},
+		nil,
+		"task-test",
+		nil,
+		func(string) {},
+		nil,
+		func() error { return nil },
+	)
+	plan, err := p.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Skipped) != 0 {
+		t.Fatalf("扁平目录 001-157 不应再跳过，skipped=%+v", plan.Skipped)
+	}
+	gotEpisodes := map[string]int{}
+	targetNames := map[string]string{}
+	for _, action := range plan.Actions {
+		if !strings.HasPrefix(action.SourceID, "e") {
+			continue
+		}
+		episode := rules.AsFirstInt(action.Metadata["episode"])
+		season := rules.AsFirstInt(action.Metadata["season"])
+		if episode == nil || season == nil || *season != 1 {
+			t.Fatalf("%s metadata=%+v，期望 Season 1 + 正确集号", action.SourceID, action.Metadata)
+		}
+		gotEpisodes[action.SourceID] = *episode
+		targetNames[action.SourceID] = action.TargetName
+	}
+	if len(gotEpisodes) != 157 {
+		t.Fatalf("应生成 157 个文件动作，实际=%d actions=%+v", len(gotEpisodes), plan.Actions)
+	}
+	for _, tt := range []struct {
+		id         string
+		episode    int
+		targetPart string
+	}{
+		{id: "e001", episode: 1, targetPart: "S01E01"},
+		{id: "e099", episode: 99, targetPart: "S01E99"},
+		{id: "e100", episode: 100, targetPart: "S01E100"},
+		{id: "e157", episode: 157, targetPart: "S01E157"},
+	} {
+		if gotEpisodes[tt.id] != tt.episode {
+			t.Fatalf("%s episode=%d，期望 %d", tt.id, gotEpisodes[tt.id], tt.episode)
+		}
+		if !strings.Contains(targetNames[tt.id], tt.targetPart) {
+			t.Fatalf("%s target=%q，期望包含 %q", tt.id, targetNames[tt.id], tt.targetPart)
+		}
+	}
+}
+
 func TestPlanRejectsInconsistentEpisodeRange(t *testing.T) {
 	fs := &mockFS{dirs: map[string][]domain.FileItem{
 		"root": {{ID: "show", Name: "完美世界 (2021)", IsDir: true}},

@@ -31,6 +31,27 @@ func TestBareNumericGuard(t *testing.T) {
 	}
 }
 
+func TestAbsoluteEpisodeSplitKeepsSeasonOne(t *testing.T) {
+	for _, tt := range []struct {
+		input   string
+		episode int
+	}{
+		{input: "100.mp4", episode: 100},
+		{input: "157.mp4", episode: 157},
+		{input: "212.mp4", episode: 212},
+	} {
+		t.Run(tt.input, func(t *testing.T) {
+			got := NormalizeParsedMedia(ParseFilenameStrict(tt.input))
+			if got.Episode == nil || *got.Episode != tt.episode {
+				t.Fatalf("episode = %v, want %d (full=%+v)", got.Episode, tt.episode, got)
+			}
+			if got.Season == nil || *got.Season != 1 {
+				t.Fatalf("season = %v, want 1 (full=%+v)", got.Season, got)
+			}
+		})
+	}
+}
+
 func TestParseExtensionSetAcceptsCommonForms(t *testing.T) {
 	extensions := ParseExtensionSet("vob;.VOB;*.MKV")
 	for _, extension := range []string{"vob", "mkv"} {
