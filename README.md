@@ -137,6 +137,7 @@ services:
 
 交流请到 <a href="https://space.bilibili.com/1501989416">B 站主页</a>。  
 暂不接受公开 PR；有维护意愿请私信。
+外部贡献致谢见 [ACKNOWLEDGEMENTS.md](./ACKNOWLEDGEMENTS.md)。
 
 ---
 
