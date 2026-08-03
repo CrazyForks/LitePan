@@ -2,6 +2,7 @@ package pan115open
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -36,13 +37,38 @@ type offlineTaskPage struct {
 }
 
 type offlineTask struct {
-	InfoHash    string `json:"info_hash"`
-	PercentDone int    `json:"percentDone"`
-	Size        int64  `json:"size"`
-	Name        string `json:"name"`
-	FileID      string `json:"file_id"`
-	Status      int    `json:"status"`
-	URL         string `json:"url"`
+	InfoHash    string           `json:"info_hash"`
+	PercentDone flexibleProgress `json:"percentDone"`
+	Size        int64            `json:"size"`
+	Name        string           `json:"name"`
+	FileID      string           `json:"file_id"`
+	Status      int              `json:"status"`
+	URL         string           `json:"url"`
+}
+
+type flexibleProgress int
+
+func (p *flexibleProgress) UnmarshalJSON(data []byte) error {
+	var number float64
+	if err := json.Unmarshal(data, &number); err == nil {
+		*p = flexibleProgress(int(number))
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(data, &text); err != nil {
+		return err
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		*p = 0
+		return nil
+	}
+	number, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return err
+	}
+	*p = flexibleProgress(int(number))
+	return nil
 }
 
 type offlineTorrentFile struct {
@@ -164,7 +190,7 @@ func (d *Driver) RefreshOfflineTasks(ctx context.Context, refs []driver.OfflineT
 			}
 			update := driver.OfflineTaskUpdate{
 				InfoHash: task.InfoHash,
-				Progress: task.PercentDone,
+				Progress: int(task.PercentDone),
 				Size:     task.Size,
 				Name:     task.Name,
 				FileID:   task.FileID,

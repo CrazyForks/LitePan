@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"litepan/internal/domain"
@@ -54,15 +55,40 @@ type offlineTaskPage struct {
 }
 
 type offlineTask struct {
-	TaskID       string          `json:"taskId"`
-	FileID       string          `json:"fileId"`
-	FileName     string          `json:"fileName"`
-	FileSize     int64           `json:"fileSize"`
-	Status       int             `json:"status"`
-	Progress     int             `json:"progress"`
-	ErrorMessage string          `json:"errorMessage"`
-	ErrorCode    json.RawMessage `json:"errorCode"`
-	Message      string          `json:"message"`
+	TaskID       string           `json:"taskId"`
+	FileID       string           `json:"fileId"`
+	FileName     string           `json:"fileName"`
+	FileSize     int64            `json:"fileSize"`
+	Status       int              `json:"status"`
+	Progress     flexibleProgress `json:"progress"`
+	ErrorMessage string           `json:"errorMessage"`
+	ErrorCode    json.RawMessage  `json:"errorCode"`
+	Message      string           `json:"message"`
+}
+
+type flexibleProgress int
+
+func (p *flexibleProgress) UnmarshalJSON(data []byte) error {
+	var number float64
+	if err := json.Unmarshal(data, &number); err == nil {
+		*p = flexibleProgress(int(number))
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(data, &text); err != nil {
+		return err
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		*p = 0
+		return nil
+	}
+	number, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return err
+	}
+	*p = flexibleProgress(int(number))
+	return nil
 }
 
 func (d *Driver) OfflineDownloadCapabilities() driver.OfflineDownloadCapabilities {
@@ -213,7 +239,7 @@ func (d *Driver) RefreshOfflineTasks(ctx context.Context, refs []driver.OfflineT
 func mapOfflineTaskUpdate(task offlineTask) (driver.OfflineTaskUpdate, bool) {
 	update := driver.OfflineTaskUpdate{
 		ProviderTaskID: strings.TrimSpace(task.TaskID),
-		Progress:       task.Progress,
+		Progress:       int(task.Progress),
 		Size:           task.FileSize,
 		Name:           strings.TrimSpace(task.FileName),
 		FileID:         strings.TrimSpace(task.FileID),
