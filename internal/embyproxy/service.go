@@ -44,6 +44,8 @@ type Service struct {
 	log      *slog.Logger
 	client   *http.Client
 
+	servePlayback func(http.ResponseWriter, *http.Request, playback.Request, playback.Intent) error
+
 	mu     sync.Mutex
 	server *http.Server
 	port   int
@@ -94,6 +96,12 @@ func New(opts Options) *Service {
 		strm:     opts.Strm,
 		log:      log,
 		client:   client,
+		servePlayback: func(w http.ResponseWriter, r *http.Request, req playback.Request, intent playback.Intent) error {
+			if opts.Playback == nil {
+				return domain.Errf(domain.CodeNotImplement)
+			}
+			return opts.Playback.ServeHTTP(w, r, req, intent)
+		},
 	}
 }
 
@@ -454,9 +462,29 @@ func (s *Service) serveSTRM(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	name, _ := url.PathUnescape(m[4])
-	if err := s.playback.ServeHTTP(w, r, playback.Request{AccountID: accountID, FileID: fileID}, playback.Intent{FileName: name}); err != nil {
+	if err := s.playbackServe(w, r, playback.Request{AccountID: accountID, FileID: fileID}, playback.Intent{FileName: name}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func (s *Service) playbackServe(w http.ResponseWriter, r *http.Request, req playback.Request, intent playback.Intent) error {
+	if s.servePlayback == nil {
+		return domain.Errf(domain.CodeNotImplement)
+	}
+	return s.servePlayback(w, r, req, intent)
+}
+
+func (s *Service) serveLitePanPlayback(w http.ResponseWriter, r *http.Request, litepanURL string) bool {
+	accountID, fileID, ok := parseLitePanSTRMURL(litepanURL)
+	if !ok {
+		return false
+	}
+	if err := s.playbackServe(w, r, playback.Request{AccountID: accountID, FileID: fileID}, playback.Intent{}); err != nil {
+		s.log.Warn("Emby 反代解析 LitePan STRM 失败", "url", litepanURL, "error", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return true
+	}
+	return true
 }
 
 func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg Config, fullPath string) {
@@ -488,14 +516,16 @@ func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg
 			continue
 		}
 		if redirectURL := s.extractLitePanSTRM(mediaSource, r, cfg); redirectURL != "" {
-			http.Redirect(w, r, redirectURL, http.StatusFound)
-			return
+			if s.serveLitePanPlayback(w, r, redirectURL) {
+				return
+			}
 		}
 	}
 	itemPath := normalizeMediaURL(stringValue(item, "Path"), r, cfg)
 	if isLitePanSTRMURL(itemPath) {
-		http.Redirect(w, r, itemPath, http.StatusFound)
-		return
+		if s.serveLitePanPlayback(w, r, itemPath) {
+			return
+		}
 	}
 	s.proxyRequest(w, r, cfg, fullPath)
 }

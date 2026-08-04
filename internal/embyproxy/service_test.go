@@ -2,14 +2,17 @@ package embyproxy
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"litepan/internal/playback"
 	"litepan/internal/settings"
 	"litepan/internal/store"
+	"litepan/internal/strm"
 )
 
 func testEmbyProxyService(t *testing.T, embyURL string) *Service {
@@ -108,5 +111,84 @@ func TestDedicatedPortPreservesInfuseAuthenticationBodyLength(t *testing.T) {
 	}
 	if gotContentLength != int64(len(body)) || len(gotTransferEncoding) != 0 {
 		t.Fatalf("认证请求长度=%d，Transfer-Encoding=%v，期望固定 Content-Length=%d", gotContentLength, gotTransferEncoding, len(body))
+	}
+}
+
+func TestRedirectSTRMStreamResolvesLitePanSTRMOnServer(t *testing.T) {
+	fileID := "file-1"
+	litepanURL := fmt.Sprintf("http://192.168.60.8:5211/api/strm/play/12/%s/t/token/n/demo.mkv", strm.EncodeFileKey(fileID))
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/Items") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, fmt.Sprintf(`{"Items":[{"Id":"123","MediaSources":[{"Id":"ms1","Path":%q}]}]}`, litepanURL))
+	}))
+	defer upstream.Close()
+
+	svc := testEmbyProxyService(t, upstream.URL)
+	var gotAccountID int64
+	var gotFileID string
+	svc.servePlayback = func(w http.ResponseWriter, r *http.Request, req playback.Request, intent playback.Intent) error {
+		gotAccountID = req.AccountID
+		gotFileID = req.FileID
+		w.Header().Set("Location", "https://cdn.example/video.mkv")
+		w.WriteHeader(http.StatusFound)
+		return nil
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://litepan.test:8097/Videos/123/stream?MediaSourceId=ms1&api_key=test-key", nil)
+	rec := httptest.NewRecorder()
+	svc.handle(rec, req)
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("状态码=%d，响应=%s", resp.StatusCode, rec.Body.String())
+	}
+	if got := resp.Header.Get("Location"); got != "https://cdn.example/video.mkv" {
+		t.Fatalf("Location=%q", got)
+	}
+	if gotAccountID != 12 || gotFileID != fileID {
+		t.Fatalf("播放请求解析错误：account=%d file=%q", gotAccountID, gotFileID)
+	}
+}
+
+func TestRedirectSTRMStreamUsesPlaybackResponseForProxyMode(t *testing.T) {
+	litepanURL := fmt.Sprintf("http://192.168.60.8:5211/api/strm/play/9/%s/t/token/n/demo.mkv", strm.EncodeFileKey("file-9"))
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/Items") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, fmt.Sprintf(`{"Items":[{"Id":"123","MediaSources":[{"Id":"ms1","Path":%q}]}]}`, litepanURL))
+	}))
+	defer upstream.Close()
+
+	svc := testEmbyProxyService(t, upstream.URL)
+	svc.servePlayback = func(w http.ResponseWriter, r *http.Request, req playback.Request, intent playback.Intent) error {
+		w.Header().Set("Content-Type", "video/mp4")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "proxied")
+		return nil
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://litepan.test:8097/Videos/123/stream?MediaSourceId=ms1&api_key=test-key", nil)
+	rec := httptest.NewRecorder()
+	svc.handle(rec, req)
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("状态码=%d，响应=%s", resp.StatusCode, string(body))
+	}
+	if got := resp.Header.Get("Location"); got != "" {
+		t.Fatalf("Location=%q，期望为空", got)
+	}
+	if got := string(body); got != "proxied" {
+		t.Fatalf("响应体=%q", got)
 	}
 }
