@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import type { Account } from "@/api/types";
+import { filesApi } from "@/api/files";
+import type { Account, BrowserFavoriteItem } from "@/api/types";
 import type { Crumb } from "@/stores/browser";
 import AppModal from "@/components/base/AppModal.vue";
 import DriverIcon from "@/components/driver/DriverIcon.vue";
@@ -60,6 +61,9 @@ const emit = defineEmits<{
 
 const selAccount = ref<number | null>(props.accountId);
 const selectedItems = ref<FolderSelection[]>([]);
+const favorites = ref<BrowserFavoriteItem[]>([]);
+const favoritesLoading = ref(false);
+let favoritesSeq = 0;
 
 function initAccount() {
   if (props.accountId != null) {
@@ -76,6 +80,11 @@ function initSelections() {
       ancestorIds: [...(item.ancestorIds ?? [])],
     }))
     : [];
+}
+
+function resetFavorites() {
+  favorites.value = [];
+  favoritesLoading.value = false;
 }
 
 const effectiveInitialBreadcrumb = computed(() =>
@@ -96,7 +105,19 @@ watch(
     if (open) {
       initAccount();
       initSelections();
+      return;
     }
+    favoritesSeq += 1;
+    resetFavorites();
+  },
+  { immediate: true },
+);
+
+watch(
+  () => [props.open, selAccount.value] as const,
+  ([open, accountId]) => {
+    if (!open) return;
+    void loadFavorites(accountId);
   },
   { immediate: true },
 );
@@ -113,6 +134,27 @@ function selectAccount(accountId: number) {
   if (selAccount.value === accountId) return;
   selAccount.value = accountId;
   selectedItems.value = [];
+}
+
+async function loadFavorites(accountId: number | null) {
+  const requestSeq = ++favoritesSeq;
+  if (accountId == null) {
+    resetFavorites();
+    return;
+  }
+  favoritesLoading.value = true;
+  try {
+    const data = await filesApi.getFavorites(accountId);
+    if (requestSeq !== favoritesSeq || !props.open || selAccount.value !== accountId) return;
+    favorites.value = data.items;
+  } catch {
+    if (requestSeq !== favoritesSeq || !props.open || selAccount.value !== accountId) return;
+    favorites.value = [];
+  } finally {
+    if (requestSeq === favoritesSeq) {
+      favoritesLoading.value = false;
+    }
+  }
 }
 
 function onResolve(folder: {
@@ -171,6 +213,8 @@ function onResolve(folder: {
           :root-anchor="selAccount === accountId ? effectiveRootAnchor : undefined"
           :multi-select="multiSelect"
           :selected-items="multiSelect ? selectedItems : undefined"
+          :favorites="favorites"
+          :favorites-loading="favoritesLoading"
           @update:selected-items="selectedItems = $event"
           @resolve="onResolve"
           @cancel="emit('close')"

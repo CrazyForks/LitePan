@@ -4,7 +4,7 @@ import { filesApi } from "@/api/files";
 import { getApiErrorMessage } from "@/api/client";
 import { toast } from "@/composables/useToast";
 import { FileNameError, validateFileName } from "@/utils/fileName";
-import type { FileItem } from "@/api/types";
+import type { BrowserFavoriteItem, FileItem } from "@/api/types";
 import type { Crumb } from "@/stores/browser";
 import type { SortKey, SortOrder } from "@/types/file-browser";
 import { naturalSort } from "@/utils/naturalSort";
@@ -52,6 +52,9 @@ const props = withDefaults(
     showClose?: boolean;
     // 是否显示当前目录筛选搜索框。
     showSearch?: boolean;
+    // 当前账号收藏夹，用于目录选择器内快速跳转。
+    favorites?: BrowserFavoriteItem[];
+    favoritesLoading?: boolean;
   }>(),
   {
     accountId: 0,
@@ -67,6 +70,8 @@ const props = withDefaults(
     selectedItems: undefined,
     showClose: true,
     showSearch: true,
+    favorites: undefined,
+    favoritesLoading: false,
   },
 );
 
@@ -93,6 +98,9 @@ const showCreateInput = ref(false);
 const newFolderName = ref("");
 const createInputRef = ref<HTMLInputElement | null>(null);
 const selectedMap = ref<Record<string, FolderSelection>>({});
+const favoriteMenuOpen = ref(false);
+const favoritePage = ref(0);
+const FAVORITE_PAGE_SIZE = 12;
 
 const columns: { key: FolderSortKey; label: string }[] = [
   { key: "name", label: "名称" },
@@ -127,6 +135,25 @@ const controlled = computed(() => props.selectedItems !== undefined);
 const activeSelections = computed(() =>
   controlled.value ? (props.selectedItems ?? []) : Object.values(selectedMap.value),
 );
+const favoriteItems = computed(() => props.favorites ?? []);
+const showFavoriteEntry = computed(() => props.favorites !== undefined);
+const favoriteTriggerDisabled = computed(() =>
+  loading.value || props.favoritesLoading || favoriteItems.value.length === 0,
+);
+const favoritePageCount = computed(() =>
+  Math.max(1, Math.ceil(favoriteItems.value.length / FAVORITE_PAGE_SIZE)),
+);
+const pagedFavoriteItems = computed(() => {
+  const start = favoritePage.value * FAVORITE_PAGE_SIZE;
+  return favoriteItems.value.slice(start, start + FAVORITE_PAGE_SIZE);
+});
+const canPrevFavoritePage = computed(() => favoritePage.value > 0);
+const canNextFavoritePage = computed(() => favoritePage.value < favoritePageCount.value - 1);
+const favoriteTriggerTitle = computed(() => {
+  if (props.favoritesLoading) return "正在加载收藏夹";
+  if (!favoriteItems.value.length) return "当前账号暂无收藏夹";
+  return favoriteMenuOpen.value ? "收起收藏夹快捷进入" : "从收藏夹快速进入";
+});
 const canCreateFolder = computed(() => props.allowCreateFolder && !props.loader);
 const selectedCount = computed(() => activeSelections.value.length);
 const primaryActionText = computed(() => {
@@ -146,6 +173,45 @@ type SelectState = "none" | "checked" | "partial" | "covered";
 function clearSelection() {
   if (controlled.value) return;
   selectedMap.value = {};
+}
+
+function closeFavoriteMenu() {
+  favoriteMenuOpen.value = false;
+}
+
+function toggleFavoriteMenu() {
+  if (favoriteTriggerDisabled.value) return;
+  if (!favoriteMenuOpen.value) favoritePage.value = 0;
+  favoriteMenuOpen.value = !favoriteMenuOpen.value;
+}
+
+function prevFavoritePage() {
+  if (!canPrevFavoritePage.value) return;
+  favoritePage.value -= 1;
+}
+
+function nextFavoritePage() {
+  if (!canNextFavoritePage.value) return;
+  favoritePage.value += 1;
+}
+
+function formatFavoritePath(item: BrowserFavoriteItem) {
+  const names = item.crumbs
+    .map((crumb) => crumb.name)
+    .filter((name) => name && name !== "根目录");
+  return names.length ? `/${names.join("/")}` : "/";
+}
+
+function isFavoriteCurrent(item: BrowserFavoriteItem) {
+  const ids = item.crumbs.map((crumb) => String(crumb.id || ""));
+  return (
+    ids.length === breadcrumb.value.length
+    && ids.every((id, index) => id === String(breadcrumb.value[index]?.id || ""))
+  );
+}
+
+function cloneBreadcrumb(items: Crumb[]) {
+  return items.map((item) => ({ id: String(item.id || ""), name: item.name }));
 }
 
 function normalizeSelectPath(id: string) {
@@ -278,6 +344,7 @@ async function resolveInitialBreadcrumb(): Promise<Crumb[]> {
 }
 
 async function resetAndLoad() {
+  closeFavoriteMenu();
   breadcrumb.value = await resolveInitialBreadcrumb();
   filterKeyword.value = "";
   resetCreateState();
@@ -364,9 +431,11 @@ async function load(parentId: string, opts?: { forceRefresh?: boolean }) {
   error.value = "";
   try {
     dirs.value = await listDirs(parentId, opts);
+    return true;
   } catch (e) {
     dirs.value = [];
     error.value = getApiErrorMessage(e, "加载失败");
+    return false;
   } finally {
     loading.value = false;
   }
@@ -378,6 +447,7 @@ function resetCreateState() {
 }
 
 function openDir(dir: FileItem) {
+  closeFavoriteMenu();
   breadcrumb.value = [...breadcrumb.value, { id: dir.id, name: dir.name }];
   filterKeyword.value = "";
   resetCreateState();
@@ -389,6 +459,7 @@ function goTo(index: number) {
   const minIndex = props.rootAnchor ? 0 : 0;
   if (index < minIndex) return;
   if (index >= breadcrumb.value.length - 1) return;
+  closeFavoriteMenu();
   breadcrumb.value = breadcrumb.value.slice(0, index + 1);
   filterKeyword.value = "";
   resetCreateState();
@@ -397,6 +468,7 @@ function goTo(index: number) {
 }
 
 function refresh() {
+  closeFavoriteMenu();
   resetCreateState();
   void load(currentParentId.value, { forceRefresh: true });
 }
@@ -450,7 +522,26 @@ async function submitCreateFolder() {
   }
 }
 
+async function openFavorite(item: BrowserFavoriteItem) {
+  if (!item.crumbs.length) return;
+  closeFavoriteMenu();
+  const previousBreadcrumb = cloneBreadcrumb(breadcrumb.value);
+  const previousFilter = filterKeyword.value;
+  const targetBreadcrumb = cloneBreadcrumb(item.crumbs);
+  breadcrumb.value = targetBreadcrumb;
+  filterKeyword.value = "";
+  resetCreateState();
+  clearSelection();
+  const ok = await load(currentParentId.value);
+  if (ok) return;
+  breadcrumb.value = previousBreadcrumb;
+  filterKeyword.value = previousFilter;
+  await load(previousBreadcrumb[previousBreadcrumb.length - 1]?.id ?? "");
+  toast.info("收藏夹目录不存在或暂时无法打开");
+}
+
 function selectCurrent() {
+  closeFavoriteMenu();
   const payload: {
     accountId: number;
     parentId: string;
@@ -474,35 +565,66 @@ watch(
   },
   { immediate: true },
 );
+
+watch(
+  () => [props.favorites, props.favoritesLoading] as const,
+  () => {
+    if (favoriteTriggerDisabled.value) closeFavoriteMenu();
+    if (favoritePage.value >= favoritePageCount.value) {
+      favoritePage.value = Math.max(0, favoritePageCount.value - 1);
+    }
+  },
+  { deep: true },
+);
 </script>
 
 <template>
   <div class="folder-selector">
-    <div v-if="title || showSearch || showClose" class="folder-selector__header">
+    <div v-if="title || showFavoriteEntry || showSearch || showClose" class="folder-selector__header">
       <h3 v-if="title" class="folder-selector__title">{{ title }}</h3>
-      <label
-        v-if="showSearch"
-        class="folder-selector__search"
-        title="仅筛选当前目录下已加载的文件夹"
-      >
-        <span class="folder-selector__search-icon"><SvgIcon name="search" :size="15" /></span>
-        <input
-          v-model.trim="filterKeyword"
-          type="search"
-          placeholder="筛选当前目录文件夹"
-          :disabled="loading"
-          maxlength="100"
-        />
-        <button
-          v-if="filterKeyword"
-          type="button"
-          class="folder-selector__search-clear"
-          aria-label="清空筛选"
-          @click="filterKeyword = ''"
+      <div v-if="showFavoriteEntry || showSearch" class="folder-selector__header-tools">
+        <div v-if="showFavoriteEntry" class="folder-selector__favorite-entry">
+          <button
+            type="button"
+            class="folder-selector__favorite-trigger"
+            :class="{ active: favoriteMenuOpen }"
+            :title="favoriteTriggerTitle"
+            :aria-label="favoriteTriggerTitle"
+            :aria-expanded="favoriteMenuOpen"
+            :disabled="favoriteTriggerDisabled"
+            @click="toggleFavoriteMenu"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path
+                d="M12 2.8l2.8 5.68 6.27.91-4.53 4.42 1.07 6.25L12 17.17 6.39 20.06l1.07-6.25L2.93 9.39l6.27-.91L12 2.8z"
+              />
+            </svg>
+          </button>
+        </div>
+        <label
+          v-if="showSearch"
+          class="folder-selector__search"
+          title="仅筛选当前目录下已加载的文件夹"
         >
-          ×
-        </button>
-      </label>
+          <span class="folder-selector__search-icon"><SvgIcon name="search" :size="15" /></span>
+          <input
+            v-model.trim="filterKeyword"
+            type="search"
+            placeholder="筛选当前目录文件夹"
+            :disabled="loading"
+            maxlength="100"
+          />
+          <button
+            v-if="filterKeyword"
+            type="button"
+            class="folder-selector__search-clear"
+            aria-label="清空筛选"
+            @click="filterKeyword = ''"
+          >
+            ×
+          </button>
+        </label>
+      </div>
       <button
         v-if="showClose"
         type="button"
@@ -514,123 +636,294 @@ watch(
       </button>
     </div>
 
-    <div class="folder-selector__content">
-      <BreadcrumbNav :items="breadcrumb" compact @navigate="goTo" />
-      <div v-if="filterKeyword" class="folder-selector__filter-tip">
-        仅筛选当前目录，匹配 {{ sortedDirs.length }} 项
-      </div>
-
-      <div class="file-list folder-selector__list" :class="tableClass">
-        <div class="folder-table-header" role="row">
-          <label
-            v-if="multiSelect"
-            class="checkbox-col"
-            :title="headerSelectState === 'checked' ? '取消全选' : '全选当前层'"
-          >
-            <input
-              type="checkbox"
-              :checked="headerSelectState === 'checked'"
-              :indeterminate="headerSelectState === 'partial'"
-              :disabled="loading || !sortedDirs.length"
-              @change="toggleSelectAllVisible"
-            />
-          </label>
-          <button
-            v-for="col in columns"
-            :key="col.key"
-            type="button"
-            class="folder-table-heading"
-            :class="[`col-${col.key}`, { active: sortKey === col.key }]"
-            @click="toggleSort(col.key)"
-          >
-            <span class="folder-table-heading-label folder-table-heading-label--full">{{ col.label }}</span>
-            <span class="folder-table-heading-label folder-table-heading-label--compact">
-              {{ col.key === "modified" ? "时间" : col.label }}
+    <div class="folder-selector__content" :class="{ 'favorite-mode': favoriteMenuOpen }">
+      <div v-if="showFavoriteEntry" class="folder-selector__panel-stack">
+        <div class="folder-selector__favorites-panel" :class="{ 'is-open': favoriteMenuOpen }">
+          <div class="folder-selector__favorites-head">
+            <span class="folder-selector__favorites-title">收藏夹快捷进入</span>
+            <span v-if="favoriteItems.length > FAVORITE_PAGE_SIZE" class="folder-selector__favorites-pager">
+              <button
+                type="button"
+                class="folder-selector__favorites-page-btn"
+                :disabled="!canPrevFavoritePage"
+                aria-label="上一页"
+                @click="prevFavoritePage"
+              >
+                <SvgIcon name="chevron-down" :size="12" class-name="folder-selector__favorites-page-icon folder-selector__favorites-page-icon--prev" />
+              </button>
+              <span class="folder-selector__favorites-page-status">
+                {{ favoritePage + 1 }} / {{ favoritePageCount }}
+              </span>
+              <button
+                type="button"
+                class="folder-selector__favorites-page-btn"
+                :disabled="!canNextFavoritePage"
+                aria-label="下一页"
+                @click="nextFavoritePage"
+              >
+                <SvgIcon name="chevron-down" :size="12" class-name="folder-selector__favorites-page-icon folder-selector__favorites-page-icon--next" />
+              </button>
             </span>
-            <span class="sort-indicator" :class="sortClass(col.key)" />
-          </button>
+          </div>
+          <div v-if="props.favoritesLoading" class="folder-selector__favorite-empty">收藏夹加载中…</div>
+          <div v-else-if="!favoriteItems.length" class="folder-selector__favorite-empty">当前账号暂无收藏夹</div>
+          <div v-else class="folder-selector__favorite-grid">
+            <button
+              v-for="item in pagedFavoriteItems"
+              :key="item.id"
+              type="button"
+              class="folder-selector__favorite-card"
+              :class="{ active: isFavoriteCurrent(item) }"
+              @click="void openFavorite(item)"
+            >
+              <span class="folder-selector__favorite-card-icon">
+                <SvgIcon name="folder" :size="16" />
+              </span>
+              <span class="folder-selector__favorite-card-body">
+                <span class="folder-selector__favorite-name">{{ item.name }}</span>
+                <span class="folder-selector__favorite-path">{{ formatFavoritePath(item) }}</span>
+              </span>
+            </button>
+          </div>
         </div>
 
-        <div class="folder-table-body">
-          <div v-if="showCreateInput" class="folder-create-row">
-            <span class="folder-name-icon"><SvgIcon name="folder" :size="18" /></span>
-            <input
-              ref="createInputRef"
-              v-model.trim="newFolderName"
-              type="text"
-              class="inline-rename-input"
-              placeholder="输入文件夹名称"
-              maxlength="100"
-              :disabled="creating"
-              @keyup.enter="submitCreateFolder"
-              @keyup.esc="cancelCreateFolder"
-            />
-            <button
-              type="button"
-              class="folder-inline-btn confirm"
-              title="确认"
-              :disabled="creating"
-              @click="submitCreateFolder"
-            >
-              ✓
-            </button>
-            <button
-              type="button"
-              class="folder-inline-btn cancel"
-              title="取消"
-              :disabled="creating"
-              @click="cancelCreateFolder"
-            >
-              ×
-            </button>
+        <div class="folder-selector__directory-panel" :class="{ 'is-shifted': favoriteMenuOpen }">
+          <BreadcrumbNav :items="breadcrumb" compact @navigate="goTo" />
+          <div v-if="filterKeyword" class="folder-selector__filter-tip">
+            仅筛选当前目录，匹配 {{ sortedDirs.length }} 项
           </div>
 
-          <div v-if="loading" class="folder-state">加载中…</div>
-          <div v-else-if="error" class="folder-state error">{{ error }}</div>
-          <div v-else-if="!sortedDirs.length && !showCreateInput" class="folder-state">
-            {{ filterKeyword ? "当前目录没有匹配的文件夹" : "没有子目录" }}
-          </div>
-          <template v-else>
-            <div
-              v-for="dir in sortedDirs"
-              :key="dir.id"
-              class="folder-table-row"
-              :class="{
-                selected: multiSelect && (isSelected(dir) || isPartialSelected(dir)),
-              }"
-              @click="openDir(dir)"
-            >
+          <div class="file-list folder-selector__list" :class="tableClass">
+            <div class="folder-table-header" role="row">
               <label
                 v-if="multiSelect"
                 class="checkbox-col"
-                :title="selectionState(dir) === 'covered'
-                  ? '已包含在上级目录中，请先取消上级目录'
-                  : selectionState(dir) === 'partial'
-                    ? '已选部分子目录，点击改为全选此目录'
-                    : `选择 ${dir.name}`"
-                @click.stop
+                :title="headerSelectState === 'checked' ? '取消全选' : '全选当前层'"
               >
                 <input
                   type="checkbox"
-                  :checked="isSelected(dir)"
-                  :indeterminate="isPartialSelected(dir)"
-                  :disabled="selectionState(dir) === 'covered'"
-                  :aria-label="`选择 ${dir.name}`"
-                  @change="toggleSelect(dir, ($event.target as HTMLInputElement).checked)"
+                  :checked="headerSelectState === 'checked'"
+                  :indeterminate="headerSelectState === 'partial'"
+                  :disabled="loading || !sortedDirs.length"
+                  @change="toggleSelectAllVisible"
                 />
               </label>
-              <div class="folder-name-cell">
-                <span class="folder-name-icon"><SvgIcon name="folder" :size="18" /></span>
-                <span class="folder-name-text" :title="dir.name">{{ dir.name }}</span>
-              </div>
-              <span class="folder-time-cell">
-                <span class="folder-time-cell__full">{{ formatTime(dir.mod_time) }}</span>
-                <span class="folder-time-cell__compact">{{ formatFolderTimeShort(dir.mod_time) }}</span>
-              </span>
+              <button
+                v-for="col in columns"
+                :key="col.key"
+                type="button"
+                class="folder-table-heading"
+                :class="[`col-${col.key}`, { active: sortKey === col.key }]"
+                @click="toggleSort(col.key)"
+              >
+                <span class="folder-table-heading-label folder-table-heading-label--full">{{ col.label }}</span>
+                <span class="folder-table-heading-label folder-table-heading-label--compact">
+                  {{ col.key === "modified" ? "时间" : col.label }}
+                </span>
+                <span class="sort-indicator" :class="sortClass(col.key)" />
+              </button>
             </div>
-          </template>
+
+            <div class="folder-table-body">
+              <div v-if="showCreateInput" class="folder-create-row">
+                <span class="folder-name-icon"><SvgIcon name="folder" :size="18" /></span>
+                <input
+                  ref="createInputRef"
+                  v-model.trim="newFolderName"
+                  type="text"
+                  class="inline-rename-input"
+                  placeholder="输入文件夹名称"
+                  maxlength="100"
+                  :disabled="creating"
+                  @keyup.enter="submitCreateFolder"
+                  @keyup.esc="cancelCreateFolder"
+                />
+                <button
+                  type="button"
+                  class="folder-inline-btn confirm"
+                  title="确认"
+                  :disabled="creating"
+                  @click="submitCreateFolder"
+                >
+                  ✓
+                </button>
+                <button
+                  type="button"
+                  class="folder-inline-btn cancel"
+                  title="取消"
+                  :disabled="creating"
+                  @click="cancelCreateFolder"
+                >
+                  ×
+                </button>
+              </div>
+
+              <div v-if="loading" class="folder-state">加载中…</div>
+              <div v-else-if="error" class="folder-state error">{{ error }}</div>
+              <div v-else-if="!sortedDirs.length && !showCreateInput" class="folder-state">
+                {{ filterKeyword ? "当前目录没有匹配的文件夹" : "没有子目录" }}
+              </div>
+              <template v-else>
+                <div
+                  v-for="dir in sortedDirs"
+                  :key="dir.id"
+                  class="folder-table-row"
+                  :class="{
+                    selected: multiSelect && (isSelected(dir) || isPartialSelected(dir)),
+                  }"
+                  @click="openDir(dir)"
+                >
+                  <label
+                    v-if="multiSelect"
+                    class="checkbox-col"
+                    :title="selectionState(dir) === 'covered'
+                      ? '已包含在上级目录中，请先取消上级目录'
+                      : selectionState(dir) === 'partial'
+                        ? '已选部分子目录，点击改为全选此目录'
+                        : `选择 ${dir.name}`"
+                    @click.stop
+                  >
+                    <input
+                      type="checkbox"
+                      :checked="isSelected(dir)"
+                      :indeterminate="isPartialSelected(dir)"
+                      :disabled="selectionState(dir) === 'covered'"
+                      :aria-label="`选择 ${dir.name}`"
+                      @change="toggleSelect(dir, ($event.target as HTMLInputElement).checked)"
+                    />
+                  </label>
+                  <div class="folder-name-cell">
+                    <span class="folder-name-icon"><SvgIcon name="folder" :size="18" /></span>
+                    <span class="folder-name-text" :title="dir.name">{{ dir.name }}</span>
+                  </div>
+                  <span class="folder-time-cell">
+                    <span class="folder-time-cell__full">{{ formatTime(dir.mod_time) }}</span>
+                    <span class="folder-time-cell__compact">{{ formatFolderTimeShort(dir.mod_time) }}</span>
+                  </span>
+                </div>
+              </template>
+            </div>
+          </div>
         </div>
       </div>
+      <template v-else>
+        <BreadcrumbNav :items="breadcrumb" compact @navigate="goTo" />
+        <div v-if="filterKeyword" class="folder-selector__filter-tip">
+          仅筛选当前目录，匹配 {{ sortedDirs.length }} 项
+        </div>
+
+        <div class="file-list folder-selector__list" :class="tableClass">
+          <div class="folder-table-header" role="row">
+            <label
+              v-if="multiSelect"
+              class="checkbox-col"
+              :title="headerSelectState === 'checked' ? '取消全选' : '全选当前层'"
+            >
+              <input
+                type="checkbox"
+                :checked="headerSelectState === 'checked'"
+                :indeterminate="headerSelectState === 'partial'"
+                :disabled="loading || !sortedDirs.length"
+                @change="toggleSelectAllVisible"
+              />
+            </label>
+            <button
+              v-for="col in columns"
+              :key="col.key"
+              type="button"
+              class="folder-table-heading"
+              :class="[`col-${col.key}`, { active: sortKey === col.key }]"
+              @click="toggleSort(col.key)"
+            >
+              <span class="folder-table-heading-label folder-table-heading-label--full">{{ col.label }}</span>
+              <span class="folder-table-heading-label folder-table-heading-label--compact">
+                {{ col.key === "modified" ? "时间" : col.label }}
+              </span>
+              <span class="sort-indicator" :class="sortClass(col.key)" />
+            </button>
+          </div>
+
+          <div class="folder-table-body">
+            <div v-if="showCreateInput" class="folder-create-row">
+              <span class="folder-name-icon"><SvgIcon name="folder" :size="18" /></span>
+              <input
+                ref="createInputRef"
+                v-model.trim="newFolderName"
+                type="text"
+                class="inline-rename-input"
+                placeholder="输入文件夹名称"
+                maxlength="100"
+                :disabled="creating"
+                @keyup.enter="submitCreateFolder"
+                @keyup.esc="cancelCreateFolder"
+              />
+              <button
+                type="button"
+                class="folder-inline-btn confirm"
+                title="确认"
+                :disabled="creating"
+                @click="submitCreateFolder"
+              >
+                ✓
+              </button>
+              <button
+                type="button"
+                class="folder-inline-btn cancel"
+                title="取消"
+                :disabled="creating"
+                @click="cancelCreateFolder"
+              >
+                ×
+              </button>
+            </div>
+
+            <div v-if="loading" class="folder-state">加载中…</div>
+            <div v-else-if="error" class="folder-state error">{{ error }}</div>
+            <div v-else-if="!sortedDirs.length && !showCreateInput" class="folder-state">
+              {{ filterKeyword ? "当前目录没有匹配的文件夹" : "没有子目录" }}
+            </div>
+            <template v-else>
+              <div
+                v-for="dir in sortedDirs"
+                :key="dir.id"
+                class="folder-table-row"
+                :class="{
+                  selected: multiSelect && (isSelected(dir) || isPartialSelected(dir)),
+                }"
+                @click="openDir(dir)"
+              >
+                <label
+                  v-if="multiSelect"
+                  class="checkbox-col"
+                  :title="selectionState(dir) === 'covered'
+                    ? '已包含在上级目录中，请先取消上级目录'
+                    : selectionState(dir) === 'partial'
+                      ? '已选部分子目录，点击改为全选此目录'
+                      : `选择 ${dir.name}`"
+                  @click.stop
+                >
+                  <input
+                    type="checkbox"
+                    :checked="isSelected(dir)"
+                    :indeterminate="isPartialSelected(dir)"
+                    :disabled="selectionState(dir) === 'covered'"
+                    :aria-label="`选择 ${dir.name}`"
+                    @change="toggleSelect(dir, ($event.target as HTMLInputElement).checked)"
+                  />
+                </label>
+                <div class="folder-name-cell">
+                  <span class="folder-name-icon"><SvgIcon name="folder" :size="18" /></span>
+                  <span class="folder-name-text" :title="dir.name">{{ dir.name }}</span>
+                </div>
+                <span class="folder-time-cell">
+                  <span class="folder-time-cell__full">{{ formatTime(dir.mod_time) }}</span>
+                  <span class="folder-time-cell__compact">{{ formatFolderTimeShort(dir.mod_time) }}</span>
+                </span>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
     </div>
 
     <div class="folder-selector__footer">
@@ -685,6 +978,7 @@ watch(
   align-items: center;
   gap: 14px;
   padding: 20px 24px 0;
+  position: relative;
 }
 .folder-selector__title {
   margin: 0;
@@ -693,10 +987,197 @@ watch(
   color: var(--text);
   flex-shrink: 0;
 }
+.folder-selector__header-tools {
+  margin-left: auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.folder-selector__favorite-entry {
+  flex-shrink: 0;
+}
+.folder-selector__favorite-trigger {
+  width: 36px;
+  height: 36px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, var(--surface));
+  border-radius: var(--radius-sm);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, white 12%), var(--surface));
+  color: color-mix(in srgb, var(--text-muted) 86%, var(--text));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 72%, transparent),
+    0 8px 18px color-mix(in srgb, var(--text) 6%, transparent);
+}
+.folder-selector__favorite-trigger:hover:not(:disabled),
+.folder-selector__favorite-trigger.active {
+  border-color: color-mix(in srgb, var(--brand) 24%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--brand) 10%, white), color-mix(in srgb, var(--brand) 7%, var(--surface)));
+  color: color-mix(in srgb, var(--brand) 72%, var(--text));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 72%, transparent),
+    0 10px 24px color-mix(in srgb, var(--brand) 16%, transparent);
+}
+.folder-selector__favorite-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.folder-selector__favorite-trigger svg {
+  width: 16px;
+  height: 16px;
+}
+.folder-selector__favorite-name {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-selector__favorite-path {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-selector__favorite-empty {
+  padding: 12px 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.folder-selector__favorites-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  background: transparent;
+  box-sizing: border-box;
+  transition:
+    opacity 0.18s ease,
+    transform 0.24s ease;
+  transform: translateY(-18px);
+  pointer-events: none;
+}
+.folder-selector__favorites-panel.is-open {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.folder-selector__favorites-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 4px 12px;
+}
+.folder-selector__favorites-title {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.folder-selector__favorites-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.folder-selector__favorites-page-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.folder-selector__favorites-page-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--brand) 8%, var(--surface));
+  color: var(--text);
+}
+.folder-selector__favorites-page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.folder-selector__favorites-page-icon {
+  line-height: 0;
+  display: block;
+}
+.folder-selector__favorites-page-icon--prev {
+  transform: rotate(90deg);
+}
+.folder-selector__favorites-page-icon--next {
+  transform: rotate(-90deg);
+}
+.folder-selector__favorites-page-status {
+  min-width: 34px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.folder-selector__favorite-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: 52px;
+  gap: 10px 14px;
+  padding: 0 0 8px;
+  align-self: stretch;
+  width: 100%;
+  align-content: start;
+  box-sizing: border-box;
+}
+.folder-selector__favorite-card {
+  min-width: 0;
+  min-height: 52px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface-muted) 58%, var(--surface));
+  color: var(--text);
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  cursor: pointer;
+  transition:
+    background 0.18s ease;
+}
+.folder-selector__favorite-card:hover,
+.folder-selector__favorite-card.active {
+  background: color-mix(in srgb, var(--brand) 9%, var(--surface));
+}
+.folder-selector__favorite-card-icon {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--brand) 56%, var(--text));
+  display: inline-flex;
+  line-height: 0;
+}
+.folder-selector__favorite-card-body {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .folder-selector__search {
   width: 220px;
   height: 36px;
-  margin-left: auto;
   padding: 0 10px;
   border-radius: var(--radius-pill);
   background: var(--surface-sunken);
@@ -764,6 +1245,32 @@ watch(
   padding: 14px 24px 12px;
   box-sizing: border-box;
   overflow: visible;
+}
+.folder-selector__content.favorite-mode {
+  overflow: hidden;
+}
+.folder-selector__panel-stack {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.folder-selector__directory-panel {
+  position: relative;
+  z-index: 2;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  transition:
+    transform 0.28s ease,
+    opacity 0.2s ease;
+}
+.folder-selector__directory-panel.is-shifted {
+  transform: translateY(100%);
+  opacity: 0.96;
+  pointer-events: none;
 }
 .folder-selector__content :deep(.breadcrumb) {
   flex: none;
@@ -962,13 +1469,19 @@ watch(
     flex-wrap: wrap;
     gap: 10px;
   }
-  .folder-selector__search {
+  .folder-selector__header-tools {
     order: 3;
     width: 100%;
-    margin-left: 0;
+  }
+  .folder-selector__search {
+    width: 100%;
   }
   .folder-selector__content {
     padding: 12px 18px 10px;
+  }
+  .folder-selector__favorite-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: 44px;
   }
   .folder-table-header,
   .folder-table-row {
@@ -990,6 +1503,11 @@ watch(
   }
   .folder-selector__footer {
     padding: 0 18px 20px;
+  }
+}
+@media (max-width: 900px) {
+  .folder-selector__favorite-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>
