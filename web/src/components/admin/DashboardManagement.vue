@@ -94,7 +94,8 @@ const totalTaskCount = computed(
 const mountedFuseCount = computed(() => fuseMounts.value.filter((mount) => mount.state === "mounted").length);
 const totalFuseCount = computed(() => fuseMounts.value.length);
 
-const recentErrorCount = computed(() => logStats.value?.recent_errors_total ?? logStats.value?.recent_errors ?? 0);
+const recentErrorCount = computed(() => logStats.value?.recent_unacknowledged_errors ?? 0);
+const recentErrorTotal = computed(() => logStats.value?.recent_errors ?? 0);
 const systemStatus = computed(() => {
   if (authErrorAccountCount.value > 0) {
     return { label: "账号需要重新授权", tone: "danger", icon: "fa-triangle-exclamation" };
@@ -113,7 +114,8 @@ const systemStatusText = computed(() => {
   if (cooldownAccountCount.value > 0) {
     return `${cooldownAccountCount.value} 个账号认证刷新失败，正在等待系统重试`;
   }
-  if (recentErrorCount.value > 0) return `近 24 小时有 ${recentErrorCount.value} 条错误日志`;
+  if (recentErrorCount.value > 0) return `近 24 小时有 ${recentErrorTotal.value} 条错误日志，${recentErrorCount.value} 条待确认`;
+  if (recentErrorTotal.value > 0) return "近 24 小时错误已确认，当前无新的待确认错误";
   if (inactiveAccountCount.value > 0) return `${inactiveAccountCount.value} 个账号未启用，其余模块正常`;
   return "账号、任务与缓存服务状态正常";
 });
@@ -258,6 +260,10 @@ function openErrorLogs() {
   logPresetLevel.value = 40;
   logPresetSeq.value += 1;
   setActiveTab(LOGS_TAB);
+}
+
+function handleLogStatsAcked(next: LogStats) {
+  logStats.value = next;
 }
 
 function assignSettled<T extends OverviewResult>(
@@ -432,7 +438,6 @@ onMounted(() => {
             <p class="dashboard-eyebrow">控制台</p>
             <h2>{{ systemStatus.label }}</h2>
             <p class="dashboard-hero__detail">{{ systemStatusText }}</p>
-            <p v-if="canJumpToErrorLogs" class="dashboard-hero__hint">点击横幅可直接查看 error 日志</p>
           </div>
         </div>
         <div class="dashboard-hero__metrics" aria-label="运行概况指标">
@@ -450,7 +455,7 @@ onMounted(() => {
           </div>
           <div class="hero-metric" :class="{ 'is-warn': recentErrorCount > 0 }">
             <strong>{{ recentErrorCount }}</strong>
-            <span>近期错误</span>
+            <span>待确认错误</span>
           </div>
         </div>
       </section>
@@ -643,6 +648,7 @@ onMounted(() => {
       v-else-if="activeTab === LOGS_TAB"
       :preset-level="logPresetLevel"
       :preset-seq="logPresetSeq"
+      @acked-errors="handleLogStatsAcked"
     />
   </div>
 </template>
@@ -761,14 +767,6 @@ onMounted(() => {
 .dashboard-hero__detail {
   margin-top: 4px;
   color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.dashboard-hero__hint {
-  margin-top: 2px;
-  color: var(--text);
-  font-weight: 600;
   font-size: 12px;
   line-height: 1.6;
 }

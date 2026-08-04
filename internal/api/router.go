@@ -180,6 +180,7 @@ func NewRouter(d Deps) http.Handler {
 			})
 			r.Get("/logs", h.listLogs)
 			r.Get("/logs/stats", h.logStats)
+			r.Post("/logs/ack-errors", h.ackRecentErrors)
 			r.Post("/logs/cleanup", h.cleanupLogs)
 			r.Post("/logs/cleanup/keep-today", h.cleanupLogsKeepToday)
 			r.Post("/logs/cleanup/all", h.cleanupLogsAll)

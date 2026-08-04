@@ -43,12 +43,16 @@ const props = withDefaults(
     presetSeq: 0,
   },
 );
+const emit = defineEmits<{
+  ackedErrors: [stats: LogStats];
+}>();
 
 const api = logsApi();
 
 const loading = ref(false);
 const cleaningKeepToday = ref(false);
 const cleaningAll = ref(false);
+const acknowledgingRecentErrors = ref(false);
 const expanded = ref<Set<number>>(new Set());
 const logsPanelRef = ref<HTMLElement | null>(null);
 
@@ -57,6 +61,9 @@ const PAGE_SIZE = 50;
 const activeModuleCount = computed(() =>
   stats.value?.by_module ? Object.keys(stats.value.by_module).length : 0,
 );
+const recentErrorCount = computed(() => stats.value?.recent_errors ?? 0);
+const recentUnacknowledgedErrorCount = computed(() => stats.value?.recent_unacknowledged_errors ?? 0);
+const canAcknowledgeRecentErrors = computed(() => recentUnacknowledgedErrorCount.value > 0);
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 let loadSequence = 0;
@@ -197,6 +204,21 @@ async function cleanupAllLogs() {
   }
 }
 
+async function ackRecentErrors() {
+  if (!canAcknowledgeRecentErrors.value) return;
+  acknowledgingRecentErrors.value = true;
+  try {
+    const next = await api.ackRecentErrors();
+    stats.value = next;
+    emit("ackedErrors", next);
+    toast.success("已知晓当前错误，后续新错误会再次提醒");
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "确认当前错误失败"));
+  } finally {
+    acknowledgingRecentErrors.value = false;
+  }
+}
+
 function onFilterChange() {
   resetPage();
   void loadLogs();
@@ -224,7 +246,7 @@ function resetPage() {
 
 function applyPresetFilter(triggerRefresh: boolean) {
   if (props.presetLevel === "" || props.presetLevel === undefined || props.presetLevel === null) return;
-  level.value = String(props.presetLevel);
+  level.value = props.presetLevel;
   module.value = "";
   period.value = "24h";
   keyword.value = "";
@@ -280,9 +302,24 @@ onUnmounted(() => clearTimeout(searchTimer));
   <div class="logs-page">
     <div v-if="stats" class="logs-stats">
       <StatCard icon="fa-file-alt" :value="stats.total" label="总日志数" tone="blue" />
-      <StatCard icon="fa-exclamation-triangle" :value="stats.recent_errors" label="近 24 小时错误" tone="red" />
+      <StatCard icon="fa-exclamation-triangle" :value="recentErrorCount" label="近 24 小时错误" tone="red" />
       <StatCard icon="fa-cubes" :value="activeModuleCount" label="活跃模块" tone="purple" />
       <StatCard icon="fa-list" :value="logs.length" label="本页结果数" tone="amber" />
+    </div>
+
+    <div v-if="canAcknowledgeRecentErrors" class="logs-ack-banner">
+      <div class="logs-ack-banner__copy">
+        <strong>当前有 {{ recentUnacknowledgedErrorCount }} 条未确认错误</strong>
+        <span>确认后“运行概况”会恢复正常，后续新错误仍会再次提醒。</span>
+      </div>
+      <button
+        type="button"
+        class="logs-ack-banner__action"
+        :disabled="acknowledgingRecentErrors"
+        @click="ackRecentErrors"
+      >
+        {{ acknowledgingRecentErrors ? "处理中..." : "已知晓当前错误" }}
+      </button>
     </div>
 
     <div class="logs-toolbar">
@@ -446,3 +483,64 @@ onUnmounted(() => clearTimeout(searchTimer));
     </div>
   </div>
 </template>
+
+<style scoped>
+.logs-ack-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--warning) 24%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+}
+
+.logs-ack-banner__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.logs-ack-banner__copy strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.logs-ack-banner__copy span {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.logs-ack-banner__action {
+  height: 34px;
+  flex: 0 0 auto;
+  padding: 0 14px;
+  border: 1px solid color-mix(in srgb, var(--warning) 32%, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.logs-ack-banner__action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 760px) {
+  .logs-ack-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .logs-ack-banner__action {
+    width: 100%;
+  }
+}
+</style>

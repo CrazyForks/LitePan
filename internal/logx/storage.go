@@ -37,6 +37,7 @@ type Storage struct {
 
 type statsSnapshot struct {
 	minLevel  int
+	ackAfter  string
 	value     Stats
 	expiresAt time.Time
 	valid     bool
@@ -354,15 +355,19 @@ func scanLinesReverse(path string, visit func([]byte) bool) (bool, error) {
 }
 
 // StatsFiltered 统计全部落盘日志，并按最低级别过滤后台可见范围。
-func (s *Storage) StatsFiltered(minLevel int) Stats {
+func (s *Storage) StatsFiltered(minLevel int, ackAfter string) Stats {
 	s.statsMu.Lock()
 	defer s.statsMu.Unlock()
-	if s.statsCache.valid && s.statsCache.minLevel == minLevel && time.Now().Before(s.statsCache.expiresAt) {
+	if s.statsCache.valid &&
+		s.statsCache.minLevel == minLevel &&
+		s.statsCache.ackAfter == ackAfter &&
+		time.Now().Before(s.statsCache.expiresAt) {
 		return cloneStats(s.statsCache.value)
 	}
-	st := s.computeStatsFiltered(minLevel)
+	st := s.computeStatsFiltered(minLevel, ackAfter)
 	s.statsCache = statsSnapshot{
 		minLevel:  minLevel,
+		ackAfter:  ackAfter,
 		value:     cloneStats(st),
 		expiresAt: time.Now().Add(statsCacheTTL),
 		valid:     true,
@@ -370,7 +375,7 @@ func (s *Storage) StatsFiltered(minLevel int) Stats {
 	return st
 }
 
-func (s *Storage) computeStatsFiltered(minLevel int) Stats {
+func (s *Storage) computeStatsFiltered(minLevel int, ackAfter string) Stats {
 	files, err := s.listFiles()
 	if err != nil {
 		return Stats{ByLevel: map[string]int{}, ByModule: map[string]int{}}
@@ -380,6 +385,7 @@ func (s *Storage) computeStatsFiltered(minLevel int) Stats {
 		ByModule: map[string]int{},
 	}
 	cutoff := time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
+	st.LastAcknowledgedErrorAt = ackAfter
 	for _, name := range files {
 		path := filepath.Join(s.dir, name)
 		f, err := os.Open(path)
@@ -403,6 +409,12 @@ func (s *Storage) computeStatsFiltered(minLevel int) Stats {
 				st.RecentErrorsTotal++
 				if e.Timestamp >= cutoff {
 					st.RecentErrors++
+					if st.LastRecentErrorAt == "" || e.Timestamp > st.LastRecentErrorAt {
+						st.LastRecentErrorAt = e.Timestamp
+					}
+					if ackAfter == "" || e.Timestamp > ackAfter {
+						st.RecentUnacknowledgedErrors++
+					}
 				}
 			}
 		}
@@ -428,6 +440,10 @@ func (s *Storage) invalidateStats() {
 	s.statsMu.Lock()
 	s.statsCache.valid = false
 	s.statsMu.Unlock()
+}
+
+func (s *Storage) InvalidateStatsCache() {
+	s.invalidateStats()
 }
 
 // CleanupOldLogs 删除早于保留期的按天日志文件；保留期按自然日计算，包含今天。

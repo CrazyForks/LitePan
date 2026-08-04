@@ -11,7 +11,6 @@ import (
 	"litepan/internal/domain"
 )
 
-
 // 内存持有 DB 覆盖值快照（启动加载、写入时增量更新），读取走内存 + 代码默认兜底，避免每次列目录都查库。
 type Service struct {
 	specs []Spec
@@ -131,6 +130,9 @@ func (s *Service) Snapshot() Payload {
 	items := make([]Item, 0, len(s.specs))
 	for i := range s.specs {
 		sp := &s.specs[i]
+		if sp.Hidden {
+			continue
+		}
 		stored, ok := s.raw(sp.Key)
 		value := sp.Default
 		isDefault := true

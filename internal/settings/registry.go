@@ -22,6 +22,7 @@ const (
 	KeyAuthActiveRefresh           = "auth_active_refresh_enabled"
 	KeyLogLevel                    = "log_level"
 	KeyLogRetentionDays            = "log_retention_days"
+	KeyLogErrorAckAt               = "log_error_ack_at"
 	KeyEmbyEnabled                 = "emby_enabled"
 	KeyEmbyURL                     = "emby_url"
 	KeyEmbyAPIKey                  = "emby_api_key"
@@ -89,6 +90,7 @@ type Spec struct {
 	Min, Max    *int     // 仅 TypeInt
 	Options     []Option // 仅 TypeSelect
 	Sensitive   bool
+	Hidden      bool
 	// normalize 对字符串值做规范化/兜底（如 OAuth 地址校验），nil 表示不处理。
 	normalize func(string) string
 }
@@ -266,6 +268,12 @@ func defaultSpecs() []Spec {
 			Unit:        "天",
 			Min:         intp(1),
 			Max:         intp(365),
+		},
+		{
+			Key:     KeyLogErrorAckAt,
+			Type:    TypeString,
+			Default: "",
+			Hidden:  true,
 		},
 		{
 			Key:         KeyEmbyEnabled,

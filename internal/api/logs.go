@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"litepan/internal/domain"
 	"litepan/internal/logx"
@@ -69,7 +71,30 @@ func (h *Handler) logStats(w http.ResponseWriter, r *http.Request) {
 		writeOK(w, logx.Stats{ByLevel: map[string]int{}, ByModule: map[string]int{}})
 		return
 	}
-	writeOK(w, h.logs.Storage().StatsFiltered(logx.LevelInfo))
+	ackAt := ""
+	if h.settings != nil {
+		ackAt = strings.TrimSpace(h.settings.String(settings.KeyLogErrorAckAt))
+	}
+	writeOK(w, h.logs.Storage().StatsFiltered(logx.LevelInfo, ackAt))
+}
+
+func (h *Handler) ackRecentErrors(w http.ResponseWriter, r *http.Request) {
+	if h.logs == nil || h.logs.Storage() == nil || h.settings == nil {
+		writeOK(w, logx.Stats{ByLevel: map[string]int{}, ByModule: map[string]int{}})
+		return
+	}
+	latest := strings.TrimSpace(h.logs.Storage().StatsFiltered(logx.LevelInfo, "").LastRecentErrorAt)
+	if latest == "" {
+		latest = time.Now().Format(time.RFC3339)
+	}
+	if err := h.settings.Update(r.Context(), map[string]string{
+		settings.KeyLogErrorAckAt: latest,
+	}); err != nil {
+		writeErr(w, err)
+		return
+	}
+	h.logs.Storage().InvalidateStatsCache()
+	writeOK(w, h.logs.Storage().StatsFiltered(logx.LevelInfo, latest))
 }
 
 func (h *Handler) cleanupLogs(w http.ResponseWriter, r *http.Request) {

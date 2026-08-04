@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStorageQueryPaginatesNewestFirstAcrossFiles(t *testing.T) {
@@ -101,20 +102,51 @@ func TestStatsFilteredCacheIsClonedAndCleanupInvalidatesIt(t *testing.T) {
 	})
 	storage := &Storage{dir: dir}
 
-	first := storage.StatsFiltered(LevelInfo)
+	first := storage.StatsFiltered(LevelInfo, "")
 	if first.Total != 2 {
 		t.Fatalf("StatsFiltered().Total = %d", first.Total)
 	}
 	first.ByLevel["INFO"] = 99
-	if cached := storage.StatsFiltered(LevelInfo); cached.ByLevel["INFO"] != 2 {
+	if cached := storage.StatsFiltered(LevelInfo, ""); cached.ByLevel["INFO"] != 2 {
 		t.Fatalf("cached ByLevel[INFO] = %d", cached.ByLevel["INFO"])
 	}
 
 	if _, err := storage.ClearAllLogs(); err != nil {
 		t.Fatalf("ClearAllLogs() error = %v", err)
 	}
-	if afterCleanup := storage.StatsFiltered(LevelInfo); afterCleanup.Total != 0 {
+	if afterCleanup := storage.StatsFiltered(LevelInfo, ""); afterCleanup.Total != 0 {
 		t.Fatalf("StatsFiltered() after cleanup total = %d", afterCleanup.Total)
+	}
+}
+
+func TestStatsFilteredTracksRecentUnacknowledgedErrors(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	oldRecent := now.Add(-2 * time.Hour).Format(time.RFC3339)
+	newRecent := now.Add(-30 * time.Minute).Format(time.RFC3339)
+	stale := now.Add(-30 * time.Hour).Format(time.RFC3339)
+	writeLogEntries(t, dir, now.Format("2006-01-02")+".log", []Entry{
+		{Timestamp: stale, Level: LevelError, Module: "system", Message: "stale"},
+		{Timestamp: oldRecent, Level: LevelError, Module: "system", Message: "old-recent"},
+		{Timestamp: newRecent, Level: LevelError, Module: "system", Message: "new-recent"},
+	})
+
+	storage := &Storage{dir: dir}
+	stats := storage.StatsFiltered(LevelInfo, oldRecent)
+	if stats.RecentErrors != 2 {
+		t.Fatalf("StatsFiltered().RecentErrors = %d", stats.RecentErrors)
+	}
+	if stats.RecentErrorsTotal != 3 {
+		t.Fatalf("StatsFiltered().RecentErrorsTotal = %d", stats.RecentErrorsTotal)
+	}
+	if stats.RecentUnacknowledgedErrors != 1 {
+		t.Fatalf("StatsFiltered().RecentUnacknowledgedErrors = %d", stats.RecentUnacknowledgedErrors)
+	}
+	if stats.LastRecentErrorAt != newRecent {
+		t.Fatalf("StatsFiltered().LastRecentErrorAt = %q", stats.LastRecentErrorAt)
+	}
+	if stats.LastAcknowledgedErrorAt != oldRecent {
+		t.Fatalf("StatsFiltered().LastAcknowledgedErrorAt = %q", stats.LastAcknowledgedErrorAt)
 	}
 }
 

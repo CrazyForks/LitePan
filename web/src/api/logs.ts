@@ -21,6 +21,9 @@ export interface LogStats {
   by_module: Record<string, number>;
   recent_errors: number;
   recent_errors_total: number;
+  recent_unacknowledged_errors: number;
+  last_recent_error_at?: string;
+  last_acknowledged_error_at?: string;
 }
 
 export interface LogCleanupResult {
@@ -66,6 +69,7 @@ export function logsApi() {
   return {
     list: (query?: LogQuery) => http.get<LogEntry[]>("/logs", query as Record<string, string | number | undefined>),
     stats: () => http.get<LogStats>("/logs/stats"),
+    ackRecentErrors: () => http.post<LogStats>("/logs/ack-errors"),
     cleanup: () => http.post<LogCleanupResult>("/logs/cleanup"),
     cleanupKeepToday: () => http.post<LogCleanupResult>("/logs/cleanup/keep-today"),
     cleanupAll: () => http.post<LogCleanupResult>("/logs/cleanup/all"),
