@@ -3,10 +3,13 @@ import { ref } from "vue";
 import type { BrowserFavoriteItem } from "@/api/types";
 import SvgIcon from "@/components/icons/SvgIcon.vue";
 
-defineProps<{
+const props = defineProps<{
   items: BrowserFavoriteItem[];
   currentCrumbIds: string[];
   currentFolderFavorited: boolean;
+  dragActive?: boolean;
+  activeDropTargetId?: string;
+  canDropOnFavorite?: (item: BrowserFavoriteItem) => boolean;
 }>();
 
 const emit = defineEmits<{
@@ -15,6 +18,9 @@ const emit = defineEmits<{
   rename: [item: BrowserFavoriteItem];
   remove: [folderId: string];
   move: [folderId: string, direction: -1 | 1];
+  "drag-enter": [item: BrowserFavoriteItem];
+  "drag-leave": [item: BrowserFavoriteItem];
+  drop: [item: BrowserFavoriteItem];
 }>();
 
 const editing = ref(false);
@@ -32,6 +38,41 @@ function isFavoriteActive(item: BrowserFavoriteItem, currentCrumbIds: string[]) 
     favoriteCrumbIds.length === currentCrumbIds.length &&
     favoriteCrumbIds.every((id, index) => id === currentCrumbIds[index])
   );
+}
+
+function isDropTarget(item: BrowserFavoriteItem) {
+  return props.activeDropTargetId === item.id;
+}
+
+function canDrop(item: BrowserFavoriteItem) {
+  return Boolean(props.dragActive) && !editing.value && (props.canDropOnFavorite?.(item) ?? false);
+}
+
+function handleDragEnter(event: DragEvent, item: BrowserFavoriteItem) {
+  if (!canDrop(item)) return;
+  event.preventDefault();
+  emit("drag-enter", item);
+}
+
+function handleDragOver(event: DragEvent, item: BrowserFavoriteItem) {
+  if (!canDrop(item)) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  emit("drag-enter", item);
+}
+
+function handleDragLeave(event: DragEvent, item: BrowserFavoriteItem) {
+  if (!props.dragActive) return;
+  const currentTarget = event.currentTarget as Node | null;
+  const relatedTarget = event.relatedTarget as Node | null;
+  if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) return;
+  emit("drag-leave", item);
+}
+
+function handleDrop(event: DragEvent, item: BrowserFavoriteItem) {
+  if (!props.dragActive) return;
+  event.preventDefault();
+  emit("drop", item);
 }
 </script>
 
@@ -73,8 +114,16 @@ function isFavoriteActive(item: BrowserFavoriteItem, currentCrumbIds: string[]) 
           v-for="item in items"
           :key="item.id"
           class="favorites-sidebar__row"
-          :class="{ active: isFavoriteActive(item, currentCrumbIds), editing }"
+          :class="{
+            active: isFavoriteActive(item, currentCrumbIds),
+            editing,
+            'drop-target': isDropTarget(item),
+          }"
           :title="formatFavoritePath(item)"
+          @dragenter="handleDragEnter($event, item)"
+          @dragover="handleDragOver($event, item)"
+          @dragleave="handleDragLeave($event, item)"
+          @drop="handleDrop($event, item)"
         >
           <td class="favorites-sidebar__cell">
             <component
@@ -316,6 +365,30 @@ function isFavoriteActive(item: BrowserFavoriteItem, currentCrumbIds: string[]) 
 
 .favorites-sidebar__row.active .favorites-sidebar__cell {
   border-left-color: var(--brand);
+}
+
+.favorites-sidebar__row.drop-target .favorites-sidebar__cell {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--brand) 12%, var(--surface)) 0%, transparent 100%),
+    var(--info-soft);
+  border-left-color: var(--brand);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--brand) 40%, transparent),
+    0 10px 24px color-mix(in srgb, var(--brand) 14%, transparent);
+  transform: translateY(-1px);
+}
+
+.favorites-sidebar__row.drop-target .favorites-sidebar__main {
+  position: relative;
+}
+
+.favorites-sidebar__row.drop-target .favorites-sidebar__main::after {
+  content: "";
+  position: absolute;
+  inset: -4px -6px;
+  border-radius: 12px;
+  border: 1px dashed color-mix(in srgb, var(--brand) 44%, transparent);
+  pointer-events: none;
 }
 
 .favorites-sidebar__filler td {

@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import { useBrowserStore, type Crumb } from "@/stores/browser";
 import { useAuthStore } from "@/stores/auth";
 import { useFileSort } from "@/composables/useFileSort";
-import { useFileSelection } from "@/composables/useFileSelection";
+import { fileKey, useFileSelection } from "@/composables/useFileSelection";
 import { useFileActions, type DeleteMode } from "@/composables/useFileActions";
 import { showConfirm } from "@/composables/useConfirm";
 import { useRelayTasks } from "@/composables/useRelayTasks";
@@ -13,7 +13,7 @@ import { useUploadTasks } from "@/composables/useUploadTasks";
 import { useOfflineDownloads } from "@/composables/useOfflineDownloads";
 import { toast } from "@/composables/useToast";
 import { filesApi } from "@/api/files";
-import type { Account, FileItem, FileNameAlignPreviewResult } from "@/api/types";
+import type { Account, BrowserFavoriteItem, FileItem, FileNameAlignPreviewResult } from "@/api/types";
 import type { OfflineDownloadTask } from "@/types/offline-download";
 import { getApiErrorMessage } from "@/api/client";
 import { generateCurrentDirectoryStrm } from "@/api/strm";
@@ -192,6 +192,12 @@ const currentFolderFavorited = computed(() =>
 );
 const currentFolderName = computed(() => breadcrumb.value[breadcrumb.value.length - 1]?.name || "");
 
+const dragMove = reactive({
+  active: false,
+  files: [] as FileItem[],
+  targetId: "",
+});
+
 const transferTitle = computed(() =>
   fileActions.transfer.action === "move" ? "移动到" : "复制到",
 );
@@ -216,6 +222,97 @@ const strmPrompt = useStrmDirectoryPrompt({
 function getCurrentDisplayPath(): string {
   const parts = getCurrentBreadcrumbNameParts();
   return parts.length ? `/${parts.join("/")}` : "/";
+}
+
+function resetDragMove() {
+  dragMove.active = false;
+  dragMove.files = [];
+  dragMove.targetId = "";
+}
+
+function resolveDraggedFiles(startFile: FileItem) {
+  const startKey = fileKey(startFile);
+  const startIsSelected = selectedIds.value.includes(startKey);
+  if (startIsSelected && selectedFiles.value.length > 0) {
+    return [...selectedFiles.value];
+  }
+  return [startFile];
+}
+
+function canDropToParent(targetParentId: string, ancestorIds: string[] = []) {
+  if (!dragMove.active || !targetParentId) return false;
+  if (targetParentId === currentParentId.value) return false;
+  const draggedIds = new Set(dragMove.files.map((file) => file.id));
+  if (draggedIds.has(targetParentId)) return false;
+  const ancestorSet = new Set(ancestorIds.filter(Boolean));
+  return !dragMove.files.some((file) => file.is_dir && ancestorSet.has(file.id));
+}
+
+function canDropOnFolder(file: FileItem) {
+  return file.is_dir && canDropToParent(file.id);
+}
+
+function canDropOnFavorite(item: BrowserFavoriteItem) {
+  return canDropToParent(item.id, item.crumbs.map((crumb) => crumb.id));
+}
+
+function startDragMove(file: FileItem) {
+  if (!isAdmin.value) return;
+  dragMove.active = true;
+  dragMove.files = resolveDraggedFiles(file);
+  dragMove.targetId = "";
+}
+
+function finishDragMove() {
+  resetDragMove();
+}
+
+function handleFolderDragEnter(file: FileItem) {
+  if (!canDropOnFolder(file)) {
+    if (dragMove.targetId === file.id) dragMove.targetId = "";
+    return;
+  }
+  dragMove.targetId = file.id;
+}
+
+function handleFolderDragLeave(file: FileItem) {
+  if (dragMove.targetId === file.id) {
+    dragMove.targetId = "";
+  }
+}
+
+async function handleFolderDrop(file: FileItem) {
+  if (!canDropOnFolder(file)) {
+    resetDragMove();
+    return;
+  }
+  const targets = [...dragMove.files];
+  resetDragMove();
+  await fileActions.moveTargetsToParent(targets, file.id);
+}
+
+function handleFavoriteDragEnter(item: BrowserFavoriteItem) {
+  if (!canDropOnFavorite(item)) {
+    if (dragMove.targetId === item.id) dragMove.targetId = "";
+    return;
+  }
+  dragMove.targetId = item.id;
+}
+
+function handleFavoriteDragLeave(item: BrowserFavoriteItem) {
+  if (dragMove.targetId === item.id) {
+    dragMove.targetId = "";
+  }
+}
+
+async function handleFavoriteDrop(item: BrowserFavoriteItem) {
+  if (!canDropOnFavorite(item)) {
+    resetDragMove();
+    return;
+  }
+  const targets = [...dragMove.files];
+  resetDragMove();
+  await fileActions.moveTargetsToParent(targets, item.id);
 }
 
 async function handleGenerateCurrentDirectoryStrm() {
@@ -812,11 +909,17 @@ onUnmounted(() => {
               :items="favorites"
               :current-crumb-ids="currentCrumbIds"
               :current-folder-favorited="currentFolderFavorited"
+              :drag-active="dragMove.active"
+              :active-drop-target-id="dragMove.targetId"
+              :can-drop-on-favorite="canDropOnFavorite"
               @add-current="openFavoriteNameModal"
               @open="store.openFavorite"
               @rename="openFavoriteRenameModal"
               @remove="store.removeFavorite"
               @move="store.moveFavorite"
+              @drag-enter="handleFavoriteDragEnter"
+              @drag-leave="handleFavoriteDragLeave"
+              @drop="handleFavoriteDrop"
             />
           </div>
         </div>
@@ -840,10 +943,18 @@ onUnmounted(() => {
             :move-file="fileActions.requestSingleMove"
             :copy-file="fileActions.requestSingleCopy"
             :name-align-file="openNameAlign"
+            :drag-active="dragMove.active"
+            :active-drop-target-id="dragMove.targetId"
+            :can-drop-on-folder="canDropOnFolder"
             @open="onOpen"
             @sort-by="sortBy"
             @set-sort="({ key, order }) => sortBy(key, order)"
             @generate-current-directory-strm="handleGenerateCurrentDirectoryStrm"
+            @drag-file-start="startDragMove"
+            @drag-file-end="finishDragMove"
+            @drag-enter-folder="handleFolderDragEnter"
+            @drag-leave-folder="handleFolderDragLeave"
+            @drop-on-folder="handleFolderDrop"
           />
         </div>
       </div>

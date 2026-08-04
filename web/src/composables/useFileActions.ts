@@ -118,30 +118,29 @@ export function useFileActions(options: {
     transfer.open = false;
   }
 
-  async function confirmTransfer(target: { parentId: string }) {
+  async function performTransfer(
+    action: "move" | "copy",
+    ids: string[],
+    rowKeys: string[],
+    targetParentId: string,
+  ) {
     const accountId = options.getAccountId();
-    if (accountId == null) return;
-
-    const action = transfer.action;
-    const ids = [...transfer.fileIds];
+    if (accountId == null) return false;
     const sourceParentId = options.getParentId();
-
-    if (action === "move" && target.parentId === sourceParentId) {
+    if (!ids.length) return false;
+    if (action === "move" && targetParentId === sourceParentId) {
       toast.info("目标目录与当前目录相同");
-      return;
+      return false;
     }
 
     const payload = {
       account_id: accountId,
       file_ids: ids,
-      target_parent_id: target.parentId,
+      target_parent_id: targetParentId,
       source_parent_id: sourceParentId,
     };
-    const keys = ids.map(String);
-
-    // 先关弹窗，让用户看到列表里被操作的行转圈+「移动中/复制中」。
-    transfer.open = false;
-    markRowOps(keys, action);
+    const movedSet = new Set(rowKeys.map(String));
+    markRowOps(rowKeys, action);
 
     acting.value = true;
     let ok = false;
@@ -159,17 +158,35 @@ export function useFileActions(options: {
     }
 
     if (!ok) {
-      unmarkRowOps(keys);
-      return;
+      unmarkRowOps(rowKeys);
+      return false;
     }
 
     if (action === "move") {
-      options.selectedIds.value = [];
+      options.selectedIds.value = options.selectedIds.value.filter((id) => !movedSet.has(String(id)));
     }
-    unmarkRowOps(keys);
+    unmarkRowOps(rowKeys);
     toast.success(action === "move" ? `已移动 ${ids.length} 个项目` : `已复制 ${ids.length} 个项目`);
 
     void options.reloadFiles({ forceRefresh: true });
+    return true;
+  }
+
+  async function confirmTransfer(target: { parentId: string }) {
+    const action = transfer.action;
+    const ids = [...transfer.fileIds];
+    const rowKeys = ids.map(String);
+
+    // 先关弹窗，让用户看到列表里被操作的行转圈+「移动中/复制中」。
+    transfer.open = false;
+    await performTransfer(action, ids, rowKeys, target.parentId);
+  }
+
+  async function moveTargetsToParent(targets: FileItem[], targetParentId: string) {
+    if (!targets.length) return false;
+    const ids = targets.map((file) => file.id);
+    const rowKeys = targets.map((file) => fileKey(file));
+    return performTransfer("move", ids, rowKeys, targetParentId);
   }
 
   function validateFolderName(name: string): string {
@@ -379,6 +396,7 @@ export function useFileActions(options: {
     downloadFile,
     requestSingleMove,
     requestSingleCopy,
+    moveTargetsToParent,
     requestBatchDelete,
     requestBatchMove,
     requestBatchCopy,

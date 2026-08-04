@@ -5,12 +5,15 @@ import type { FileRowOperation, SortKey, SortOrder } from "@/types/file-browser"
 import { formatSize, formatTime } from "@/utils/format";
 import type { DeleteFileHooks } from "@/composables/useFileActions";
 import { useFileTableInline } from "@/composables/useFileTableInline";
+import { getSvg } from "@/components/icons/svgRegistry";
+import { getIconfontSymbolId } from "@/components/icons/iconfontSymbolMap";
 import FileIcon from "./FileIcon.vue";
 import FileTableHeader from "./FileTableHeader.vue";
 import FileGridSortMenu from "./FileGridSortMenu.vue";
 import FileContextMenu from "./FileContextMenu.vue";
 import SvgIcon from "@/components/icons/SvgIcon.vue";
 import type { ContextMenuItem } from "@/composables/useFileTableInline";
+import { fileKind } from "@/utils/fileIcon";
 
 const props = defineProps<{
   files: FileItem[];
@@ -30,6 +33,9 @@ const props = defineProps<{
   moveFile: (file: FileItem) => void;
   copyFile: (file: FileItem) => void;
   nameAlignFile: (file: FileItem) => void;
+  dragActive?: boolean;
+  activeDropTargetId?: string;
+  canDropOnFolder?: (file: FileItem) => boolean;
 }>();
 
 const INITIAL_LIST_RENDER_COUNT = 200;
@@ -41,6 +47,11 @@ const emit = defineEmits<{
   "sort-by": [key: SortKey];
   "set-sort": [payload: { key: SortKey; order: SortOrder }];
   "generate-current-directory-strm": [];
+  "drag-file-start": [file: FileItem];
+  "drag-file-end": [];
+  "drag-enter-folder": [file: FileItem];
+  "drag-leave-folder": [file: FileItem];
+  "drop-on-folder": [file: FileItem];
 }>();
 
 const inline = useFileTableInline({
@@ -200,6 +211,196 @@ function toggleSelectAll(checked: boolean) {
   emit("update:selectedIds", checked ? props.files.map(fileKey) : []);
 }
 
+function isDroppableFolder(file: FileItem) {
+  return Boolean(props.dragActive) && file.is_dir && !isInlineProcessing(file) && (props.canDropOnFolder?.(file) ?? false);
+}
+
+function isActiveDropTarget(file: FileItem) {
+  return props.activeDropTargetId === file.id;
+}
+
+function truncateDragText(input: string, limit: number) {
+  if (input.length <= limit) return input;
+  return `${input.slice(0, Math.max(0, limit - 1))}…`;
+}
+
+function createDragPreview(file: FileItem) {
+  if (typeof document === "undefined") return null;
+  const draggingSelected = selectedSet.value.has(fileKey(file));
+  const count = draggingSelected && selectedCount.value > 1 ? selectedCount.value : 1;
+  const rootStyle = getComputedStyle(document.documentElement);
+  const brand = rootStyle.getPropertyValue("--brand").trim() || "#3b82f6";
+  const surface = rootStyle.getPropertyValue("--surface").trim() || "#ffffff";
+  const text = rootStyle.getPropertyValue("--text").trim() || "#111827";
+  const muted = rootStyle.getPropertyValue("--text-muted").trim() || "#6b7280";
+  const border = rootStyle.getPropertyValue("--border-soft").trim() || "rgba(59,130,246,0.24)";
+  const hotAreaWidth = 24;
+  const width = Math.min(320, Math.max(196, 132 + Math.min(file.name.length, 18) * 8));
+  const height = 54;
+  const iconX = hotAreaWidth + 12;
+  const iconY = 13;
+  const textX = iconX + 28;
+  const title = truncateDragText(file.name, count > 1 ? 20 : 22);
+  const subtitle = count > 1 ? `等 ${count} 个项目` : file.is_dir ? "移动文件夹" : "移动文件";
+  const NS = "http://www.w3.org/2000/svg";
+
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("xmlns", NS);
+  svg.setAttribute("width", String(width));
+  svg.setAttribute("height", String(height));
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.style.position = "fixed";
+  svg.style.left = "-9999px";
+  svg.style.top = "-9999px";
+  svg.style.pointerEvents = "none";
+  svg.style.zIndex = "99999";
+
+  const rect = document.createElementNS(NS, "rect");
+  rect.setAttribute("x", "0.5");
+  rect.setAttribute("y", "0.5");
+  rect.setAttribute("width", String(width - 1));
+  rect.setAttribute("height", String(height - 1));
+  rect.setAttribute("rx", "16");
+  rect.setAttribute("ry", "16");
+  rect.setAttribute("fill", surface);
+  rect.setAttribute("stroke", border);
+  svg.appendChild(rect);
+
+  const iconBg = document.createElementNS(NS, "rect");
+  iconBg.setAttribute("x", String(iconX - 5));
+  iconBg.setAttribute("y", String(iconY - 4));
+  iconBg.setAttribute("width", "28");
+  iconBg.setAttribute("height", "28");
+  iconBg.setAttribute("rx", "10");
+  iconBg.setAttribute("ry", "10");
+  iconBg.setAttribute("fill", surface);
+  iconBg.setAttribute("stroke", border);
+  svg.appendChild(iconBg);
+
+  const iconName = fileKind(file);
+  const symbolId = getIconfontSymbolId(iconName);
+  if (symbolId) {
+    const iconSvg = document.createElementNS(NS, "svg");
+    iconSvg.setAttribute("x", String(iconX));
+    iconSvg.setAttribute("y", String(iconY));
+    iconSvg.setAttribute("width", "18");
+    iconSvg.setAttribute("height", "18");
+    iconSvg.setAttribute("viewBox", "0 0 1024 1024");
+    iconSvg.setAttribute("fill", brand);
+    iconSvg.setAttribute("color", brand);
+    const use = document.createElementNS(NS, "use");
+    use.setAttribute("href", `#${symbolId}`);
+    use.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", `#${symbolId}`);
+    iconSvg.appendChild(use);
+    svg.appendChild(iconSvg);
+  } else {
+    const iconMarkup = getSvg(iconName);
+    const parsed = new DOMParser().parseFromString(iconMarkup, "image/svg+xml").documentElement;
+    if (parsed?.tagName?.toLowerCase() === "svg") {
+      parsed.setAttribute("x", String(iconX));
+      parsed.setAttribute("y", String(iconY));
+      parsed.setAttribute("width", "18");
+      parsed.setAttribute("height", "18");
+      parsed.setAttribute("color", brand);
+      parsed.setAttribute("fill", brand);
+      svg.appendChild(document.importNode(parsed, true));
+    }
+  }
+
+  const titleText = document.createElementNS(NS, "text");
+  titleText.setAttribute("x", String(textX));
+  titleText.setAttribute("y", "24");
+  titleText.setAttribute("fill", text);
+  titleText.setAttribute("font-size", "13");
+  titleText.setAttribute("font-weight", "600");
+  titleText.setAttribute("font-family", "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
+  titleText.textContent = title;
+  svg.appendChild(titleText);
+
+  const subtitleText = document.createElementNS(NS, "text");
+  subtitleText.setAttribute("x", String(textX));
+  subtitleText.setAttribute("y", "40");
+  subtitleText.setAttribute("fill", muted);
+  subtitleText.setAttribute("font-size", "12");
+  subtitleText.setAttribute("font-weight", "500");
+  subtitleText.setAttribute("font-family", "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
+  subtitleText.textContent = subtitle;
+  svg.appendChild(subtitleText);
+
+  if (count > 1) {
+    const badge = document.createElementNS(NS, "circle");
+    badge.setAttribute("cx", "12");
+    badge.setAttribute("cy", "12");
+    badge.setAttribute("r", "10");
+    badge.setAttribute("fill", brand);
+    svg.appendChild(badge);
+
+    const badgeText = document.createElementNS(NS, "text");
+    badgeText.setAttribute("x", "12");
+    badgeText.setAttribute("y", "16");
+    badgeText.setAttribute("text-anchor", "middle");
+    badgeText.setAttribute("fill", "#ffffff");
+    badgeText.setAttribute("font-size", "11");
+    badgeText.setAttribute("font-weight", "700");
+    badgeText.setAttribute("font-family", "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
+    badgeText.textContent = String(count);
+    svg.appendChild(badgeText);
+  }
+
+  document.body.appendChild(svg);
+  return { wrapper: svg, offsetX: 14, offsetY: 26 };
+}
+
+function handleDragStart(event: DragEvent, file: FileItem) {
+  if (!props.isAdmin || isInlineProcessing(file) || isInlineRenaming(file)) {
+    event.preventDefault();
+    return;
+  }
+  event.dataTransfer?.setData("text/plain", file.id || file.name);
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    const preview = createDragPreview(file);
+    if (preview) {
+      event.dataTransfer.setDragImage(preview.wrapper, preview.offsetX, preview.offsetY);
+      window.setTimeout(() => {
+        preview.wrapper.remove();
+      }, 0);
+    }
+  }
+  emit("drag-file-start", file);
+}
+
+function handleDragEnd() {
+  emit("drag-file-end");
+}
+
+function handleFolderDragEnter(event: DragEvent, file: FileItem) {
+  if (!isDroppableFolder(file)) return;
+  event.preventDefault();
+  emit("drag-enter-folder", file);
+}
+
+function handleFolderDragOver(event: DragEvent, file: FileItem) {
+  if (!isDroppableFolder(file)) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  emit("drag-enter-folder", file);
+}
+
+function handleFolderDragLeave(event: DragEvent, file: FileItem) {
+  if (!props.dragActive) return;
+  const currentTarget = event.currentTarget as Node | null;
+  const relatedTarget = event.relatedTarget as Node | null;
+  if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) return;
+  emit("drag-leave-folder", file);
+}
+
+function handleFolderDrop(event: DragEvent, file: FileItem) {
+  if (!props.dragActive) return;
+  event.preventDefault();
+  emit("drop-on-folder", file);
+}
+
 function onRowClick(event: MouseEvent, file: FileItem) {
   if (!props.isAdmin) {
     emit("open", file);
@@ -334,9 +535,16 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
           v-if="!showEmptyRow"
           :key="fileKey(f)"
           class="file-row"
-          :class="{ processing: isInlineProcessing(f) }"
+          :class="{ processing: isInlineProcessing(f), 'drag-target': isActiveDropTarget(f) }"
+          :draggable="isAdmin && !isInlineProcessing(f) && !isInlineRenaming(f)"
           @click="onRowClick($event, f)"
           @contextmenu.prevent.stop="openContextMenu($event, f)"
+          @dragstart="handleDragStart($event, f)"
+          @dragend="handleDragEnd"
+          @dragenter="handleFolderDragEnter($event, f)"
+          @dragover="handleFolderDragOver($event, f)"
+          @dragleave="handleFolderDragLeave($event, f)"
+          @drop="handleFolderDrop($event, f)"
         >
           <td v-if="isAdmin" class="checkbox-col" @click.stop>
             <input
@@ -495,8 +703,19 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
           v-for="(f, index) in files"
           :key="fileKey(f)"
           class="file-card"
-          :class="{ selected: selectedSet.has(fileKey(f)), processing: isInlineProcessing(f) }"
+          :class="{
+            selected: selectedSet.has(fileKey(f)),
+            processing: isInlineProcessing(f),
+            'drag-target': isActiveDropTarget(f),
+          }"
+          :draggable="isAdmin && !isInlineProcessing(f) && !isInlineRenaming(f)"
           @contextmenu.prevent.stop="openContextMenu($event, f)"
+          @dragstart="handleDragStart($event, f)"
+          @dragend="handleDragEnd"
+          @dragenter="handleFolderDragEnter($event, f)"
+          @dragover="handleFolderDragOver($event, f)"
+          @dragleave="handleFolderDragLeave($event, f)"
+          @drop="handleFolderDrop($event, f)"
         >
           <label
             v-if="isAdmin"
@@ -619,6 +838,24 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
   background: var(--surface-sunken);
 }
 
+.file-row.drag-target {
+  position: relative;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--brand) 14%, var(--surface)) 0%, transparent 100%),
+    var(--info-soft);
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--brand) 14%, transparent);
+  transform: none;
+}
+
+.file-row.drag-target::after {
+  content: "";
+  position: absolute;
+  inset: 4px 8px;
+  border-radius: 12px;
+  border: 1px dashed color-mix(in srgb, var(--brand) 48%, transparent);
+  pointer-events: none;
+}
+
 .file-list__load-more-row {
   pointer-events: none;
 }
@@ -735,6 +972,14 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
 
 .file-card.selected .file-card-main {
   background: var(--info-soft);
+}
+
+.file-card.drag-target .file-card-main {
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--brand) 16%, transparent), transparent 55%),
+    var(--info-soft);
+  box-shadow: 0 14px 26px color-mix(in srgb, var(--brand) 16%, transparent);
+  transform: translateY(-2px) scale(1.01);
 }
 
 .file-card-icon {
