@@ -213,7 +213,7 @@ defineExpose(
               <div class="settings-row__label">代理地址</div>
             </template>
             <template #control>
-              <AppInput v-model="settings.proxy_url" placeholder="http://127.0.0.1:7890" />
+              <AppInput v-model="settings.proxy_url" placeholder="http://127.0.0.1:1080 或 socks5://127.0.0.1:1080" />
             </template>
           </SettingsRow>
           <SettingsRow :show-changed-badge="true" :changed="isFieldChanged('proxy_username')">

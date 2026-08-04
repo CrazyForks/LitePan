@@ -32,6 +32,10 @@ function isChanged(it: SettingItem): boolean {
   return isEntryChanged(it.key, it.type);
 }
 
+function isGlobalCacheTTLItem(it: SettingItem): boolean {
+  return it.key === "cache_ttl";
+}
+
 const settingsChanged = computed(() => cacheItems.value.some((it) => isChanged(it)));
 
 function revertSettings() {
@@ -96,8 +100,30 @@ defineExpose(
           :item="it"
           :model-value="form[it.key]"
           :changed="isChanged(it)"
+          :help-title="isGlobalCacheTTLItem(it) ? '默认缓存时间' : undefined"
           @update:model-value="form[it.key] = $event"
-        />
+        >
+          <template v-if="isGlobalCacheTTLItem(it)" #help>
+            <p>当账号未设置缓存时间时，系统将使用此时间作为默认值。每个账号可以在账号管理中单独设置缓存时间。</p>
+            <div class="settings-help__section">优先级说明</div>
+            <div class="settings-help__item">
+              <span class="settings-help__dot settings-help__dot--on" />
+              <span>账号设置 &gt; 全局默认值</span>
+            </div>
+            <div class="settings-help__item">
+              <span class="settings-help__dot settings-help__dot--off" />
+              <span>账号TTL=0：完全禁用该账号缓存</span>
+            </div>
+            <div class="settings-help__item">
+              <span class="settings-help__dot settings-help__dot--on" />
+              <span>账号TTL&gt;0：使用账号设置的时间</span>
+            </div>
+            <div class="settings-help__item">
+              <span class="settings-help__dot settings-help__dot--off" />
+              <span>账号未设置：使用此全局默认值</span>
+            </div>
+          </template>
+        </SettingsFormRow>
       </SettingsCard>
 
       <SettingsCard v-if="webdavCacheItems.length" title="WebDAV 专用缓存" :accent="CACHE_SETTINGS_ACCENT">

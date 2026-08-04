@@ -126,7 +126,7 @@ func defaultSpecs() []Spec {
 			Type:        TypeInt,
 			Category:    "performance",
 			Label:       "全局缓存时间",
-			Description: "目录/详情缓存的默认有效期。账号可单独覆盖；账号填 0 表示该账号禁用缓存。",
+			Description: "缓存过期时间",
 			Default:     "30",
 			Unit:        "分钟",
 			Min:         intp(0),

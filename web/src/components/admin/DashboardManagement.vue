@@ -35,6 +35,8 @@ const tabs = [
 ];
 
 const { activeTab, setActiveTab } = useSectionTabRoute(OVERVIEW_TAB, VALID_TABS);
+const logPresetLevel = ref<string | number>("");
+const logPresetSeq = ref(0);
 
 const accounts = ref<Account[]>([]);
 const cacheStats = ref<CacheStats | null>(null);
@@ -115,6 +117,9 @@ const systemStatusText = computed(() => {
   if (inactiveAccountCount.value > 0) return `${inactiveAccountCount.value} 个账号未启用，其余模块正常`;
   return "账号、任务与缓存服务状态正常";
 });
+const canJumpToErrorLogs = computed(
+  () => recentErrorCount.value > 0 && authErrorAccountCount.value === 0 && cooldownAccountCount.value === 0,
+);
 
 const generatedStrmCount = computed(() => strmTasks.value.reduce((sum, task) => sum + (task.generated_count || 0), 0));
 const cacheHitRate = computed(() => `${Math.round(cacheStats.value?.hit_rate ?? 0)}%`);
@@ -246,6 +251,13 @@ async function clearDashboardCache() {
   } finally {
     clearingCache.value = false;
   }
+}
+
+function openErrorLogs() {
+  if (!canJumpToErrorLogs.value) return;
+  logPresetLevel.value = 40;
+  logPresetSeq.value += 1;
+  setActiveTab(LOGS_TAB);
 }
 
 function assignSettled<T extends OverviewResult>(
@@ -402,7 +414,16 @@ onMounted(() => {
     <SectionTabBar :model-value="activeTab" :tabs="tabs" @update:model-value="setActiveTab" />
 
     <div v-if="activeTab === OVERVIEW_TAB && !loading" class="dashboard-overview">
-      <section class="dashboard-hero" :class="`dashboard-hero--${systemStatus.tone}`">
+      <section
+        class="dashboard-hero"
+        :class="[`dashboard-hero--${systemStatus.tone}`, { 'dashboard-hero--actionable': canJumpToErrorLogs }]"
+        :role="canJumpToErrorLogs ? 'button' : undefined"
+        :tabindex="canJumpToErrorLogs ? 0 : undefined"
+        :aria-label="canJumpToErrorLogs ? '查看错误日志' : undefined"
+        @click="openErrorLogs"
+        @keydown.enter.prevent="openErrorLogs"
+        @keydown.space.prevent="openErrorLogs"
+      >
         <div class="dashboard-hero__main">
           <div class="dashboard-hero__icon">
             <i class="fas" :class="systemStatus.icon" />
@@ -410,7 +431,8 @@ onMounted(() => {
           <div class="dashboard-hero__copy">
             <p class="dashboard-eyebrow">控制台</p>
             <h2>{{ systemStatus.label }}</h2>
-            <p>{{ systemStatusText }}</p>
+            <p class="dashboard-hero__detail">{{ systemStatusText }}</p>
+            <p v-if="canJumpToErrorLogs" class="dashboard-hero__hint">点击横幅可直接查看 error 日志</p>
           </div>
         </div>
         <div class="dashboard-hero__metrics" aria-label="运行概况指标">
@@ -617,7 +639,11 @@ onMounted(() => {
       </section>
     </div>
 
-    <SystemLogs v-else-if="activeTab === LOGS_TAB" />
+    <SystemLogs
+      v-else-if="activeTab === LOGS_TAB"
+      :preset-level="logPresetLevel"
+      :preset-seq="logPresetSeq"
+    />
   </div>
 </template>
 
@@ -648,6 +674,22 @@ onMounted(() => {
   gap: 20px;
   padding: 18px 22px;
   background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--brand) 4%, var(--surface)));
+}
+
+.dashboard-hero--actionable {
+  cursor: pointer;
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.16s ease,
+    border-color 0.16s ease;
+}
+
+.dashboard-hero--actionable:hover,
+.dashboard-hero--actionable:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-medium);
+  border-color: color-mix(in srgb, var(--warning) 24%, var(--border-soft));
+  outline: none;
 }
 
 .dashboard-hero--warn {
@@ -716,9 +758,17 @@ onMounted(() => {
   margin: 0;
 }
 
-.dashboard-hero__copy > p:last-child {
+.dashboard-hero__detail {
   margin-top: 4px;
   color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.dashboard-hero__hint {
+  margin-top: 2px;
+  color: var(--text);
+  font-weight: 600;
   font-size: 12px;
   line-height: 1.6;
 }

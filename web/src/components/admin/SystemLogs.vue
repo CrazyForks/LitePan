@@ -15,7 +15,7 @@ const hasMore = ref(false);
 </script>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from "vue";
+import { computed, onMounted, onUnmounted, watch } from "vue";
 import { getApiErrorMessage } from "@/api/client";
 import {
   LOG_LEVELS,
@@ -32,6 +32,17 @@ import SvgIcon from "@/components/icons/SvgIcon.vue";
 import { confirm } from "@/composables/useConfirm";
 import { toast } from "@/composables/useToast";
 import { formatTime } from "@/utils/format";
+
+const props = withDefaults(
+  defineProps<{
+    presetLevel?: string | number;
+    presetSeq?: number;
+  }>(),
+  {
+    presetLevel: "",
+    presetSeq: 0,
+  },
+);
 
 const api = logsApi();
 
@@ -211,6 +222,15 @@ function resetPage() {
   expanded.value = new Set();
 }
 
+function applyPresetFilter(triggerRefresh: boolean) {
+  if (props.presetLevel === "" || props.presetLevel === undefined || props.presetLevel === null) return;
+  level.value = String(props.presetLevel);
+  module.value = "";
+  period.value = "24h";
+  keyword.value = "";
+  if (triggerRefresh) void refreshAll();
+}
+
 async function changePage(target: number) {
   if (loading.value || target < 1 || (target > page.value && !hasMore.value)) return;
   const previous = page.value;
@@ -242,7 +262,17 @@ function formatDetails(details: Record<string, unknown>) {
   return JSON.stringify(details, null, 2);
 }
 
-onMounted(() => void loadInitialPage());
+watch(
+  () => props.presetSeq,
+  (next, prev) => {
+    if (next > 0 && next !== prev) applyPresetFilter(true);
+  },
+);
+
+onMounted(() => {
+  if (props.presetSeq > 0) applyPresetFilter(false);
+  void loadInitialPage();
+});
 onUnmounted(() => clearTimeout(searchTimer));
 </script>
 
