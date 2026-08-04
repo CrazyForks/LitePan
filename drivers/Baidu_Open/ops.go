@@ -158,7 +158,7 @@ func (d *Driver) ResolveDownload(ctx context.Context, req driver.DownloadRequest
 		URL:         downloadURL,
 		Headers:     headers,
 		Mode:        mode,
-		Expiration:  time.Hour,
+		Expiration:  5 * time.Minute,
 		ForceProxy:  mode != domain.DownloadRedirect,
 		Size:        item.Size,
 		FileName:    item.Name,

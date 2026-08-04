@@ -37,7 +37,7 @@ const (
 	listPageSize          = 200
 	requestInterval       = 0
 	convergeDelayMS       = 500
-	downloadURLTTLSeconds = 120
+	downloadURLTTLSeconds = 300
 	proxyPartSize         = 10 * 1024 * 1024
 	proxyConcurrency      = 3
 )
