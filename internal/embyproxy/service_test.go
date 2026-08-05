@@ -130,15 +130,18 @@ func TestRedirectSTRMStreamResolvesLitePanSTRMOnServer(t *testing.T) {
 	svc := testEmbyProxyService(t, upstream.URL)
 	var gotAccountID int64
 	var gotFileID string
+	var gotUA string
 	svc.servePlayback = func(w http.ResponseWriter, r *http.Request, req playback.Request, intent playback.Intent) error {
 		gotAccountID = req.AccountID
 		gotFileID = req.FileID
+		gotUA = r.UserAgent()
 		w.Header().Set("Location", "https://cdn.example/video.mkv")
 		w.WriteHeader(http.StatusFound)
 		return nil
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "http://litepan.test:8097/Videos/123/stream?MediaSourceId=ms1&api_key=test-key", nil)
+	req.Header.Set("User-Agent", "Infuse-Direct/8.5")
 	rec := httptest.NewRecorder()
 	svc.handle(rec, req)
 
@@ -152,6 +155,9 @@ func TestRedirectSTRMStreamResolvesLitePanSTRMOnServer(t *testing.T) {
 	}
 	if gotAccountID != 12 || gotFileID != fileID {
 		t.Fatalf("播放请求解析错误：account=%d file=%q", gotAccountID, gotFileID)
+	}
+	if gotUA != "Infuse-Direct/8.5" {
+		t.Fatalf("播放请求 UA=%q，期望透传 Infuse-Direct/8.5", gotUA)
 	}
 }
 
