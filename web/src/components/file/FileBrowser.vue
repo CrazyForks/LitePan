@@ -91,6 +91,9 @@ const floatingAccountSwitchEnabled = computed(
   () => accountSwitchMode.value === "floating" && accounts.value.length > 1,
 );
 
+const browserFileLoading = computed(() => browserBootstrapping.value || loading.value);
+const showBrowserFrame = computed(() => browserBootstrapping.value || accounts.value.length > 0);
+
 const selectedAccountName = computed(
   () => accounts.value.find((a) => a.id === currentAccountId.value)?.name || "",
 );
@@ -838,7 +841,7 @@ onUnmounted(() => {
       添加。
     </div>
 
-    <div v-else-if="!browserBootstrapping" class="browser__frame" :class="{ 'browser__frame--grid': view === 'grid' }">
+    <div v-else-if="showBrowserFrame" class="browser__frame" :class="{ 'browser__frame--grid': view === 'grid' }">
       <div v-if="refreshing" class="browser__refresh-overlay">
         <BusySpinner variant="notch" :size="28" color="var(--brand)" />
         <span class="browser__refresh-text">正在强制刷新…</span>
@@ -923,7 +926,7 @@ onUnmounted(() => {
           <FileTable
             :files="files"
             :view="view"
-            :loading="loading"
+            :loading="browserFileLoading"
             :is-admin="isAdmin"
             :sort-key="sortKey"
             :sort-order="sortOrder"
