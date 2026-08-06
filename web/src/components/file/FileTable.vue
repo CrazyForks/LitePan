@@ -5,15 +5,12 @@ import type { FileRowOperation, SortKey, SortOrder } from "@/types/file-browser"
 import { formatSize, formatTime } from "@/utils/format";
 import type { DeleteFileHooks } from "@/composables/useFileActions";
 import { useFileTableInline } from "@/composables/useFileTableInline";
-import { getSvg } from "@/components/icons/svgRegistry";
-import { getIconfontSymbolId } from "@/components/icons/iconfontSymbolMap";
 import FileIcon from "./FileIcon.vue";
 import FileTableHeader from "./FileTableHeader.vue";
 import FileGridSortMenu from "./FileGridSortMenu.vue";
 import FileContextMenu from "./FileContextMenu.vue";
 import SvgIcon from "@/components/icons/SvgIcon.vue";
 import type { ContextMenuItem } from "@/composables/useFileTableInline";
-import { fileKind } from "@/utils/fileIcon";
 
 const props = defineProps<{
   files: FileItem[];
@@ -35,6 +32,8 @@ const props = defineProps<{
   nameAlignFile: (file: FileItem) => void;
   dragActive?: boolean;
   activeDropTargetId?: string;
+  dragUnlockedTargetId?: string;
+  dragLockProgress?: number;
   canDropOnFolder?: (file: FileItem) => boolean;
 }>();
 
@@ -110,6 +109,23 @@ const selectedCount = computed(() => props.selectedIds.length);
 const listVisibleCount = ref(INITIAL_LIST_RENDER_COUNT);
 const listLoadMoreSentinel = ref<HTMLTableRowElement | null>(null);
 let listLoadMoreObserver: IntersectionObserver | null = null;
+const DRAG_PREVIEW_OFFSET_X = 14;
+const DRAG_PREVIEW_OFFSET_Y = 26;
+const DRAG_ACTIVITY_TIMEOUT_MS = 180;
+const dragPreviewLeft = ref(0);
+const dragPreviewTop = ref(0);
+const dragPreviewVisible = ref(false);
+const dragPreviewFile = ref<FileItem | null>(null);
+const dragPreviewCount = ref(1);
+const dragPreviewSubtitle = ref("");
+const dragGhostImageRef = ref<HTMLImageElement | null>(null);
+const dragPreviewRef = ref<HTMLElement | null>(null);
+const fileListRef = ref<HTMLElement | null>(null);
+const dragRowOutlineRect = ref<{ top: number; left: number; width: number; height: number; ready: boolean } | null>(null);
+const TRANSPARENT_DRAG_GIF =
+  "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
+let dragEndCleanupFrame: number | null = null;
+let dragActivityCleanupTimer: number | null = null;
 
 const visibleListFiles = computed(() =>
   props.view === "list" ? props.files.slice(0, listVisibleCount.value) : props.files,
@@ -219,136 +235,132 @@ function isActiveDropTarget(file: FileItem) {
   return props.activeDropTargetId === file.id;
 }
 
-function truncateDragText(input: string, limit: number) {
-  if (input.length <= limit) return input;
-  return `${input.slice(0, Math.max(0, limit - 1))}…`;
+function isUnlockedDropTarget(file: FileItem) {
+  return props.dragUnlockedTargetId === file.id;
 }
 
-function createDragPreview(file: FileItem) {
-  if (typeof document === "undefined") return null;
+function dragLockProgressStyle() {
+  const progress = Math.max(0, Math.min(1, props.dragLockProgress ?? 0));
+  const radius = 11.5;
+  const circumference = 2 * Math.PI * radius;
+  return {
+    "--drag-lock-dasharray": `${circumference}`,
+    "--drag-lock-dashoffset": `${circumference * (1 - progress)}`,
+  };
+}
+
+const dragRowOutlineStyle = computed(() => {
+  if (!dragRowOutlineRect.value) return undefined;
+  return {
+    top: `${dragRowOutlineRect.value.top}px`,
+    left: `${dragRowOutlineRect.value.left}px`,
+    width: `${dragRowOutlineRect.value.width}px`,
+    height: `${dragRowOutlineRect.value.height}px`,
+  };
+});
+
+const dragPreviewStyle = computed(() => ({
+  left: `${dragPreviewLeft.value}px`,
+  top: `${dragPreviewTop.value}px`,
+}));
+
+const dragPreviewLockText = computed(() => {
+  if (props.dragUnlockedTargetId) return "松手即可移入";
+  if (props.activeDropTargetId) return "悬停片刻解锁";
+  return "";
+});
+
+const dragPreviewStatusText = computed(() => dragPreviewLockText.value || dragPreviewSubtitle.value);
+
+const dragPreviewShowLock = computed(() => Boolean(props.activeDropTargetId));
+const dragPreviewLockIcon = computed(() => (props.dragUnlockedTargetId ? "lock-open" : "lock"));
+
+function updateDragPreviewPosition(event: DragEvent) {
+  if (!dragPreviewVisible.value) return;
+  if (event.clientX === 0 && event.clientY === 0) return;
+  dragPreviewLeft.value = event.clientX - DRAG_PREVIEW_OFFSET_X;
+  dragPreviewTop.value = event.clientY - DRAG_PREVIEW_OFFSET_Y;
+}
+
+function updateDragRowOutline(event: DragEvent, ready = false) {
+  if (props.view !== "list") {
+    dragRowOutlineRect.value = null;
+    return;
+  }
+  const row = event.currentTarget as HTMLElement | null;
+  const container = fileListRef.value;
+  if (!row || !container) return;
+  const rowRect = row.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+  dragRowOutlineRect.value = {
+    top: rowRect.top - containerRect.top + 4,
+    left: rowRect.left - containerRect.left + 8,
+    width: Math.max(0, rowRect.width - 16),
+    height: Math.max(0, rowRect.height - 8),
+    ready,
+  };
+}
+
+function resetDragRowOutline() {
+  dragRowOutlineRect.value = null;
+}
+
+function getDragSubtitle(file: FileItem, count: number) {
+  return count > 1 ? `等 ${count} 个项目` : file.is_dir ? "移动文件夹" : "移动文件";
+}
+
+function showCustomDragPreview(file: FileItem, event: DragEvent) {
   const draggingSelected = selectedSet.value.has(fileKey(file));
   const count = draggingSelected && selectedCount.value > 1 ? selectedCount.value : 1;
-  const rootStyle = getComputedStyle(document.documentElement);
-  const brand = rootStyle.getPropertyValue("--brand").trim() || "#3b82f6";
-  const surface = rootStyle.getPropertyValue("--surface").trim() || "#ffffff";
-  const text = rootStyle.getPropertyValue("--text").trim() || "#111827";
-  const muted = rootStyle.getPropertyValue("--text-muted").trim() || "#6b7280";
-  const border = rootStyle.getPropertyValue("--border-soft").trim() || "rgba(59,130,246,0.24)";
-  const hotAreaWidth = 24;
-  const width = Math.min(320, Math.max(196, 132 + Math.min(file.name.length, 18) * 8));
-  const height = 54;
-  const iconX = hotAreaWidth + 12;
-  const iconY = 13;
-  const textX = iconX + 28;
-  const title = truncateDragText(file.name, count > 1 ? 20 : 22);
-  const subtitle = count > 1 ? `等 ${count} 个项目` : file.is_dir ? "移动文件夹" : "移动文件";
-  const NS = "http://www.w3.org/2000/svg";
+  if (dragPreviewRef.value) dragPreviewRef.value.style.opacity = "1";
+  dragPreviewFile.value = file;
+  dragPreviewCount.value = count;
+  dragPreviewSubtitle.value = getDragSubtitle(file, count);
+  dragPreviewVisible.value = true;
+  updateDragPreviewPosition(event);
+}
 
-  const svg = document.createElementNS(NS, "svg");
-  svg.setAttribute("xmlns", NS);
-  svg.setAttribute("width", String(width));
-  svg.setAttribute("height", String(height));
-  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  svg.style.position = "fixed";
-  svg.style.left = "-9999px";
-  svg.style.top = "-9999px";
-  svg.style.pointerEvents = "none";
-  svg.style.zIndex = "99999";
+function resetCustomDragPreview() {
+  if (dragPreviewRef.value) dragPreviewRef.value.style.opacity = "0";
+  dragPreviewVisible.value = false;
+  dragPreviewFile.value = null;
+  dragPreviewCount.value = 1;
+  dragPreviewSubtitle.value = "";
+  dragPreviewLeft.value = 0;
+  dragPreviewTop.value = 0;
+}
 
-  const rect = document.createElementNS(NS, "rect");
-  rect.setAttribute("x", "0.5");
-  rect.setAttribute("y", "0.5");
-  rect.setAttribute("width", String(width - 1));
-  rect.setAttribute("height", String(height - 1));
-  rect.setAttribute("rx", "16");
-  rect.setAttribute("ry", "16");
-  rect.setAttribute("fill", surface);
-  rect.setAttribute("stroke", border);
-  svg.appendChild(rect);
+function cancelPendingDragEndCleanup() {
+  if (dragEndCleanupFrame === null || typeof window === "undefined") return;
+  window.cancelAnimationFrame(dragEndCleanupFrame);
+  dragEndCleanupFrame = null;
+}
 
-  const iconBg = document.createElementNS(NS, "rect");
-  iconBg.setAttribute("x", String(iconX - 5));
-  iconBg.setAttribute("y", String(iconY - 4));
-  iconBg.setAttribute("width", "28");
-  iconBg.setAttribute("height", "28");
-  iconBg.setAttribute("rx", "10");
-  iconBg.setAttribute("ry", "10");
-  iconBg.setAttribute("fill", surface);
-  iconBg.setAttribute("stroke", border);
-  svg.appendChild(iconBg);
+function cancelDragActivityCleanup() {
+  if (dragActivityCleanupTimer === null || typeof window === "undefined") return;
+  window.clearTimeout(dragActivityCleanupTimer);
+  dragActivityCleanupTimer = null;
+}
 
-  const iconName = fileKind(file);
-  const symbolId = getIconfontSymbolId(iconName);
-  if (symbolId) {
-    const iconSvg = document.createElementNS(NS, "svg");
-    iconSvg.setAttribute("x", String(iconX));
-    iconSvg.setAttribute("y", String(iconY));
-    iconSvg.setAttribute("width", "18");
-    iconSvg.setAttribute("height", "18");
-    iconSvg.setAttribute("viewBox", "0 0 1024 1024");
-    iconSvg.setAttribute("fill", brand);
-    iconSvg.setAttribute("color", brand);
-    const use = document.createElementNS(NS, "use");
-    use.setAttribute("href", `#${symbolId}`);
-    use.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", `#${symbolId}`);
-    iconSvg.appendChild(use);
-    svg.appendChild(iconSvg);
-  } else {
-    const iconMarkup = getSvg(iconName);
-    const parsed = new DOMParser().parseFromString(iconMarkup, "image/svg+xml").documentElement;
-    if (parsed?.tagName?.toLowerCase() === "svg") {
-      parsed.setAttribute("x", String(iconX));
-      parsed.setAttribute("y", String(iconY));
-      parsed.setAttribute("width", "18");
-      parsed.setAttribute("height", "18");
-      parsed.setAttribute("color", brand);
-      parsed.setAttribute("fill", brand);
-      svg.appendChild(document.importNode(parsed, true));
-    }
-  }
+// mac 某些失败拖拽会先给异常 drag，再晚一点才给 dragend，这里补一帧兜底清理。
+function scheduleDragEndCleanup() {
+  if (dragEndCleanupFrame !== null || typeof window === "undefined") return;
+  dragEndCleanupFrame = window.requestAnimationFrame(() => {
+    dragEndCleanupFrame = null;
+    if (!dragPreviewVisible.value) return;
+    clearDragArtifacts();
+  });
+}
 
-  const titleText = document.createElementNS(NS, "text");
-  titleText.setAttribute("x", String(textX));
-  titleText.setAttribute("y", "24");
-  titleText.setAttribute("fill", text);
-  titleText.setAttribute("font-size", "13");
-  titleText.setAttribute("font-weight", "600");
-  titleText.setAttribute("font-family", "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
-  titleText.textContent = title;
-  svg.appendChild(titleText);
-
-  const subtitleText = document.createElementNS(NS, "text");
-  subtitleText.setAttribute("x", String(textX));
-  subtitleText.setAttribute("y", "40");
-  subtitleText.setAttribute("fill", muted);
-  subtitleText.setAttribute("font-size", "12");
-  subtitleText.setAttribute("font-weight", "500");
-  subtitleText.setAttribute("font-family", "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
-  subtitleText.textContent = subtitle;
-  svg.appendChild(subtitleText);
-
-  if (count > 1) {
-    const badge = document.createElementNS(NS, "circle");
-    badge.setAttribute("cx", "12");
-    badge.setAttribute("cy", "12");
-    badge.setAttribute("r", "10");
-    badge.setAttribute("fill", brand);
-    svg.appendChild(badge);
-
-    const badgeText = document.createElementNS(NS, "text");
-    badgeText.setAttribute("x", "12");
-    badgeText.setAttribute("y", "16");
-    badgeText.setAttribute("text-anchor", "middle");
-    badgeText.setAttribute("fill", "#ffffff");
-    badgeText.setAttribute("font-size", "11");
-    badgeText.setAttribute("font-weight", "700");
-    badgeText.setAttribute("font-family", "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
-    badgeText.textContent = String(count);
-    svg.appendChild(badgeText);
-  }
-
-  document.body.appendChild(svg);
-  return { wrapper: svg, offsetX: 14, offsetY: 26 };
+// Safari 失败拖拽有时不给明确结束信号，只能靠拖拽“心跳”断掉后主动收卡片。
+function markDragActivity() {
+  if (!dragPreviewVisible.value || typeof window === "undefined") return;
+  cancelDragActivityCleanup();
+  dragActivityCleanupTimer = window.setTimeout(() => {
+    dragActivityCleanupTimer = null;
+    if (!dragPreviewVisible.value) return;
+    clearDragArtifacts();
+  }, DRAG_ACTIVITY_TIMEOUT_MS);
 }
 
 function handleDragStart(event: DragEvent, file: FileItem) {
@@ -356,33 +368,51 @@ function handleDragStart(event: DragEvent, file: FileItem) {
     event.preventDefault();
     return;
   }
+  cancelDragActivityCleanup();
+  cancelPendingDragEndCleanup();
   event.dataTransfer?.setData("text/plain", file.id || file.name);
   if (event.dataTransfer) {
     event.dataTransfer.effectAllowed = "move";
-    const preview = createDragPreview(file);
-    if (preview) {
-      event.dataTransfer.setDragImage(preview.wrapper, preview.offsetX, preview.offsetY);
-      window.setTimeout(() => {
-        preview.wrapper.remove();
-      }, 0);
-    }
+    const ghostImage = dragGhostImageRef.value;
+    if (ghostImage?.complete) event.dataTransfer.setDragImage(ghostImage, 0, 0);
   }
+  showCustomDragPreview(file, event);
+  markDragActivity();
   emit("drag-file-start", file);
 }
 
+function handleDragMove(event: DragEvent) {
+  if (event.clientX === 0 && event.clientY === 0) {
+    // 这类 0,0 坐标常见于拖拽会话将结束但 dragend 还没到的瞬间。
+    scheduleDragEndCleanup();
+    return;
+  }
+  cancelPendingDragEndCleanup();
+  updateDragPreviewPosition(event);
+  markDragActivity();
+}
+
 function handleDragEnd() {
+  resetCustomDragPreview();
+  resetDragRowOutline();
   emit("drag-file-end");
 }
 
 function handleFolderDragEnter(event: DragEvent, file: FileItem) {
   if (!isDroppableFolder(file)) return;
   event.preventDefault();
+  updateDragPreviewPosition(event);
+  updateDragRowOutline(event, isUnlockedDropTarget(file));
+  markDragActivity();
   emit("drag-enter-folder", file);
 }
 
 function handleFolderDragOver(event: DragEvent, file: FileItem) {
   if (!isDroppableFolder(file)) return;
   event.preventDefault();
+  updateDragPreviewPosition(event);
+  updateDragRowOutline(event, isUnlockedDropTarget(file));
+  markDragActivity();
   if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
   emit("drag-enter-folder", file);
 }
@@ -392,12 +422,15 @@ function handleFolderDragLeave(event: DragEvent, file: FileItem) {
   const currentTarget = event.currentTarget as Node | null;
   const relatedTarget = event.relatedTarget as Node | null;
   if (currentTarget && relatedTarget && currentTarget.contains(relatedTarget)) return;
+  resetDragRowOutline();
   emit("drag-leave-folder", file);
 }
 
 function handleFolderDrop(event: DragEvent, file: FileItem) {
   if (!props.dragActive) return;
   event.preventDefault();
+  resetCustomDragPreview();
+  resetDragRowOutline();
   emit("drop-on-folder", file);
 }
 
@@ -434,9 +467,34 @@ watch(hasMoreListFiles, async () => {
   void updateListLoadMoreObserver();
 });
 
+function handleWindowDragOver(event: DragEvent) {
+  updateDragPreviewPosition(event);
+  markDragActivity();
+}
+
+function clearDragArtifacts() {
+  cancelDragActivityCleanup();
+  cancelPendingDragEndCleanup();
+  resetCustomDragPreview();
+  resetDragRowOutline();
+}
+
+// 用 window 兜底，是为了覆盖非目标目录区域 drop 的失败路径。
+function handleWindowDrop() {
+  clearDragArtifacts();
+}
+
+// 源元素自己的 dragend 不一定稳定冒泡到预期位置，这里统一从窗口收尾。
+function handleWindowDragEnd() {
+  clearDragArtifacts();
+}
+
 onMounted(() => {
   void nextTick(updateListLoadMoreObserver);
   document.addEventListener("keydown", handleHeaderMenuKeydown);
+  window.addEventListener("dragover", handleWindowDragOver);
+  window.addEventListener("drop", handleWindowDrop);
+  window.addEventListener("dragend", handleWindowDragEnd, true);
   window.addEventListener("resize", closeDirectoryContextMenu);
   window.addEventListener("scroll", closeDirectoryContextMenu, true);
 });
@@ -444,6 +502,9 @@ onMounted(() => {
 onUnmounted(() => {
   disconnectListLoadMoreObserver();
   document.removeEventListener("keydown", handleHeaderMenuKeydown);
+  window.removeEventListener("dragover", handleWindowDragOver);
+  window.removeEventListener("drop", handleWindowDrop);
+  window.removeEventListener("dragend", handleWindowDragEnd, true);
   window.removeEventListener("resize", closeDirectoryContextMenu);
   window.removeEventListener("scroll", closeDirectoryContextMenu, true);
 });
@@ -457,8 +518,16 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
   <div
     class="file-list"
     :class="`view-${view}`"
+    ref="fileListRef"
     @contextmenu.prevent="openDirectoryContextMenu($event)"
   >
+    <div
+      v-if="view === 'list' && dragRowOutlineRect"
+      class="file-list__drag-row-outline"
+      :class="{ 'file-list__drag-row-outline--ready': dragRowOutlineRect.ready }"
+      :style="dragRowOutlineStyle"
+      aria-hidden="true"
+    />
     <table v-if="view === 'list'" class="file-table">
       <FileTableHeader
         :is-admin="isAdmin"
@@ -535,11 +604,16 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
           v-if="!showEmptyRow"
           :key="fileKey(f)"
           class="file-row"
-          :class="{ processing: isInlineProcessing(f), 'drag-target': isActiveDropTarget(f) }"
+          :class="{
+            processing: isInlineProcessing(f),
+            'drag-target': isActiveDropTarget(f),
+            'drag-target-unlocked': isUnlockedDropTarget(f),
+          }"
           :draggable="isAdmin && !isInlineProcessing(f) && !isInlineRenaming(f)"
           @click="onRowClick($event, f)"
           @contextmenu.prevent.stop="openContextMenu($event, f)"
           @dragstart="handleDragStart($event, f)"
+          @drag="handleDragMove($event)"
           @dragend="handleDragEnd"
           @dragenter="handleFolderDragEnter($event, f)"
           @dragover="handleFolderDragOver($event, f)"
@@ -707,10 +781,12 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
             selected: selectedSet.has(fileKey(f)),
             processing: isInlineProcessing(f),
             'drag-target': isActiveDropTarget(f),
+            'drag-target-unlocked': isUnlockedDropTarget(f),
           }"
           :draggable="isAdmin && !isInlineProcessing(f) && !isInlineRenaming(f)"
           @contextmenu.prevent.stop="openContextMenu($event, f)"
           @dragstart="handleDragStart($event, f)"
+          @drag="handleDragMove($event)"
           @dragend="handleDragEnd"
           @dragenter="handleFolderDragEnter($event, f)"
           @dragover="handleFolderDragOver($event, f)"
@@ -781,6 +857,48 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
       </div>
     </div>
 
+    <div
+      v-if="dragPreviewVisible && dragPreviewFile"
+      ref="dragPreviewRef"
+      class="drag-preview"
+      :style="dragPreviewStyle"
+      aria-hidden="true"
+    >
+      <span class="drag-preview__icon-stack">
+        <span class="drag-preview__icon-shell">
+          <FileIcon :file="dragPreviewFile" :size="18" />
+        </span>
+        <span v-if="dragPreviewCount > 1" class="drag-preview__badge">{{ dragPreviewCount }}</span>
+      </span>
+      <span class="drag-preview__body">
+        <span class="drag-preview__title" :title="dragPreviewFile.name">{{ dragPreviewFile.name }}</span>
+        <span class="drag-preview__subtitle">{{ dragPreviewStatusText }}</span>
+      </span>
+      <span
+        v-if="dragPreviewShowLock"
+        class="drag-preview__lock drag-lock"
+        :class="{ 'drag-lock--ready': dragPreviewLockText === '松手即可移入' }"
+      >
+        <span class="drag-lock__ring" :style="dragLockProgressStyle()">
+          <svg class="drag-lock__ring-svg" viewBox="0 0 28 28" aria-hidden="true">
+            <circle class="drag-lock__ring-track" cx="14" cy="14" r="11.5" />
+            <circle class="drag-lock__ring-progress" cx="14" cy="14" r="11.5" />
+          </svg>
+          <span class="drag-lock__core">
+            <SvgIcon :name="dragPreviewLockIcon" :size="14" />
+          </span>
+        </span>
+      </span>
+    </div>
+
+    <img
+      ref="dragGhostImageRef"
+      class="drag-ghost-image"
+      :src="TRANSPARENT_DRAG_GIF"
+      alt=""
+      aria-hidden="true"
+    />
+
     <FileContextMenu
       :open="contextMenu.open"
       :x="contextMenu.x"
@@ -844,16 +962,28 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
     linear-gradient(90deg, color-mix(in srgb, var(--brand) 14%, var(--surface)) 0%, transparent 100%),
     var(--info-soft);
   box-shadow: 0 8px 22px color-mix(in srgb, var(--brand) 14%, transparent);
-  transform: none;
+  transform: translateZ(0);
 }
 
-.file-row.drag-target::after {
-  content: "";
+.file-row.drag-target-unlocked {
+  position: relative;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, #22c55e 12%, var(--surface)) 0%, transparent 100%),
+    color-mix(in srgb, #22c55e 10%, var(--surface));
+  box-shadow: 0 8px 22px color-mix(in srgb, #22c55e 16%, transparent);
+  transform: translateZ(0);
+}
+
+.file-list__drag-row-outline {
   position: absolute;
-  inset: 4px 8px;
   border-radius: 12px;
   border: 1px dashed color-mix(in srgb, var(--brand) 48%, transparent);
   pointer-events: none;
+  z-index: 1;
+}
+
+.file-list__drag-row-outline--ready {
+  border-color: color-mix(in srgb, #22c55e 58%, transparent);
 }
 
 .file-list__load-more-row {
@@ -867,6 +997,10 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
   background: transparent;
 }
 
+.name-col {
+  position: relative;
+}
+
 .file-name {
   display: flex;
   align-items: center;
@@ -875,6 +1009,7 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
   font-size: 14px;
   color: var(--text-regular);
   min-width: 0;
+  position: relative;
 }
 
 .file-icon-wrap {
@@ -897,6 +1032,7 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .file-mobile-meta {
@@ -963,6 +1099,7 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
   cursor: pointer;
   text-align: center;
   transition: background-color 0.18s ease;
+  position: relative;
 }
 
 .file-card:hover .file-card-main,
@@ -980,6 +1117,13 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
     var(--info-soft);
   box-shadow: 0 14px 26px color-mix(in srgb, var(--brand) 16%, transparent);
   transform: translateY(-2px) scale(1.01);
+}
+
+.file-card.drag-target-unlocked .file-card-main {
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, #22c55e 18%, transparent), transparent 55%),
+    color-mix(in srgb, #22c55e 11%, var(--surface));
+  box-shadow: 0 14px 26px color-mix(in srgb, #22c55e 20%, transparent);
 }
 
 .file-card-icon {
@@ -1034,6 +1178,194 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
   background: var(--surface-sunken);
 }
 
+.drag-preview {
+  position: fixed;
+  width: 240px;
+  height: 54px;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 16px 32px color-mix(in srgb, rgb(15 23 42) 14%, transparent);
+  pointer-events: none;
+  z-index: 30;
+}
+
+.drag-preview__icon-stack {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.drag-preview__badge {
+  position: absolute;
+  top: -5px;
+  right: -7px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand);
+  color: #fff;
+  box-shadow: 0 0 0 2px var(--surface);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.drag-preview__icon-shell {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+.drag-preview__body {
+  min-width: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.drag-preview__title,
+.drag-preview__subtitle {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drag-preview__title {
+  padding-right: 2px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.drag-preview__subtitle {
+  padding-right: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.drag-preview__lock {
+  width: 28px;
+  justify-content: center;
+  margin-left: 2px;
+}
+
+.drag-ghost-image {
+  position: fixed;
+  left: -9999px;
+  top: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.drag-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.drag-lock__ring {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--brand) 82%, white);
+}
+
+.drag-lock__ring-svg {
+  position: absolute;
+  inset: 0;
+  transform: rotate(-90deg);
+  overflow: visible;
+}
+
+.drag-lock__ring-track,
+.drag-lock__ring-progress {
+  fill: none;
+  stroke-width: 2;
+}
+
+.drag-lock__ring-track {
+  stroke: color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.drag-lock__ring-progress {
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-dasharray: var(--drag-lock-dasharray, 75.4);
+  stroke-dashoffset: var(--drag-lock-dashoffset, 75.4);
+}
+
+.drag-lock__core {
+  position: relative;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 28%, transparent);
+  color: var(--brand);
+}
+
+.drag-lock--ready .drag-lock__ring {
+  color: #22c55e;
+}
+
+.drag-lock--ready .drag-lock__core {
+  color: #16a34a;
+}
+
+.drag-lock__text {
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 650;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 2px color-mix(in srgb, var(--surface) 72%, transparent);
+}
+
+.drag-lock--ready .drag-lock__text {
+  color: #15803d;
+}
+
 @media (max-width: 768px) {
   .file-list {
     overflow-x: hidden;
@@ -1045,6 +1377,18 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
 
   .file-mobile-meta {
     display: block;
+  }
+
+  .drag-preview {
+    width: min(240px, calc(100vw - 20px));
+  }
+
+  .drag-lock {
+    gap: 7px;
+  }
+
+  .drag-lock__text {
+    font-size: 11px;
   }
 }
 </style>

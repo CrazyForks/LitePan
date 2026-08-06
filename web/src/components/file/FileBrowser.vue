@@ -44,6 +44,7 @@ type FocusableInput = {
 const BROWSER_LOCATION_STORAGE_KEY = "litepan:index:browser-location";
 const BROWSER_LOCATION_RESET_ONCE_KEY = "litepan:index:reset-once";
 const ACCOUNT_SWITCH_MODE_STORAGE_KEY = "litepan:index:account-switch-mode";
+const DRAG_UNLOCK_DURATION_MS = 600;
 
 interface BrowserLocationSnapshot {
   accountId: number;
@@ -201,7 +202,10 @@ const dragMove = reactive({
   active: false,
   files: [] as FileItem[],
   targetId: "",
+  unlockedTargetId: "",
+  lockProgress: 0,
 });
+let dragUnlockFrame: number | undefined;
 
 const transferTitle = computed(() =>
   fileActions.transfer.action === "move" ? "移动到" : "复制到",
@@ -230,9 +234,46 @@ function getCurrentDisplayPath(): string {
 }
 
 function resetDragMove() {
+  stopDragUnlock();
   dragMove.active = false;
   dragMove.files = [];
   dragMove.targetId = "";
+  dragMove.unlockedTargetId = "";
+  dragMove.lockProgress = 0;
+}
+
+function stopDragUnlock() {
+  if (dragUnlockFrame !== undefined) {
+    window.cancelAnimationFrame(dragUnlockFrame);
+    dragUnlockFrame = undefined;
+  }
+}
+
+function resetFolderDragLock(targetId = "") {
+  stopDragUnlock();
+  dragMove.targetId = targetId;
+  dragMove.unlockedTargetId = "";
+  dragMove.lockProgress = 0;
+}
+
+function startFolderDragUnlock(targetId: string) {
+  if (!dragMove.active) return;
+  if (dragMove.targetId === targetId && dragMove.unlockedTargetId === targetId) return;
+  if (dragMove.targetId === targetId && dragMove.lockProgress > 0 && dragMove.lockProgress < 1) return;
+  resetFolderDragLock(targetId);
+  const startedAt = performance.now();
+  const tick = (now: number) => {
+    if (dragMove.targetId !== targetId) return;
+    const nextProgress = Math.min(1, (now - startedAt) / DRAG_UNLOCK_DURATION_MS);
+    dragMove.lockProgress = nextProgress;
+    if (nextProgress >= 1) {
+      dragMove.unlockedTargetId = targetId;
+      dragUnlockFrame = undefined;
+      return;
+    }
+    dragUnlockFrame = window.requestAnimationFrame(tick);
+  };
+  dragUnlockFrame = window.requestAnimationFrame(tick);
 }
 
 function resolveDraggedFiles(startFile: FileItem) {
@@ -265,7 +306,7 @@ function startDragMove(file: FileItem) {
   if (!isAdmin.value) return;
   dragMove.active = true;
   dragMove.files = resolveDraggedFiles(file);
-  dragMove.targetId = "";
+  resetFolderDragLock();
 }
 
 function finishDragMove() {
@@ -274,20 +315,20 @@ function finishDragMove() {
 
 function handleFolderDragEnter(file: FileItem) {
   if (!canDropOnFolder(file)) {
-    if (dragMove.targetId === file.id) dragMove.targetId = "";
+    if (dragMove.targetId === file.id) resetFolderDragLock();
     return;
   }
-  dragMove.targetId = file.id;
+  startFolderDragUnlock(file.id);
 }
 
 function handleFolderDragLeave(file: FileItem) {
   if (dragMove.targetId === file.id) {
-    dragMove.targetId = "";
+    resetFolderDragLock();
   }
 }
 
 async function handleFolderDrop(file: FileItem) {
-  if (!canDropOnFolder(file)) {
+  if (!canDropOnFolder(file) || dragMove.unlockedTargetId !== file.id) {
     resetDragMove();
     return;
   }
@@ -301,12 +342,15 @@ function handleFavoriteDragEnter(item: BrowserFavoriteItem) {
     if (dragMove.targetId === item.id) dragMove.targetId = "";
     return;
   }
+  resetFolderDragLock(item.id);
+  dragMove.unlockedTargetId = item.id;
+  dragMove.lockProgress = 1;
   dragMove.targetId = item.id;
 }
 
 function handleFavoriteDragLeave(item: BrowserFavoriteItem) {
   if (dragMove.targetId === item.id) {
-    dragMove.targetId = "";
+    resetFolderDragLock();
   }
 }
 
@@ -810,6 +854,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  stopDragUnlock();
   clearNameAlignApplyProgress();
   uploadApi.cleanupUploadTasks();
 });
@@ -943,6 +988,8 @@ onUnmounted(() => {
             :name-align-file="openNameAlign"
             :drag-active="dragMove.active"
             :active-drop-target-id="dragMove.targetId"
+            :drag-unlocked-target-id="dragMove.unlockedTargetId"
+            :drag-lock-progress="dragMove.lockProgress"
             :can-drop-on-folder="canDropOnFolder"
             @open="onOpen"
             @sort-by="sortBy"
