@@ -53,6 +53,39 @@ function fieldString(name: string): string {
   const v = props.modelValue[name];
   return typeof v === "string" ? v : v == null ? "" : String(v);
 }
+
+function normalizedFieldText(f: FieldSchema): string {
+  return `${f.name} ${f.label}`.trim().toLowerCase();
+}
+
+function isSensitiveField(f: FieldSchema): boolean {
+  if (f.type === "password") return true;
+  const text = normalizedFieldText(f);
+  return [
+    "token",
+    "refresh_token",
+    "access_token",
+    "authorization",
+    "cookie",
+    "secret",
+    "client_secret",
+    "api_key",
+    "password",
+    "passwd",
+    "bearer",
+    "凭证",
+    "令牌",
+    "密钥",
+    "密码",
+    "授权",
+    "cookie",
+  ].some((keyword) => text.includes(keyword));
+}
+
+function inputAutocomplete(f: FieldSchema): string | undefined {
+  if (!isSensitiveField(f)) return f.type === "number" ? "off" : undefined;
+  return f.type === "password" ? "new-password" : "off";
+}
 </script>
 
 <template>
@@ -98,6 +131,8 @@ function fieldString(name: string): string {
           :type="f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text'"
           :model-value="(modelValue[f.name] as string) ?? ''"
           :placeholder="f.default ? `默认：${f.default}` : ''"
+          :autocomplete="inputAutocomplete(f)"
+          :ignore-autofill="isSensitiveField(f)"
           @update:model-value="(v) => setField(f.name, v)"
         />
       </FormField>

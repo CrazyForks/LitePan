@@ -1,5 +1,5 @@
 <script setup lang="ts">
-withDefaults(
+const props = withDefaults(
   defineProps<{
     modelValue: string | number | null;
     type?: "text" | "password" | "number";
@@ -15,6 +15,12 @@ const emit = defineEmits<{ "update:modelValue": [string] }>();
 function clearReadonly(event: FocusEvent) {
   (event.target as HTMLInputElement).removeAttribute("readonly");
 }
+
+function resolvedAutocomplete() {
+  if (props.autocomplete) return props.autocomplete;
+  if (props.ignoreAutofill) return props.type === "password" ? "new-password" : "off";
+  return undefined;
+}
 </script>
 
 <template>
@@ -24,8 +30,13 @@ function clearReadonly(event: FocusEvent) {
     :value="modelValue ?? ''"
     :placeholder="placeholder"
     :disabled="disabled"
-    :autocomplete="autocomplete"
+    :autocomplete="resolvedAutocomplete()"
     :readonly="ignoreAutofill || undefined"
+    :autocapitalize="ignoreAutofill ? 'off' : undefined"
+    :spellcheck="ignoreAutofill ? false : undefined"
+    :data-1p-ignore="ignoreAutofill ? 'true' : undefined"
+    :data-lpignore="ignoreAutofill ? 'true' : undefined"
+    :data-form-type="ignoreAutofill ? 'other' : undefined"
     @focus="ignoreAutofill ? clearReadonly($event) : undefined"
     @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
   />
