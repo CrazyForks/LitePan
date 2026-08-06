@@ -3,6 +3,7 @@ package upload
 import (
 	"context"
 	"log/slog"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"litepan/internal/domain"
 	"litepan/internal/eventbus"
 	"litepan/internal/file"
+	"litepan/internal/playback"
 	"litepan/internal/settings"
 )
 
@@ -20,6 +22,7 @@ type AccountLookup interface {
 type Options struct {
 	Exec     *driverexec.Executor
 	Files    *file.Service
+	Playback *playback.Service
 	Accounts AccountLookup
 	Repo     domain.UploadTaskRepository
 	Settings *settings.Service
@@ -31,6 +34,7 @@ type Options struct {
 type Manager struct {
 	exec     *driverexec.Executor
 	files    *file.Service
+	playback *playback.Service
 	accounts AccountLookup
 	repo     domain.UploadTaskRepository
 	settings *settings.Service
@@ -42,7 +46,8 @@ type Manager struct {
 	tasks        map[string]*taskState
 	queueOrder   int
 	limit        int
-	running      int
+	runningUploads   int
+	runningDownloads int
 	runCond      sync.Cond
 	subs         map[chan []byte]struct{}
 	subMu        sync.Mutex
@@ -56,6 +61,7 @@ func NewManager(opts Options) *Manager {
 	m := &Manager{
 		exec:     opts.Exec,
 		files:    opts.Files,
+		playback: opts.Playback,
 		accounts: opts.Accounts,
 		repo:     opts.Repo,
 		settings: opts.Settings,
@@ -85,22 +91,51 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (*Task, error) {
 	if p.TotalBytes < 0 {
 		return nil, domain.Errorf(domain.CodeValidation, "上传文件大小非法")
 	}
-	if m.accounts == nil {
-		return nil, domain.Errorf(domain.CodeInternal, "上传服务未配置账号查询")
-	}
-	accountName, driverType, err := m.accounts.LookupUploadAccount(ctx, p.AccountID)
-	if err != nil {
-		return nil, err
+	accountName := p.AccountName
+	driverType := p.DriverType
+	if accountName == "" || driverType == "" {
+		if m.accounts == nil {
+			return nil, domain.Errorf(domain.CodeInternal, "上传服务未配置账号查询")
+		}
+		var err error
+		accountName, driverType, err = m.accounts.LookupUploadAccount(ctx, p.AccountID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	name := p.DisplayName
 	if name == "" {
 		name = p.FileName
+	}
+	sourceType := p.SourceType
+	if sourceType == "" {
+		sourceType = SourceTypeManual
+	}
+	phase := p.Phase
+	if phase == "" {
+		if sourceType == SourceTypeCrossTransfer {
+			phase = PhaseDownloading
+		} else {
+			phase = PhaseUploading
+		}
 	}
 	now := time.Now()
 	m.mu.Lock()
 	m.queueOrder++
 	order := m.queueOrder
 	id := newTaskID()
+	localPath := p.LocalPath
+	if localPath == "" && sourceType == SourceTypeCrossTransfer {
+		localPath = filepath.Join(m.TempDir(), id+filepath.Ext(name))
+	}
+	relayVisible := p.RelayVisible
+	if sourceType == SourceTypeCrossTransfer {
+		relayVisible = true
+	}
+	message := "等待上传"
+	if sourceType == SourceTypeCrossTransfer {
+		message = "等待源盘下载"
+	}
 	st := &taskState{
 		Task: Task{
 			TaskID:            id,
@@ -109,16 +144,25 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (*Task, error) {
 			AccountName:       accountName,
 			DriverType:        driverType,
 			FileName:          name,
+			SourceType:        sourceType,
+			SourceAccountID:   p.SourceAccountID,
+			SourceAccountName: p.SourceAccountName,
+			SourceDriverType:  p.SourceDriverType,
+			SourceFileID:      p.SourceFileID,
+			RelPath:           p.RelPath,
+			RelDir:            p.RelDir,
 			TargetPath:        p.TargetPath,
 			TargetDisplayPath: p.TargetDisplayPath,
 			Status:            StatusPending,
-			Message:           "等待上传",
+			Phase:             phase,
+			Message:           message,
 			TotalBytes:        p.TotalBytes,
+			RelayVisible:      relayVisible,
 			QueueOrder:        order,
 			CreatedAt:         unixFloat(now),
 			UpdatedAt:         unixFloat(now),
 		},
-		localPath:      p.LocalPath,
+		localPath:      localPath,
 		conflictPolicy: p.ConflictPolicy,
 		runDone:        make(chan struct{}),
 	}

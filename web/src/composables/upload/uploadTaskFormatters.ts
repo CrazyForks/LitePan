@@ -29,6 +29,16 @@ export function isRemoteTaskWaitingResume(task: UploadTask, pendingRemoteResumeT
   return pendingRemoteResumeTaskIds.has(String(task.task_id));
 }
 
+export function getUploadTaskDisplayStatus(task: UploadTask, pendingRemoteResumeTaskIds: Set<string>) {
+  if (
+    isRemoteTaskWaitingResume(task, pendingRemoteResumeTaskIds) &&
+    ["paused", "failed", "canceled"].includes(task.status)
+  ) {
+    return "pending";
+  }
+  return task.status;
+}
+
 export function isUploadTaskActive(task: UploadTask) {
   return ["pending", "running", "paused"].includes(task.status);
 }
@@ -75,9 +85,10 @@ export function getUploadTaskPhaseLabel(
   pendingRemoteResumeTaskIds: Set<string>,
   localDispatchingTaskIds?: Set<string>,
 ) {
-  if (task.status === "paused") return "已暂停";
-  if (task.status === "running") return "上传到网盘";
-  if (task.status === "pending") {
+  const displayStatus = getUploadTaskDisplayStatus(task, pendingRemoteResumeTaskIds);
+  if (displayStatus === "paused") return "已暂停";
+  if (displayStatus === "running") return "上传到网盘";
+  if (displayStatus === "pending") {
     if (isRemoteTaskWaitingResume(task, pendingRemoteResumeTaskIds)) return "等待继续";
     if (isSendingToLitePanServerTask(task)) {
       const progress = Number(task.progress || 0);
@@ -92,7 +103,7 @@ export function getUploadTaskPhaseLabel(
     }
     return "等待中";
   }
-  return getUploadTaskStatusText(task.status);
+  return getUploadTaskStatusText(displayStatus);
 }
 
 export function shouldShowUploadTaskMetaPercent(task: UploadTask) {
@@ -159,37 +170,6 @@ export function getSystemUploadJunkReason(relativePath: string) {
   return "";
 }
 
-export function getRelayStatusText(status: string) {
-  const map: Record<string, string> = {
-    success: "已完成",
-    failed: "失败",
-    canceled: "已取消",
-    pending: "等待中",
-    running: "进行中",
-  };
-  return map[status] || status;
-}
-
-export function getRelayPhaseLabel(task: { phase?: string }) {
-  if (task.phase === "downloading") return "源盘下载中";
-  if (task.phase === "uploading") return "目标盘上传中";
-  return "等待中";
-}
-
-export function isRelayTaskActive(task: { status: string }) {
-  return !["success", "failed", "canceled"].includes(task.status);
-}
-
-export function shouldShowRelayTaskMetaPercent(task: { status: string; phase?: string }) {
-  if (["success", "failed", "canceled"].includes(task.status)) return false;
-  return task.phase === "downloading" || task.phase === "uploading";
-}
-
-export function shouldShowRelayTaskHairline(task: { status: string; phase?: string }) {
-  if (["success", "failed", "canceled"].includes(task.status)) return false;
-  return task.phase === "uploading";
-}
-
 export function formatRelaySpeed(task: { speed_bytes_per_second?: number }) {
   return formatUploadSpeed(task.speed_bytes_per_second);
 }
@@ -198,26 +178,6 @@ export function formatRelayPart(task: { message?: string; phase?: string }) {
   if (task.phase !== "downloading" && task.phase !== "uploading") return "";
   const m = String(task.message || "").match(/分片[（(]\s*(\d+)\s*\/\s*(\d+)\s*[)）]/);
   return m ? `分片 ${m[1]}/${m[2]}` : "";
-}
-
-export function canHandleUploadTaskPrimaryAction(task: UploadTask) {
-  return ["success", "skipped", "pending", "running", "failed", "paused", "canceled"].includes(task.status);
-}
-
-export function getUploadTaskPrimaryActionTitle(task: UploadTask) {
-  if (["success", "skipped"].includes(task.status)) return "打开所在目录";
-  if (["pending", "running"].includes(task.status)) return "暂停上传任务";
-  return "继续上传任务";
-}
-
-export function getUploadTaskPrimaryActionIcon(task: UploadTask): "folder-open" | "pause" | "play" {
-  if (["success", "skipped"].includes(task.status)) return "folder-open";
-  if (["pending", "running"].includes(task.status)) return "pause";
-  return "play";
-}
-
-export function canDeleteUploadTask(task: UploadTask) {
-  return Boolean(task.task_id);
 }
 
 export function getUploadTaskOpenPath(task: UploadTask) {

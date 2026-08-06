@@ -13,6 +13,7 @@ import (
 	"litepan/internal/domain"
 	"litepan/internal/driver"
 	"litepan/internal/file"
+	"litepan/internal/upload"
 )
 
 func TestRemovableCreatedRoots(t *testing.T) {
@@ -360,7 +361,9 @@ func newCleanupService(t *testing.T, drv driver.Driver) *Service {
 	t.Helper()
 	exec := driverexec.New(cleanupProvider{drv: drv}, nil)
 	files := file.NewService(exec, nil, nil, nil, nil, nil)
-	return New(Options{Exec: exec, Files: files, DataDir: t.TempDir()})
+	dataDir := t.TempDir()
+	uploads := upload.NewManager(upload.Options{Exec: exec, Files: files, DataDir: dataDir})
+	return New(Options{Exec: exec, Files: files, Uploads: uploads, DataDir: dataDir})
 }
 
 type cleanupProvider struct{ drv driver.Driver }

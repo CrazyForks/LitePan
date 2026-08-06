@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 
@@ -54,6 +55,9 @@ func logAPIError(r *http.Request, err error) {
 		fields = append(fields, "account_id", accountID)
 	}
 	if ae, ok := domain.AsAppError(err); ok {
+		if shouldSuppressAPIErrorLog(r, ae) {
+			return
+		}
 		fields = append(fields,
 			"status", ae.HTTPStatus(),
 			"error_type", ae.Code,
@@ -75,4 +79,44 @@ func logAPIError(r *http.Request, err error) {
 		"error_type", domain.CodeInternal,
 		"message", "服务内部错误",
 	)...)
+}
+
+func shouldSuppressAPIErrorLog(r *http.Request, ae *domain.AppError) bool {
+	if r == nil || ae == nil {
+		return false
+	}
+	if ae.Code != domain.CodeAdminAuthRequired {
+		return false
+	}
+	if !isTaskPanelProbePath(r.URL.Path) {
+		return false
+	}
+	return isLoopbackRemoteAddr(r.RemoteAddr)
+}
+
+func isTaskPanelProbePath(path string) bool {
+	switch path {
+	case "/api/files/upload/tasks",
+		"/api/files/upload/tasks/stream",
+		"/api/cross-transfer/relay/tasks/stream":
+		return true
+	default:
+		return false
+	}
+}
+
+func isLoopbackRemoteAddr(remoteAddr string) bool {
+	host := strings.TrimSpace(remoteAddr)
+	if host == "" {
+		return false
+	}
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

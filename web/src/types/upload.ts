@@ -14,15 +14,25 @@ export interface UploadTask {
   account_name?: string;
   driver_type?: string;
   file_name: string;
+  source_type?: string;
+  source_account_id?: number;
+  source_account_name?: string;
+  source_driver_type?: string;
+  source_file_id?: string;
+  rel_path?: string;
+  rel_dir?: string;
   target_path: string;
   target_display_path?: string;
   status: UploadTaskStatus;
+  phase?: string;
   progress: number;
+  downloaded_bytes?: number;
   uploaded_bytes?: number;
   speed_bytes_per_second?: number;
   total_bytes?: number;
   message?: string;
   error?: string;
+  relay_visible?: boolean;
   result?: {
     file_id?: string;
     parent_id?: string;

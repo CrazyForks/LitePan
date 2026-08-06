@@ -13,19 +13,21 @@ import (
 	"litepan/internal/driver"
 	"litepan/internal/file"
 	"litepan/internal/playback"
+	"litepan/internal/upload"
 )
 
 type Service struct {
-	exec  *driverexec.Executor
-	files *file.Service
-	relay *RelayManager
-	log   *slog.Logger
+	exec    *driverexec.Executor
+	files   *file.Service
+	uploads *upload.Manager
+	log     *slog.Logger
 }
 
 type Options struct {
 	Exec     *driverexec.Executor
 	Files    *file.Service
 	Playback *playback.Service
+	Uploads  *upload.Manager
 	DataDir  string
 	Log      *slog.Logger
 }
@@ -35,17 +37,8 @@ func New(opts Options) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	relay := NewRelayManager(RelayOptions{
-		Exec:     opts.Exec,
-		Files:    opts.Files,
-		Playback: opts.Playback,
-		DataDir:  opts.DataDir,
-		Log:      log,
-	})
-	return &Service{exec: opts.Exec, files: opts.Files, relay: relay, log: log}
+	return &Service{exec: opts.Exec, files: opts.Files, uploads: opts.Uploads, log: log}
 }
-
-func (s *Service) Relay() *RelayManager { return s.relay }
 
 type ScanFile struct {
 	SourceFileID string `json:"source_file_id"`
@@ -849,25 +842,30 @@ func (s *Service) executeTransferFile(ctx context.Context, in executeFileInput) 
 
 func (s *Service) enqueueRelayTask(ctx context.Context, in executeFileInput) error {
 	f := in.file
+	if s.uploads == nil {
+		return domain.Errorf(domain.CodeInternal, "上传服务未就绪")
+	}
 	if strings.TrimSpace(f.SourceFileID) == "" {
 		return domain.Errorf(domain.CodeValidation, "源文件缺少 file_id，无法执行兜底传输")
 	}
-	_, err := s.relay.CreateTask(ctx, RelayTaskInput{
+	_, err := s.uploads.Create(ctx, upload.CreateParams{
+		AccountID:         in.targetAccountID,
+		AccountName:       in.targetAccountName,
+		DriverType:        in.targetDriverType,
+		FileName:          f.Name,
+		SourceType:        upload.SourceTypeCrossTransfer,
 		SourceAccountID:   in.sourceAccountID,
 		SourceAccountName: in.sourceAccountName,
 		SourceDriverType:  in.sourceDriverType,
-		TargetAccountID:   in.targetAccountID,
-		TargetAccountName: in.targetAccountName,
-		TargetDriverType:  in.targetDriverType,
 		SourceFileID:      f.SourceFileID,
-		FileName:          f.Name,
 		RelPath:           f.RelPath,
 		RelDir:            f.RelDir,
-		TargetParentID:    in.targetParentID,
+		TargetPath:        in.targetParentID,
 		TargetDisplayPath: in.targetDisplayPath,
 		TotalBytes:        f.Size,
-		Method:            in.methodID,
 		ConflictPolicy:    in.conflict,
+		Phase:             upload.PhaseDownloading,
+		RelayVisible:      true,
 	})
 	return err
 }

@@ -15,7 +15,6 @@ export function useUploadFileInput(ctx: UploadActionsCtx) {
     if (!selectedFiles.length) return;
     try {
       store.uploadTaskPanelOpen.value = true;
-      store.uploadTaskView.value = "running";
       await stream.refreshUploadTaskServerConcurrency();
       let batchConflictPolicy: string | null = null;
       const existing = new Set(deps.files.value.map((f) => f.name.toLowerCase()));

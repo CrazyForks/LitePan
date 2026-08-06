@@ -3,12 +3,14 @@ import { getApiErrorMessage } from "@/api/client";
 import { isLocalUploadTask } from "@/composables/upload/uploadTaskFormatters";
 import type { LocalUploadPayload, UploadTaskDeps } from "@/composables/upload/uploadTaskTypes";
 import {
-  getActiveUploadSlotUsage,
-  getNextUploadTaskCandidate,
+  getNextLocalUploadTaskCandidate,
+  getNextRemoteResumeTaskCandidate,
   type UploadTaskStream,
 } from "@/composables/upload/useUploadTaskStream";
 import type { UploadTaskStore } from "@/composables/upload/useUploadTaskStore";
 import type { UploadTask } from "@/types/upload";
+
+const localDispatchConcurrency = 2;
 
 export function useLocalUploadDispatcher(
   deps: UploadTaskDeps,
@@ -65,9 +67,15 @@ export function useLocalUploadDispatcher(
           const progress = total > 0 ? Math.min(99, Math.round((loaded / total) * 100)) : 0;
           const message =
             total > 0 && loaded >= total
-              ? "文件已发送到 LitePan 服务器，正在创建上传任务"
-              : `正在将文件发送给 LitePan 服务器 ${progress}%`;
-          store.updateLocalUploadTask(task.task_id, { status: "pending", progress, message });
+              ? "投递成功，创建任务中"
+              : `投递到 LitePan 服务器 ${progress}%`;
+          store.updateLocalUploadTask(task.task_id, {
+            status: "pending",
+            progress,
+            uploaded_bytes: loaded,
+            total_bytes: total > 0 ? total : selectedFile.size,
+            message,
+          });
         },
       });
       if (store.canceledLocalUploadTaskIds.has(task.task_id)) {
@@ -76,18 +84,47 @@ export function useLocalUploadDispatcher(
         } catch {}
         store.removeLocalUploadTask(task.task_id);
         store.localUploadTaskPayloads.delete(task.task_id);
+        store.canceledLocalUploadTaskIds.delete(task.task_id);
+        store.pausedLocalUploadTaskIds.delete(task.task_id);
         return { success: false, canceled: true };
       }
-      store.removeLocalUploadTask(task.task_id);
-      store.localUploadTaskPayloads.delete(task.task_id);
+      if (store.pausedLocalUploadTaskIds.has(task.task_id) || store.batchPauseInProgress.value) {
+        store.canceledLocalUploadTaskIds.delete(task.task_id);
+        store.pausedLocalUploadTaskIds.delete(task.task_id);
+        try {
+          await uploadApi.pauseTask(created.task_id);
+        } catch {}
+        await stream.fetchUploadTasks();
+        stream.startUploadTaskPolling();
+        return { success: false, paused: true };
+      }
+      store.canceledLocalUploadTaskIds.delete(task.task_id);
+      store.pausedLocalUploadTaskIds.delete(task.task_id);
+      store.updateLocalUploadTask(task.task_id, {
+        status: "pending",
+        progress: 0,
+        uploaded_bytes: 0,
+        message: "创建任务中",
+        error: "",
+      });
       await stream.fetchUploadTasks();
       stream.startUploadTaskPolling();
       return { success: true };
     } catch (e) {
-      if (controller.signal.aborted || store.canceledLocalUploadTaskIds.has(task.task_id)) {
+      if (store.canceledLocalUploadTaskIds.has(task.task_id)) {
         store.removeLocalUploadTask(task.task_id);
         store.localUploadTaskPayloads.delete(task.task_id);
+        store.canceledLocalUploadTaskIds.delete(task.task_id);
+        store.pausedLocalUploadTaskIds.delete(task.task_id);
         return { success: false, canceled: true };
+      }
+      if (controller.signal.aborted && (store.pausedLocalUploadTaskIds.has(task.task_id) || store.batchPauseInProgress.value)) {
+        store.updateLocalUploadTask(task.task_id, { status: "paused", message: "上传已暂停", error: "" });
+        return { success: false, paused: true };
+      }
+      if (controller.signal.aborted) {
+        store.updateLocalUploadTask(task.task_id, { status: "pending", message: "等待上传", error: "" });
+        return { success: false };
       }
       const msg = getApiErrorMessage(e, "创建上传任务失败");
       store.updateLocalUploadTask(task.task_id, { status: "failed", message: "创建上传任务失败", error: msg });
@@ -129,12 +166,29 @@ export function useLocalUploadDispatcher(
     try {
       await stream.refreshUploadTaskServerConcurrency();
       while (true) {
-        const capacity = Math.max(0, store.uploadTaskServerConcurrency.value - getActiveUploadSlotUsage(store));
-        if (capacity <= 0) break;
-        const next = getNextUploadTaskCandidate(store);
-        if (!next) break;
-        const ok = await activateQueuedUploadTask(next);
-        if (!ok) break;
+        let advanced = false;
+
+        if (store.localDispatchingTaskIds.size < localDispatchConcurrency) {
+          const nextLocal = getNextLocalUploadTaskCandidate(store);
+          if (nextLocal) {
+            const ok = await activateQueuedUploadTask(nextLocal);
+            if (ok) {
+              advanced = true;
+              continue;
+            }
+          }
+        }
+
+        const nextRemote = getNextRemoteResumeTaskCandidate(store);
+        if (nextRemote) {
+          const ok = await activateQueuedUploadTask(nextRemote);
+          if (ok) {
+            advanced = true;
+            continue;
+          }
+        }
+
+        if (!advanced) break;
       }
     } finally {
       uploadTaskSchedulerRunning = false;

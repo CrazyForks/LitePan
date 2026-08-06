@@ -460,7 +460,7 @@ func (s *Service) prepareCredentialUpdates(ctx context.Context, req UpdateCreden
 	}
 	if req.UploadTaskConcurrency != nil {
 		if *req.UploadTaskConcurrency < 1 || *req.UploadTaskConcurrency > 5 {
-			return "", nil, domain.Errorf(domain.CodeValidation, "上传任务并发数必须是 1-5 之间的整数")
+			return "", nil, domain.Errorf(domain.CodeValidation, "传输任务并发数必须是 1-5 之间的整数")
 		}
 		updates = append(updates, configUpdate{key: "upload_task_concurrency", value: strconv.Itoa(*req.UploadTaskConcurrency)})
 	}

@@ -1,4 +1,5 @@
 import { computed, onUnmounted, ref } from "vue";
+import { ApiError } from "@/api/client";
 import {
   deleteCrossTransferRelayTasks,
   listCrossTransferRelayTasks,
@@ -13,12 +14,16 @@ function relayTaskActivityRank(task: CrossTransferRelayTask) {
 
 export function useRelayTasks() {
   const relayTasks = ref<CrossTransferRelayTask[]>([]);
-  const relayTaskView = ref<"running" | "completed">("running");
   const relayTaskOrderMap = ref<Record<string, number>>({});
   let relayTaskOrderCounter = 0;
   let relayPollingTimer: ReturnType<typeof setInterval> | null = null;
   let relayEventSource: EventSource | null = null;
   let relaySseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let relayAuthDenied = false;
+
+  function isAdminAuthError(error: unknown) {
+    return error instanceof ApiError && error.status === 401 && error.errorType === "ADMIN_AUTH_REQUIRED";
+  }
 
   function ensureRelayTaskDisplayOrder(task: CrossTransferRelayTask) {
     const key = String(task.task_id || "");
@@ -58,19 +63,15 @@ export function useRelayTasks() {
 
   const displayRelayTasks = computed(() => sortRelayTasksForDisplay(relayTasks.value));
 
-  const runningRelayTasks = computed(() =>
+  const activeRelayTasks = computed(() =>
     displayRelayTasks.value.filter((task) => ["pending", "running"].includes(task.status)),
   );
 
-  const completedRelayTasks = computed(() =>
-    displayRelayTasks.value.filter((task) => ["success", "failed", "canceled"].includes(task.status)),
+  const failedRelayTasks = computed(() =>
+    displayRelayTasks.value.filter((task) => ["failed", "canceled"].includes(task.status)),
   );
 
-  const filteredRelayTasks = computed(() =>
-    relayTaskView.value === "completed" ? completedRelayTasks.value : runningRelayTasks.value,
-  );
-
-  const activeRelayCount = computed(() => runningRelayTasks.value.length);
+  const activeRelayCount = computed(() => activeRelayTasks.value.length);
 
   function applyRelayTasks(tasks: CrossTransferRelayTask[]) {
     relayTasks.value = Array.isArray(tasks) ? tasks : [];
@@ -79,7 +80,14 @@ export function useRelayTasks() {
   async function fetchRelayTasks() {
     try {
       applyRelayTasks(await listCrossTransferRelayTasks());
+      relayAuthDenied = false;
     } catch (error) {
+      if (isAdminAuthError(error)) {
+        relayAuthDenied = true;
+        disconnectRelayStream();
+        stopRelayPolling();
+        return;
+      }
       console.error("获取跨盘任务失败:", error);
     }
   }
@@ -92,7 +100,7 @@ export function useRelayTasks() {
   }
 
   function startRelayPolling() {
-    if (relayPollingTimer) return;
+    if (relayPollingTimer || relayAuthDenied) return;
     relayPollingTimer = setInterval(() => {
       void fetchRelayTasks();
     }, 4000);
@@ -115,15 +123,16 @@ export function useRelayTasks() {
   }
 
   function scheduleRelayStreamReconnect(panelOpen?: boolean) {
-    if (!panelOpen || relaySseReconnectTimer) return;
+    if (!panelOpen || relaySseReconnectTimer || relayAuthDenied) return;
     relaySseReconnectTimer = setTimeout(() => {
       relaySseReconnectTimer = null;
+      if (relayAuthDenied) return;
       connectRelayStream(panelOpen);
     }, 3000);
   }
 
   function connectRelayStream(panelOpen?: boolean) {
-    if (!panelOpen || relayEventSource) return;
+    if (!panelOpen || relayEventSource || relayAuthDenied) return;
     if (typeof window === "undefined" || !window.EventSource) {
       startRelayPolling();
       void fetchRelayTasks();
@@ -139,6 +148,7 @@ export function useRelayTasks() {
     });
     relayEventSource.onerror = () => {
       disconnectRelayStream();
+      if (relayAuthDenied) return;
       scheduleRelayStreamReconnect(panelOpen);
     };
   }
@@ -155,28 +165,19 @@ export function useRelayTasks() {
     await fetchRelayTasks();
   }
 
-  async function openRelayMonitoring() {
-    await fetchRelayTasks();
-    connectRelayStream(true);
-    if (!relayEventSource) startRelayPolling();
-  }
-
   onUnmounted(() => {
     disconnectRelayStream();
   });
 
   return {
     relayTasks,
-    relayTaskView,
     displayRelayTasks,
-    runningRelayTasks,
-    completedRelayTasks,
-    filteredRelayTasks,
+    activeRelayTasks,
+    failedRelayTasks,
     activeRelayCount,
     fetchRelayTasks,
     connectRelayStream,
     disconnectRelayStream,
-    openRelayMonitoring,
     batchDeleteRelayTasks,
   };
 }

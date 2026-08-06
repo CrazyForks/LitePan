@@ -47,6 +47,10 @@ func openStore(ctx context.Context, cfg config.Config, logs *logx.Manager) (*sto
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	if err := db.EnsureUploadTaskCrossColumns(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("repair upload_tasks schema: %w", err)
+	}
 
 	st := store.New(db)
 	settingsSvc, err := settings.New(ctx, st.Configs)

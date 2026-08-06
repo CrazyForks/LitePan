@@ -36,7 +36,6 @@ const props = defineProps<{
   uploadTaskFailed?: boolean;
   uploadTaskSuccess?: boolean;
   uploadTaskLabel?: string;
-  uploadTaskTitle?: string;
   favoritesOpen?: boolean;
   offlineDownloadSupported?: boolean;
 }>();
@@ -163,7 +162,7 @@ function onTransferSelect(key: string) {
           failed: uploadTaskFailed && !uploadTaskActive,
           success: uploadTaskSuccess && !uploadTaskActive && !uploadTaskFailed,
         }"
-        :title="uploadTaskTitle || '传输列表'"
+        :title="uploadTaskLabel || '传输列表'"
         @click="emit('open-upload-tasks')"
       >
         <span class="transfer-status-icon-wrap">

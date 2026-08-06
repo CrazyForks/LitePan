@@ -420,7 +420,11 @@ func (s *Service) Delete(ctx context.Context, taskID string) error {
 }
 
 func (s *Service) BatchDelete(ctx context.Context, taskIDs []string) BatchDeleteResult {
-	result := BatchDeleteResult{FailedMessages: make(map[string]string)}
+	result := BatchDeleteResult{
+		DeletedTaskIDs: make([]string, 0, len(taskIDs)),
+		FailedTaskIDs:  make([]string, 0),
+		FailedMessages: make(map[string]string),
+	}
 	seen := make(map[string]struct{})
 	for _, id := range taskIDs {
 		id = strings.TrimSpace(id)

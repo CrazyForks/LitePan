@@ -10,9 +10,9 @@ import (
 	"litepan/internal/crosstransfer"
 	"litepan/internal/domain"
 	"litepan/internal/embyproxy"
-	"litepan/internal/fnosproxy"
 	"litepan/internal/favorites"
 	"litepan/internal/file"
+	"litepan/internal/fnosproxy"
 	"litepan/internal/fusemount"
 	"litepan/internal/fusereadcache"
 	"litepan/internal/logx"
@@ -109,6 +109,7 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 	uploadSvc := upload.NewManager(upload.Options{
 		Exec:     core.exec,
 		Files:    fileSvc,
+		Playback: playbackSvc,
 		Accounts: accountSvc,
 		Repo:     st.store.UploadTasks,
 		Settings: st.settings,
@@ -121,6 +122,7 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		Exec:     core.exec,
 		Files:    fileSvc,
 		Playback: playbackSvc,
+		Uploads:  uploadSvc,
 		DataDir:  cfg.DataDir,
 		Log:      logs.For(logx.ModuleAPI),
 	})

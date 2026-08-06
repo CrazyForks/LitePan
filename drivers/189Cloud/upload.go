@@ -277,6 +277,31 @@ func rootErrorMessage(err error) string {
 	return "未知网络错误"
 }
 
+func retryDelay(ctx context.Context, attempt int) error {
+	if attempt <= 0 {
+		return nil
+	}
+	delay := time.Duration(attempt) * 300 * time.Millisecond
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func annotateUploadPartRetry(err error, retries int) error {
+	if retries <= 0 || err == nil {
+		return err
+	}
+	if appErr, ok := domain.AsAppError(err); ok {
+		return domain.Errorf(appErr.Code, "%s（已自动重试 %d 次）", appErr.Message, retries)
+	}
+	return domain.Errorf(domain.CodeDriverError, "%s（已自动重试 %d 次）", err.Error(), retries)
+}
+
 func normalize189ResumeState(state map[string]any, space, parentID, requestedName string, fileSize, partSize int64, hashes uploadHashInfo) *cloud189ResumeCtx {
 	stateSpace := strings.TrimSpace(uploadutil.AnyString(state["space"]))
 	if stateSpace == "" {
@@ -584,13 +609,34 @@ func parseUploadHeaders(raw string) map[string]string {
 }
 
 func (d *Driver) putUploadPart(ctx context.Context, requestURL string, headers map[string]string, localPath string, offset, size int64, partNumber, totalParts int, baseUploaded, totalSize int64, progress driver.UploadProgress) error {
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			if err := retryDelay(ctx, attempt); err != nil {
+				return err
+			}
+		}
+		retryable, err := d.putUploadPartOnce(ctx, requestURL, headers, localPath, offset, size, partNumber, totalParts, baseUploaded, totalSize, progress)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !retryable {
+			return err
+		}
+	}
+	return annotateUploadPartRetry(lastErr, maxAttempts-1)
+}
+
+func (d *Driver) putUploadPartOnce(ctx context.Context, requestURL string, headers map[string]string, localPath string, offset, size int64, partNumber, totalParts int, baseUploaded, totalSize int64, progress driver.UploadProgress) (bool, error) {
 	f, err := os.Open(localPath)
 	if err != nil {
-		return domain.Wrap(domain.CodeDriverError, err)
+		return false, domain.Wrap(domain.CodeDriverError, err)
 	}
 	defer f.Close()
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return domain.Wrap(domain.CodeDriverError, err)
+		return false, domain.Wrap(domain.CodeDriverError, err)
 	}
 	body := io.LimitReader(f, size)
 	reqURL := requestURL
@@ -602,7 +648,7 @@ func (d *Driver) putUploadPart(ctx context.Context, requestURL string, headers m
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqURL, body)
 	if err != nil {
-		return domain.Wrap(domain.CodeInternal, err)
+		return false, domain.Wrap(domain.CodeInternal, err)
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -610,10 +656,13 @@ func (d *Driver) putUploadPart(ctx context.Context, requestURL string, headers m
 	req.ContentLength = size
 	resp, data, err := httpx.Execute(d.uploadClient, req, 4<<20)
 	if err != nil {
-		return domain.Wrap(domain.CodeDriverError, err)
+		return retryableUploadURLFailure(ctx, err), domain.Wrap(domain.CodeDriverError, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return domain.Errorf(domain.CodeDriverError, "上传分片 %d/%d 失败 HTTP %d: %s", partNumber, totalParts, resp.StatusCode, httpx.Truncate(data, 300))
+		retryable := resp.StatusCode == http.StatusRequestTimeout ||
+			resp.StatusCode == http.StatusTooManyRequests ||
+			resp.StatusCode >= http.StatusInternalServerError
+		return retryable, domain.Errorf(domain.CodeDriverError, "上传分片 %d/%d 失败 HTTP %d: %s", partNumber, totalParts, resp.StatusCode, httpx.Truncate(data, 300))
 	}
 	if len(data) > 0 && (strings.Contains(string(data), "errorCode") || strings.Contains(string(data), "Error")) {
 		var xe struct {
@@ -622,11 +671,13 @@ func (d *Driver) putUploadPart(ctx context.Context, requestURL string, headers m
 			Message string   `xml:"message"`
 		}
 		if xml.Unmarshal(data, &xe) == nil && xe.Code != "" {
-			return domain.Errorf(domain.CodeDriverError, "上传分片 %d/%d 失败: %s %s", partNumber, totalParts, xe.Code, xe.Message)
+			codeLower := strings.ToLower(strings.TrimSpace(xe.Code))
+			retryable := codeLower == "internalerror" || codeLower == "requesttimeout" || codeLower == "slowdown"
+			return retryable, domain.Errorf(domain.CodeDriverError, "上传分片 %d/%d 失败: %s %s", partNumber, totalParts, xe.Code, xe.Message)
 		}
 	}
 	uploadutil.NotifyProgress(progress, min(totalSize, baseUploaded+size), totalSize, fmt.Sprintf("正在上传到天翼云盘，分片（%d/%d）", partNumber, totalParts))
-	return nil
+	return false, nil
 }
 
 func mapFromAny(v any) map[string]any {

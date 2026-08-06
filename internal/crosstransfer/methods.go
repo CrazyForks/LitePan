@@ -20,6 +20,4 @@ const (
 	maxScanDirs        = 10000
 	maxScanDepth       = 40
 	scanDirConcurrency = 6
-	relayConcurrency   = 2
-	maxRelayTasks      = 200
 )

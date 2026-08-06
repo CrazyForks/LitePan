@@ -20,8 +20,13 @@ func (m *Manager) Pause(_ context.Context, taskID string) (*Task, bool) {
 	}
 	st.cancelMode = "pause"
 	st.Status = StatusPaused
+	st.resumePriority = false
 	st.SpeedBytesPerSecond = 0
-	st.Message = "上传已暂停"
+	if st.SourceType == SourceTypeCrossTransfer && st.Phase == PhaseDownloading {
+		st.Message = "源盘下载已暂停"
+	} else {
+		st.Message = "上传已暂停"
+	}
 	st.Error = ""
 	st.UpdatedAt = unixFloat(time.Now())
 	cancel := st.cancel
@@ -69,31 +74,34 @@ func (m *Manager) Resume(ctx context.Context, taskID string) (*Task, bool) {
 		m.mu.Unlock()
 		return t, true
 	}
-	if st.localPath == "" {
-		st.Status = StatusFailed
-		st.Message = "上传失败"
-		st.Error = "本地临时文件不存在，无法继续上传"
-		st.UpdatedAt = unixFloat(time.Now())
-		snap := st
-		m.mu.Unlock()
-		m.persistTask(snap)
-		m.broadcast()
-		return snapshotCopy(snap), true
-	}
-	if _, err := os.Stat(st.localPath); err != nil {
-		st.Status = StatusFailed
-		st.Message = "上传失败"
-		st.Error = "本地临时文件不存在，无法继续上传"
-		st.UpdatedAt = unixFloat(time.Now())
-		snap := st
-		m.mu.Unlock()
-		m.persistTask(snap)
-		m.broadcast()
-		return snapshotCopy(snap), true
+	if uploadNeedsLocalFile(st) {
+		if st.localPath == "" {
+			st.Status = StatusFailed
+			st.Message = "上传失败"
+			st.Error = "本地临时文件不存在，无法继续上传"
+			st.UpdatedAt = unixFloat(time.Now())
+			snap := st
+			m.mu.Unlock()
+			m.persistTask(snap)
+			m.broadcast()
+			return snapshotCopy(snap), true
+		}
+		if _, err := os.Stat(st.localPath); err != nil {
+			st.Status = StatusFailed
+			st.Message = "上传失败"
+			st.Error = "本地临时文件不存在，无法继续上传"
+			st.UpdatedAt = unixFloat(time.Now())
+			snap := st
+			m.mu.Unlock()
+			m.persistTask(snap)
+			m.broadcast()
+			return snapshotCopy(snap), true
+		}
 	}
 	m.queueOrder++
 	st.QueueOrder = m.queueOrder
 	st.Status = StatusPending
+	st.resumePriority = true
 	st.Error = ""
 	st.Result = nil
 	st.cancelMode = ""
@@ -103,6 +111,10 @@ func (m *Manager) Resume(ctx context.Context, taskID string) (*Task, bool) {
 		st.Progress = progress
 		st.UploadedBytes = uploaded
 		st.Message = "准备继续上传"
+	} else if st.SourceType == SourceTypeCrossTransfer && st.Phase == PhaseDownloading {
+		st.Progress = progressForBytes(st.DownloadedBytes, st.TotalBytes)
+		st.UploadedBytes = 0
+		st.Message = "准备继续源盘下载"
 	} else {
 		st.Progress = 0
 		st.UploadedBytes = 0
@@ -120,4 +132,11 @@ func (m *Manager) Resume(ctx context.Context, taskID string) (*Task, bool) {
 func snapshotCopy(st *taskState) *Task {
 	t := st.Task
 	return &t
+}
+
+func progressForBytes(done, total int64) int {
+	if total <= 0 {
+		return 0
+	}
+	return calcProgress(done, total)
 }

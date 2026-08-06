@@ -96,6 +96,14 @@ export function useFileActions(options: {
     for (const k of keys) delete rowOps[String(k)];
   }
 
+  function markExternalDeleteRows(keys: string[]) {
+    markRowOps(keys, "delete");
+  }
+
+  function clearExternalDeleteRows(keys: string[]) {
+    unmarkRowOps(keys);
+  }
+
   // 移动/复制目标选择：由外层 FolderPickerModal 绑定该状态。
   const transfer = reactive({
     open: false,
@@ -387,6 +395,8 @@ export function useFileActions(options: {
   return {
     acting,
     rowOps,
+    markExternalDeleteRows,
+    clearExternalDeleteRows,
     transfer,
     confirmTransfer,
     cancelTransfer,

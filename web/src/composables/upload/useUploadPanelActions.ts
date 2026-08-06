@@ -18,8 +18,11 @@ export function useUploadPanelActions(ctx: UploadActionsCtx) {
 
   async function openUploadTaskPanel(preferredCategory: "" | "relay" | "offline" = "") {
     store.uploadTaskPanelOpen.value = true;
-    await stream.fetchUploadTasks();
-    await fetchRelayTasks();
+    await Promise.all([
+      stream.fetchUploadTasks(),
+      fetchRelayTasks(),
+      deps.refreshOfflineTasks(true, true),
+    ]);
     if (preferredCategory === "offline") {
       store.taskPanelCategory.value = "offline";
     } else if (
@@ -27,10 +30,8 @@ export function useUploadPanelActions(ctx: UploadActionsCtx) {
       (store.activeRelayCount.value > 0 && store.runningUploadTasks.value.length === 0)
     ) {
       store.taskPanelCategory.value = "relay";
-      ctx.deps.relay.relayTaskView.value = "running";
     } else {
       store.taskPanelCategory.value = "upload";
-      store.uploadTaskView.value = store.runningUploadTasks.value.length > 0 ? "running" : "completed";
     }
     stream.connectUploadTaskStream();
     connectRelayStream(true);

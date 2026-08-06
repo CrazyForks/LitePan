@@ -1,21 +1,13 @@
 import {
-  canDeleteUploadTask,
-  canHandleUploadTaskPrimaryAction,
   formatRelayPart,
   formatRelaySpeed,
   formatUploadPart,
-  getRelayPhaseLabel,
-  getRelayStatusText,
   getUploadTaskDriverBadge,
+  getUploadTaskDisplayStatus,
   getUploadTaskPhaseLabel,
-  getUploadTaskPrimaryActionIcon,
-  getUploadTaskPrimaryActionTitle,
   getUploadTaskSpeedText,
   getUploadTaskStatusText,
-  isRelayTaskActive,
   isUploadTaskActive,
-  shouldShowRelayTaskHairline,
-  shouldShowRelayTaskMetaPercent,
   shouldShowUploadTaskHairline,
   shouldShowUploadTaskMetaPercent,
 } from "@/composables/upload/uploadTaskFormatters";
@@ -29,6 +21,7 @@ export type { UploadTaskDeps as Deps } from "@/composables/upload/uploadTaskType
 
 export function useUploadTasks(deps: UploadTaskDeps) {
   const store = useUploadTaskStore(deps);
+  store.restoreLocalUploadTasks();
 
   const hooks: UploadRuntimeHooks = {
     startScheduler: async () => {},
@@ -55,20 +48,23 @@ export function useUploadTasks(deps: UploadTaskDeps) {
   const getUploadTaskPhaseLabelBound = (task: Parameters<typeof getUploadTaskPhaseLabel>[0]) =>
     getUploadTaskPhaseLabel(task, store.pendingRemoteResumeTaskIds, store.localDispatchingTaskIds);
 
+  const getUploadTaskDisplayStatusBound = (task: Parameters<typeof getUploadTaskDisplayStatus>[0]) =>
+    getUploadTaskDisplayStatus(task, store.pendingRemoteResumeTaskIds);
+
   const getUploadTaskDriverBadgeBound = (
     task: Parameters<typeof getUploadTaskDriverBadge>[0],
   ) => getUploadTaskDriverBadge(task, deps.accounts.value);
 
   const getRelayTaskDriverBadge = (task: {
-    target_driver_type?: string;
-    target_account_id?: number;
-    target_account_name?: string;
+    source_driver_type?: string;
+    source_account_id?: number;
+    source_account_name?: string;
   }) =>
     getUploadTaskDriverBadge(
       {
-        driver_type: task.target_driver_type,
-        account_id: task.target_account_id ?? 0,
-        account_name: task.target_account_name,
+        driver_type: task.source_driver_type,
+        account_id: task.source_account_id ?? 0,
+        account_name: task.source_account_name,
       },
       deps.accounts.value,
     );
@@ -76,40 +72,24 @@ export function useUploadTasks(deps: UploadTaskDeps) {
   return {
     uploadTaskPanelOpen: store.uploadTaskPanelOpen,
     taskPanelCategory: store.taskPanelCategory,
-    uploadTaskView: store.uploadTaskView,
     uploadTaskPanelLoading: store.uploadTaskPanelLoading,
     uploadTaskPanelLoadingText: store.uploadTaskPanelLoadingText,
     uploadTaskServerConcurrency: store.uploadTaskServerConcurrency,
     displayUploadTasks: store.displayUploadTasks,
     activeUploadTasks: store.activeUploadTasks,
-    runningUploadTasks: store.runningUploadTasks,
-    completedUploadTasks: store.completedUploadTasks,
-    filteredUploadTasks: store.filteredUploadTasks,
-    canBatchToggle: store.canBatchToggle,
-    canBatchDelete: store.canBatchDelete,
-    batchToggleMode: store.batchToggleMode,
-    batchToggleLabel: store.batchToggleLabel,
-    batchToggleTitle: store.batchToggleTitle,
-    batchDeleteLabel: store.batchDeleteLabel,
-    uploadTaskEmptyText: store.uploadTaskEmptyText,
-    uploadTaskTitle: store.uploadTaskTitle,
     uploadTaskLabel: store.uploadTaskLabel,
     getUploadTaskStatusText,
     formatUploadPart,
     getUploadTaskSpeedText,
     getUploadTaskDriverBadge: getUploadTaskDriverBadgeBound,
+    getUploadTaskDisplayStatus: getUploadTaskDisplayStatusBound,
     isUploadTaskActive,
     getUploadTaskPhaseLabel: getUploadTaskPhaseLabelBound,
     shouldShowUploadTaskMetaPercent,
     shouldShowUploadTaskHairline,
-    canHandleUploadTaskPrimaryAction,
-    getUploadTaskPrimaryActionTitle,
-    getUploadTaskPrimaryActionIcon,
-    canDeleteUploadTask,
     handleDeleteUploadTask: actions.handleDeleteUploadTask,
+    handleDeleteUploadTasks: actions.handleDeleteUploadTasks,
     handleUploadTaskPrimaryAction: actions.handleUploadTaskPrimaryAction,
-    handleBatchToggle: actions.handleBatchToggle,
-    handleBatchDelete: actions.handleBatchDelete,
     openUploadTaskPanel: actions.openUploadTaskPanel,
     closeUploadTaskPanel: actions.closeUploadTaskPanel,
     openUploadNoticeFromPanel: actions.openUploadNoticeFromPanel,
@@ -120,18 +100,11 @@ export function useUploadTasks(deps: UploadTaskDeps) {
     fetchUploadTasks: stream.fetchUploadTasks,
     refreshUploadTaskServerConcurrency: stream.refreshUploadTaskServerConcurrency,
     getRelayTaskDriverBadge,
-    handleDeleteRelayTask: actions.handleDeleteRelayTask,
-    handleBatchDeleteRelayTasks: actions.handleBatchDeleteRelayTasks,
-    getRelayStatusText,
-    getRelayPhaseLabel,
-    shouldShowRelayTaskMetaPercent,
-    shouldShowRelayTaskHairline,
-    isRelayTaskActive,
+    handleDeleteRelayTasks: actions.handleDeleteRelayTasks,
     formatRelaySpeed,
     formatRelayPart,
-    filteredRelayTasks: store.filteredRelayTasks,
-    runningRelayTasks: store.runningRelayTasks,
-    completedRelayTasks: store.completedRelayTasks,
+    activeRelayTasks: store.activeRelayTasks,
+    failedRelayTasks: store.failedRelayTasks,
     activeRelayCount: store.activeRelayCount,
     cleanupUploadTasks: stream.cleanupUploadTasks,
   };

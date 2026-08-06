@@ -42,7 +42,7 @@ func (h *Handler) updateUploadRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Concurrency < uploadConcurrencyMin || req.Concurrency > uploadConcurrencyMax {
-		writeErr(w, domain.Errorf(domain.CodeValidation, "上传任务并发数必须是 %d-%d 之间的整数", uploadConcurrencyMin, uploadConcurrencyMax))
+		writeErr(w, domain.Errorf(domain.CodeValidation, "传输任务并发数必须是 %d-%d 之间的整数", uploadConcurrencyMin, uploadConcurrencyMax))
 		return
 	}
 	h.applyUploadConcurrencyHotReload(r.Context(), &req.Concurrency)

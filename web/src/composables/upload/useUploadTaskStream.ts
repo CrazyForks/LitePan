@@ -1,3 +1,4 @@
+import { ApiError } from "@/api/client";
 import { uploadApi } from "@/api/upload";
 import { getUploadTaskStableKey, isLocalUploadTask } from "@/composables/upload/uploadTaskFormatters";
 import type { UploadRuntimeHooks, UploadTaskDeps } from "@/composables/upload/uploadTaskTypes";
@@ -9,6 +10,11 @@ export function useUploadTaskStream(deps: UploadTaskDeps, store: UploadTaskStore
   let uploadTaskEventSource: EventSource | null = null;
   let uploadTaskSseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   const refreshedSuccessfulTaskKeys = new Set<string>();
+  let uploadAuthDenied = false;
+
+  function isAdminAuthError(error: unknown) {
+    return error instanceof ApiError && error.status === 401 && error.errorType === "ADMIN_AUTH_REQUIRED";
+  }
 
   function refreshCurrentDirectoryForNewSuccess(tasks: UploadTask[]) {
     const currentSuccessKeys = new Set<string>();
@@ -44,19 +50,27 @@ export function useUploadTaskStream(deps: UploadTaskDeps, store: UploadTaskStore
   async function fetchUploadTasks() {
     try {
       store.uploadTasks.value = await uploadApi.listTasks();
+      uploadAuthDenied = false;
       store.uploadTasks.value.forEach(store.ensureUploadTaskDisplayOrder);
+      store.pruneLocalUploadTasksByStableKeys(store.uploadTasks.value.map((task) => getUploadTaskStableKey(task)));
       refreshCurrentDirectoryForNewSuccess(store.uploadTasks.value);
       if (store.activeUploadTasks.value.length === 0 && !store.uploadTaskPanelOpen.value) {
         stopUploadTaskPolling();
       }
       await hooks.startScheduler();
     } catch (e) {
+      if (isAdminAuthError(e)) {
+        uploadAuthDenied = true;
+        disconnectUploadTaskStream();
+        stopUploadTaskPolling();
+        return;
+      }
       console.error("获取上传任务失败:", e);
     }
   }
 
   function startUploadTaskPolling() {
-    if (uploadTaskPollingTimer) return;
+    if (uploadTaskPollingTimer || uploadAuthDenied) return;
     uploadTaskPollingTimer = setInterval(() => void fetchUploadTasks(), 400);
   }
 
@@ -68,7 +82,7 @@ export function useUploadTaskStream(deps: UploadTaskDeps, store: UploadTaskStore
   }
 
   function connectUploadTaskStream() {
-    if (!store.uploadTaskPanelOpen.value || uploadTaskEventSource) return;
+    if (!store.uploadTaskPanelOpen.value || uploadTaskEventSource || uploadAuthDenied) return;
     if (typeof EventSource === "undefined") {
       startUploadTaskPolling();
       return;
@@ -80,6 +94,7 @@ export function useUploadTaskStream(deps: UploadTaskDeps, store: UploadTaskStore
         const payload = JSON.parse(ev.data || "{}") as { tasks?: UploadTask[] };
         store.uploadTasks.value = payload.tasks || [];
         store.uploadTasks.value.forEach(store.ensureUploadTaskDisplayOrder);
+        store.pruneLocalUploadTasksByStableKeys(store.uploadTasks.value.map((task) => getUploadTaskStableKey(task)));
         refreshCurrentDirectoryForNewSuccess(store.uploadTasks.value);
       } catch (e) {
         console.error(e);
@@ -88,10 +103,12 @@ export function useUploadTaskStream(deps: UploadTaskDeps, store: UploadTaskStore
     es.onopen = () => stopUploadTaskPolling();
     es.onerror = () => {
       disconnectUploadTaskStream();
+      if (uploadAuthDenied) return;
       startUploadTaskPolling();
       if (!uploadTaskSseReconnectTimer) {
         uploadTaskSseReconnectTimer = setTimeout(() => {
           uploadTaskSseReconnectTimer = null;
+          if (uploadAuthDenied) return;
           connectUploadTaskStream();
         }, 3000);
       }
@@ -128,33 +145,38 @@ export function useUploadTaskStream(deps: UploadTaskDeps, store: UploadTaskStore
 
 export type UploadTaskStream = ReturnType<typeof useUploadTaskStream>;
 
-export function getActiveUploadSlotUsage(store: UploadTaskStore) {
-  return (
-    store.localDispatchingTaskIds.size +
-    store.uploadTasks.value.filter((t) => {
-      if (t.status === "running") return true;
-      if (t.status === "pending") return !store.pendingRemoteResumeTaskIds.has(String(t.task_id));
-      return false;
-    }).length
-  );
+export function getActiveRemoteUploadSlotUsage(store: UploadTaskStore) {
+  return store.uploadTasks.value.filter((t) => {
+    if (t.status === "running") return true;
+    if (t.status === "pending") return !store.pendingRemoteResumeTaskIds.has(String(t.task_id));
+    return false;
+  }).length;
 }
 
-export function getNextUploadTaskCandidate(store: UploadTaskStore) {
+export function getNextLocalUploadTaskCandidate(store: UploadTaskStore) {
   return (
     store.displayUploadTasks.value.find((task) => {
       if (store.hiddenUploadTaskKeys.has(getUploadTaskStableKey(task))) return false;
-      if (isLocalUploadTask(task)) {
-        return (
-          task.status === "pending" &&
-          !store.localDispatchingTaskIds.has(task.task_id) &&
-          !store.canceledLocalUploadTaskIds.has(task.task_id) &&
-          !store.pausedLocalUploadTaskIds.has(task.task_id) &&
-          Boolean(store.localUploadTaskPayloads.get(task.task_id)?.file)
-        );
-      }
+      return (
+        isLocalUploadTask(task) &&
+        task.status === "pending" &&
+        !store.localDispatchingTaskIds.has(task.task_id) &&
+        !store.canceledLocalUploadTaskIds.has(task.task_id) &&
+        !store.pausedLocalUploadTaskIds.has(task.task_id) &&
+        Boolean(store.localUploadTaskPayloads.get(task.task_id)?.file)
+      );
+    }) || null
+  );
+}
+
+export function getNextRemoteResumeTaskCandidate(store: UploadTaskStore) {
+  return (
+    store.displayUploadTasks.value.find((task) => {
+      if (store.hiddenUploadTaskKeys.has(getUploadTaskStableKey(task))) return false;
+      if (isLocalUploadTask(task)) return false;
       return (
         store.pendingRemoteResumeTaskIds.has(String(task.task_id)) &&
-        ["paused", "failed", "canceled"].includes(task.status)
+        ["pending", "paused", "failed", "canceled"].includes(task.status)
       );
     }) || null
   );

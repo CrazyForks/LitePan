@@ -43,6 +43,7 @@ func (m *Manager) updateProgress(taskID string, uploaded, total int64, message s
 	st.lastProgress = progress
 	st.lastMessage = message
 	st.Status = StatusRunning
+	st.Phase = PhaseUploading
 	st.Progress = progress
 	st.UploadedBytes = uploaded
 	st.TotalBytes = total
@@ -85,6 +86,10 @@ func translateError(msg string) string {
 		return "连接服务器超时"
 	case strings.Contains(msg, "Network Error"), strings.Contains(msg, "Failed to fetch"):
 		return "网络连接异常"
+	case strings.Contains(msg, "InvalidPartOrder"), strings.Contains(msg, "previous part hash context"):
+		return "移动云盘分片上下文已失效，请点击重试后从头上传当前文件"
+	case strings.Contains(strings.ToLower(msg), "no space left on device"):
+		return "服务器上传缓存目录空间不足，请清理磁盘后重试"
 	default:
 		return msg
 	}

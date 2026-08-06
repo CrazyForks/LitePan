@@ -91,6 +91,41 @@ func (db *DB) Migrate(ctx context.Context) error {
 	return nil
 }
 
+func (db *DB) EnsureUploadTaskCrossColumns(ctx context.Context) error {
+	exists, err := tableExists(ctx, db, "upload_tasks")
+	if err != nil || !exists {
+		return err
+	}
+	columns, err := tableColumns(ctx, db, "upload_tasks")
+	if err != nil {
+		return err
+	}
+	need := []struct {
+		name string
+		ddl  string
+	}{
+		{name: "source_type", ddl: `ALTER TABLE upload_tasks ADD COLUMN source_type TEXT NOT NULL DEFAULT ''`},
+		{name: "source_account_id", ddl: `ALTER TABLE upload_tasks ADD COLUMN source_account_id INTEGER NOT NULL DEFAULT 0`},
+		{name: "source_account_name", ddl: `ALTER TABLE upload_tasks ADD COLUMN source_account_name TEXT NOT NULL DEFAULT ''`},
+		{name: "source_driver_type", ddl: `ALTER TABLE upload_tasks ADD COLUMN source_driver_type TEXT NOT NULL DEFAULT ''`},
+		{name: "source_file_id", ddl: `ALTER TABLE upload_tasks ADD COLUMN source_file_id TEXT NOT NULL DEFAULT ''`},
+		{name: "rel_path", ddl: `ALTER TABLE upload_tasks ADD COLUMN rel_path TEXT NOT NULL DEFAULT ''`},
+		{name: "rel_dir", ddl: `ALTER TABLE upload_tasks ADD COLUMN rel_dir TEXT NOT NULL DEFAULT ''`},
+		{name: "phase", ddl: `ALTER TABLE upload_tasks ADD COLUMN phase TEXT NOT NULL DEFAULT ''`},
+		{name: "downloaded_bytes", ddl: `ALTER TABLE upload_tasks ADD COLUMN downloaded_bytes INTEGER NOT NULL DEFAULT 0`},
+		{name: "relay_visible", ddl: `ALTER TABLE upload_tasks ADD COLUMN relay_visible INTEGER NOT NULL DEFAULT 0`},
+	}
+	for _, item := range need {
+		if columns[item.name] {
+			continue
+		}
+		if _, err := db.write.ExecContext(ctx, item.ddl); err != nil {
+			return fmt.Errorf("repair upload_tasks.%s: %w", item.name, err)
+		}
+	}
+	return nil
+}
+
 func appliedVersions(ctx context.Context, db *DB) (map[int]bool, error) {
 	rows, err := db.write.QueryContext(ctx, `SELECT version FROM schema_migrations`)
 	if err != nil {
@@ -106,6 +141,40 @@ func appliedVersions(ctx context.Context, db *DB) (map[int]bool, error) {
 		applied[v] = true
 	}
 	return applied, rows.Err()
+}
+
+func tableExists(ctx context.Context, db *DB, name string) (bool, error) {
+	var count int
+	if err := db.write.QueryRowContext(ctx,
+		`SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name=?`, name,
+	).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func tableColumns(ctx context.Context, db *DB, table string) (map[string]bool, error) {
+	rows, err := db.write.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols := make(map[string]bool)
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			typ       string
+			notNull   int
+			defaultV  any
+			primaryKV int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultV, &primaryKV); err != nil {
+			return nil, err
+		}
+		cols[name] = true
+	}
+	return cols, rows.Err()
 }
 
 // splitStatements 按分号拆分迁移脚本（迁移 SQL 内不含分号字面量）。

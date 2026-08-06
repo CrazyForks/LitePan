@@ -9,8 +9,97 @@ import { getUploadTaskStableKey, isLocalUploadTask, buildUploadTaskBreadcrumb } 
 import type { UploadActionsCtx } from "@/composables/upload/useUploadPanelActions";
 import type { UploadTask } from "@/types/upload";
 
+type VisibleDeleteTarget = {
+  taskId: string;
+  rowKey: string;
+  removeId: string;
+};
+
 export function useUploadBatchActions(ctx: UploadActionsCtx, closePanel: () => void) {
   const { deps, store, stream, dispatcher } = ctx;
+
+  function getPendingResumeMessage(task: UploadTask) {
+    if (task.source_type === "cross_transfer" && task.phase === "downloading") return "等待下载";
+    return "等待上传";
+  }
+
+  function getPausedMessage(task: UploadTask) {
+    if (task.source_type === "cross_transfer" && task.phase === "downloading") return "已暂停";
+    return "上传已暂停";
+  }
+
+  function isQueuedRemoteResumeTask(task: UploadTask) {
+    return !isLocalUploadTask(task) && store.pendingRemoteResumeTaskIds.has(String(task.task_id));
+  }
+
+  function formatRemovedTaskToast(count: number) {
+    return count > 1 ? `已移除 ${count} 条上传记录` : "已移除上传记录";
+  }
+
+  function formatCloudDeleteStartToast(count: number) {
+    return count > 1
+      ? `已从任务列表移除，正在后台删除 ${count} 个云端文件...`
+      : "已从任务列表移除，正在后台删除云端文件...";
+  }
+
+  function formatCloudDeleteResultToast(successCount: number, failedCount: number) {
+    if (failedCount <= 0) {
+      return successCount > 1 ? `${successCount} 个云端文件已删除` : "云端文件已删除";
+    }
+    if (successCount > 0) {
+      return `已删除 ${successCount} 个云端文件，${failedCount} 个删除失败`;
+    }
+    return failedCount > 1 ? `${failedCount} 个云端文件删除失败` : "云端文件删除失败";
+  }
+
+  function taskTargetsCurrentDirectory(task: UploadTask) {
+    if (deps.selectedAccountId.value == null) return false;
+    if (String(task.account_id) !== String(deps.selectedAccountId.value)) return false;
+    const currentPath = String(deps.currentPath.value || "");
+    const parentId = String(task.result?.parent_id ?? task.target_path ?? "");
+    return parentId === currentPath || String(task.target_path || "") === currentPath;
+  }
+
+  function resolveVisibleDeleteTargets(tasks: UploadTask[]): VisibleDeleteTarget[] {
+    const currentFiles = deps.files.value || [];
+    type CurrentFile = (typeof currentFiles)[number];
+    const fileById = new Map<string, CurrentFile>();
+    const filesByName = new Map<string, CurrentFile[]>();
+    for (const file of currentFiles) {
+      const fileId = String(file.id || "");
+      if (fileId) fileById.set(fileId, file);
+      const name = String(file.name || "");
+      const bucket = filesByName.get(name) || [];
+      bucket.push(file);
+      filesByName.set(name, bucket);
+    }
+    const targets: VisibleDeleteTarget[] = [];
+    const seenRemoveIds = new Set<string>();
+    for (const task of tasks) {
+      if (!taskTargetsCurrentDirectory(task)) continue;
+      let file: CurrentFile | undefined;
+      const fileId = String(task.result?.file_id || "");
+      if (fileId) {
+        file = fileById.get(fileId);
+      }
+      if (!file) {
+        const matched = filesByName.get(String(task.result?.file_name || task.file_name || "")) || [];
+        if (matched.length === 1) {
+          file = matched[0];
+        }
+      }
+      if (!file) continue;
+      const removeId = String(file.id || file.name || "");
+      if (!removeId || seenRemoveIds.has(removeId)) continue;
+      seenRemoveIds.add(removeId);
+      targets.push({
+        taskId: String(task.task_id),
+        rowKey: removeId,
+        removeId,
+      });
+    }
+    return targets;
+  }
 
   async function pauseUploadTask(task: UploadTask, silent = false) {
     if (isLocalUploadTask(task)) {
@@ -19,8 +108,14 @@ export function useUploadBatchActions(ctx: UploadActionsCtx, closePanel: () => v
       store.updateLocalUploadTask(task.task_id, { status: "paused", message: "上传已暂停", error: "" });
       return;
     }
+    if (isQueuedRemoteResumeTask(task)) {
+      store.pendingRemoteResumeTaskIds.delete(String(task.task_id));
+      store.patchRemoteUploadTask(task.task_id, { status: "paused", message: getPausedMessage(task), error: "" });
+      return;
+    }
     try {
-      store.patchRemoteUploadTask(task.task_id, { status: "paused", message: "上传已暂停", error: "" });
+      store.pendingRemoteResumeTaskIds.delete(String(task.task_id));
+      store.patchRemoteUploadTask(task.task_id, { status: "paused", message: getPausedMessage(task), error: "" });
       await uploadApi.pauseTask(task.task_id);
       await stream.fetchUploadTasks();
     } catch (e) {
@@ -35,22 +130,25 @@ export function useUploadBatchActions(ctx: UploadActionsCtx, closePanel: () => v
       if (!payload?.file) {
         store.updateLocalUploadTask(task.task_id, {
           status: "failed",
-          error: "缺少本地上传数据，无法继续",
+          message: "请重新选择文件后再上传",
+          error: "缺少本地上传数据，无法继续，请重新选择文件",
         });
-        if (!silent) toast.error("缺少本地上传数据，无法继续");
+        if (!silent) toast.error("页面刷新后本地文件引用已丢失，请重新选择文件");
         return;
       }
       store.pausedLocalUploadTaskIds.delete(task.task_id);
       store.canceledLocalUploadTaskIds.delete(task.task_id);
       store.updateLocalUploadTask(task.task_id, { status: "pending", message: "等待上传", error: "" });
-      store.uploadTaskView.value = "running";
       void dispatcher.startUploadTaskScheduler();
       return;
     }
     store.pendingRemoteResumeTaskIds.add(String(task.task_id));
-    store.uploadTaskView.value = "running";
+    store.patchRemoteUploadTask(task.task_id, {
+      status: "pending",
+      message: getPendingResumeMessage(task),
+      error: "",
+    });
     void dispatcher.startUploadTaskScheduler();
-    if (!silent) void stream.fetchUploadTasks();
   }
 
   async function handleDeleteUploadTask(
@@ -75,22 +173,46 @@ export function useUploadBatchActions(ctx: UploadActionsCtx, closePanel: () => v
       : await confirmUploadTaskDelete(task.file_name, allowDeleteFile);
     if (!r) return;
     const deleteUploadedFile = allowDeleteFile && r.checked;
+    const visibleTargets = deleteUploadedFile ? resolveVisibleDeleteTargets([task]) : [];
+    if (deleteUploadedFile && visibleTargets.length && !opts.silent) {
+      deps.markDeletingFiles(visibleTargets.map((item) => item.rowKey));
+    }
     store.hiddenUploadTaskKeys.add(getUploadTaskStableKey(task));
     store.removeRemoteUploadTask(task.task_id);
+    if (!opts.silent) {
+      if (deleteUploadedFile) toast.info(formatCloudDeleteStartToast(1));
+      else toast.success(formatRemovedTaskToast(1));
+    }
     try {
       await uploadApi.deleteTask(task.task_id, deleteUploadedFile);
-      await stream.fetchUploadTasks();
-      if (deleteUploadedFile && task.target_path === deps.currentPath.value) {
-        await deps.loadFiles({ forceRefresh: true, silent: true });
+      void stream.fetchUploadTasks();
+      if (deleteUploadedFile) {
+        if (visibleTargets.length) {
+          deps.removeFilesLocally(visibleTargets.map((item) => item.removeId));
+        }
+        const shouldRefreshFiles = taskTargetsCurrentDirectory(task);
+        if (shouldRefreshFiles) {
+          void deps.loadFiles({ forceRefresh: true, silent: true });
+        }
+        if (!opts.silent) {
+          toast.success(formatCloudDeleteResultToast(1, 0));
+        }
       }
     } catch (e) {
       store.hiddenUploadTaskKeys.delete(getUploadTaskStableKey(task));
-      await stream.fetchUploadTasks();
+      if (visibleTargets.length) {
+        deps.clearDeletingFiles(visibleTargets.map((item) => item.rowKey));
+      }
+      void stream.fetchUploadTasks();
       if (!opts.silent) toast.error(getApiErrorMessage(e, "删除上传任务失败"));
     }
   }
 
   async function handleUploadTaskPrimaryAction(task: UploadTask) {
+    if (isQueuedRemoteResumeTask(task)) {
+      await pauseUploadTask(task);
+      return;
+    }
     if (["pending", "running"].includes(task.status)) {
       await pauseUploadTask(task);
       return;
@@ -111,31 +233,10 @@ export function useUploadBatchActions(ctx: UploadActionsCtx, closePanel: () => v
     closePanel();
   }
 
-  async function handleBatchToggle() {
-    if (store.batchToggleMode.value === "pause") {
-      store.batchPauseInProgress.value = true;
-      try {
-        for (const task of store.filteredUploadTasks.value.filter((t) =>
-          ["pending", "running"].includes(t.status),
-        )) {
-          await pauseUploadTask(task, true);
-        }
-      } finally {
-        store.batchPauseInProgress.value = false;
-      }
-      return;
-    }
-    for (const task of store.filteredUploadTasks.value.filter((t) =>
-      ["failed", "paused", "canceled"].includes(t.status),
-    )) {
-      await resumeUploadTask(task, true);
-    }
-  }
-
-  async function handleBatchDelete() {
-    const tasks = [...store.filteredUploadTasks.value];
+  async function handleDeleteUploadTasks(tasks: UploadTask[]) {
     if (!tasks.length) return;
     const hasRemote = tasks.some((t) => !isLocalUploadTask(t));
+    const remote = tasks.filter((t) => !isLocalUploadTask(t));
     let deleteUploadedFile = false;
     if (hasRemote) {
       const successCount = tasks.filter((t) => t.status === "success").length;
@@ -146,18 +247,69 @@ export function useUploadBatchActions(ctx: UploadActionsCtx, closePanel: () => v
     for (const task of tasks.filter(isLocalUploadTask)) {
       await handleDeleteUploadTask(task, { silent: true, skipDialog: true });
     }
-    const remote = tasks.filter((t) => !isLocalUploadTask(t));
+    if (!hasRemote) {
+      toast.success(formatRemovedTaskToast(tasks.length));
+      return;
+    }
     if (remote.length) {
+      const visibleTargets = deleteUploadedFile ? resolveVisibleDeleteTargets(remote) : [];
+      const visibleTargetMap = new Map(visibleTargets.map((item) => [item.taskId, item] as const));
+      const deleteFileCount = remote.filter((task) => task.status === "success").length;
       remote.forEach((t) => store.hiddenUploadTaskKeys.add(getUploadTaskStableKey(t)));
+      if (deleteUploadedFile && deleteFileCount > 0) {
+        if (visibleTargets.length) {
+          deps.markDeletingFiles(visibleTargets.map((item) => item.rowKey));
+        }
+        toast.info(formatCloudDeleteStartToast(deleteFileCount));
+      }
       try {
-        await uploadApi.batchDelete(
+        const result = await uploadApi.batchDelete(
           remote.map((t) => t.task_id),
           deleteUploadedFile,
         );
-        await stream.fetchUploadTasks();
-        if (deleteUploadedFile) await deps.loadFiles({ forceRefresh: true, silent: true });
+        const failedTaskIds = new Set((result.failed_task_ids || []).map(String));
+        const processedTaskIds = remote
+          .map((task) => String(task.task_id))
+          .filter((taskId) => !failedTaskIds.has(taskId));
+        const processedVisibleTargets = processedTaskIds
+          .map((taskId) => visibleTargetMap.get(taskId))
+          .filter((item): item is VisibleDeleteTarget => Boolean(item));
+        const failedVisibleTargets = [...failedTaskIds]
+          .map((taskId) => visibleTargetMap.get(taskId))
+          .filter((item): item is VisibleDeleteTarget => Boolean(item));
+        failedTaskIds.forEach((taskId) => {
+          const failedTask = remote.find((task) => String(task.task_id) === taskId);
+          if (failedTask) {
+            store.hiddenUploadTaskKeys.delete(getUploadTaskStableKey(failedTask));
+          }
+        });
+        if (processedVisibleTargets.length) {
+          deps.removeFilesLocally(processedVisibleTargets.map((item) => item.removeId));
+        }
+        if (failedVisibleTargets.length) {
+          deps.clearDeletingFiles(failedVisibleTargets.map((item) => item.rowKey));
+        }
+        const shouldRefreshFiles = deleteUploadedFile && remote.some((task) => taskTargetsCurrentDirectory(task));
+        void stream.fetchUploadTasks();
+        if (shouldRefreshFiles) void deps.loadFiles({ forceRefresh: true, silent: true });
+        if (!deleteUploadedFile) {
+          const failedCount = failedTaskIds.size;
+          const successCount = tasks.length - failedCount;
+          if (failedCount === 0) toast.success(formatRemovedTaskToast(tasks.length));
+          else if (successCount > 0) toast.warning(`已移除 ${successCount} 条上传记录，${failedCount} 条删除失败`);
+          else toast.error("上传记录删除失败");
+          return;
+        }
+        const failedCount = failedTaskIds.size;
+        const successCount = Math.max(0, deleteFileCount - failedCount);
+        if (failedCount === 0) toast.success(formatCloudDeleteResultToast(successCount, 0));
+        else if (successCount > 0) toast.warning(formatCloudDeleteResultToast(successCount, failedCount));
+        else toast.error(formatCloudDeleteResultToast(0, failedCount));
       } catch (e) {
         remote.forEach((t) => store.hiddenUploadTaskKeys.delete(getUploadTaskStableKey(t)));
+        if (visibleTargets.length) {
+          deps.clearDeletingFiles(visibleTargets.map((item) => item.rowKey));
+        }
         toast.error(getApiErrorMessage(e, "批量删除失败"));
       }
     }
@@ -167,26 +319,15 @@ export function useUploadBatchActions(ctx: UploadActionsCtx, closePanel: () => v
     pauseUploadTask,
     resumeUploadTask,
     handleDeleteUploadTask,
+    handleDeleteUploadTasks,
     handleUploadTaskPrimaryAction,
-    handleBatchToggle,
-    handleBatchDelete,
   };
 }
 
 export function useUploadRelayActions(ctx: UploadActionsCtx) {
   const { batchDeleteRelayTasks } = ctx.deps.relay;
 
-  async function handleDeleteRelayTask(task: { task_id: string }) {
-    try {
-      await batchDeleteRelayTasks([task.task_id]);
-      toast.success("跨盘任务已删除");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "删除跨盘任务失败");
-    }
-  }
-
-  async function handleBatchDeleteRelayTasks() {
-    const ids = (ctx.store.filteredRelayTasks.value as Array<{ task_id: string }>).map((t) => t.task_id);
+  async function handleDeleteRelayTasks(ids: string[]) {
     if (!ids.length) return;
     try {
       await batchDeleteRelayTasks(ids);
@@ -196,5 +337,5 @@ export function useUploadRelayActions(ctx: UploadActionsCtx) {
     }
   }
 
-  return { handleDeleteRelayTask, handleBatchDeleteRelayTasks };
+  return { handleDeleteRelayTasks };
 }

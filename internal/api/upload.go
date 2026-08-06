@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -23,9 +26,17 @@ type batchDeleteUploadTasksReq struct {
 
 func (h *Handler) createUploadTask(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		writeErr(w, domain.Errorf(domain.CodeValidation, "解析上传表单失败"))
+		if errors.Is(r.Context().Err(), context.Canceled) || strings.Contains(strings.ToLower(err.Error()), "context canceled") {
+			return
+		}
+		writeErr(w, translateUploadFormParseError(err))
 		return
 	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 	accountID, err := strconv.ParseInt(r.FormValue("account_id"), 10, 64)
 	if err != nil || accountID <= 0 {
 		writeErr(w, domain.Errorf(domain.CodeValidation, "非法 account_id"))
@@ -45,6 +56,9 @@ func (h *Handler) createUploadTask(w http.ResponseWriter, r *http.Request) {
 
 	tempPath, total, err := saveUploadTemp(h.uploads.TempDir(), file, header.Filename)
 	if err != nil {
+		if errors.Is(r.Context().Err(), context.Canceled) || strings.Contains(strings.ToLower(err.Error()), "context canceled") {
+			return
+		}
 		writeErr(w, err)
 		return
 	}
@@ -73,10 +87,24 @@ func (h *Handler) createUploadTask(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		_ = os.Remove(tempPath)
+		if errors.Is(r.Context().Err(), context.Canceled) || strings.Contains(strings.ToLower(err.Error()), "context canceled") {
+			return
+		}
 		writeErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, Resp{Success: true, Message: "上传任务已创建", Data: task})
+}
+
+func translateUploadFormParseError(err error) error {
+	if err == nil {
+		return domain.Errorf(domain.CodeValidation, "解析上传表单失败")
+	}
+	lower := strings.ToLower(err.Error())
+	if errors.Is(err, syscall.ENOSPC) || strings.Contains(lower, "no space left on device") {
+		return domain.Errorf(domain.CodeInternal, "服务器临时目录空间不足，请清理磁盘后重试")
+	}
+	return domain.Errorf(domain.CodeValidation, "解析上传表单失败: %v", err)
 }
 
 func saveUploadTemp(dir string, src io.Reader, name string) (string, int64, error) {
@@ -87,12 +115,18 @@ func saveUploadTemp(dir string, src io.Reader, name string) (string, int64, erro
 	path := filepath.Join(dir, fmt.Sprintf("%d%s", time.Now().UnixNano(), ext))
 	out, err := os.Create(path)
 	if err != nil {
+		if errors.Is(err, syscall.ENOSPC) || strings.Contains(strings.ToLower(err.Error()), "no space left on device") {
+			return "", 0, domain.Errorf(domain.CodeInternal, "服务器上传缓存目录空间不足，请清理磁盘后重试")
+		}
 		return "", 0, domain.Wrap(domain.CodeInternal, err)
 	}
 	defer out.Close()
 	n, err := io.Copy(out, src)
 	if err != nil {
 		_ = os.Remove(path)
+		if errors.Is(err, syscall.ENOSPC) || strings.Contains(strings.ToLower(err.Error()), "no space left on device") {
+			return "", 0, domain.Errorf(domain.CodeInternal, "服务器上传缓存目录空间不足，请清理磁盘后重试")
+		}
 		return "", 0, domain.Wrap(domain.CodeInternal, err)
 	}
 	return path, n, nil

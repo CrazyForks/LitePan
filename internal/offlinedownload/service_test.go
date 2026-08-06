@@ -246,6 +246,44 @@ func TestDeleteFailedTaskWithoutRemoteReferenceOnlyDeletesLocal(t *testing.T) {
 	}
 }
 
+func TestBatchDeleteCompletedTaskReturnsEmptyFailedSlice(t *testing.T) {
+	drv := &offlineTestDriver{}
+	repo := newOfflineTaskRepo()
+	svc := New(Options{
+		Exec:     driverexec.New(offlineTestProvider{drv: drv}, nil),
+		Accounts: offlineAccountRepo{account: &domain.Account{ID: 7, Name: "测试盘", DriverType: "offline-test"}},
+		Repo:     repo,
+	})
+
+	created, err := svc.AddURLs(context.Background(), AddURLParams{
+		AccountID: 7,
+		URLs:      []string{"https://example.com/movie.mkv"},
+	})
+	if err != nil || len(created) != 1 {
+		t.Fatalf("创建任务失败: tasks=%#v err=%v", created, err)
+	}
+	drv.updates = []driver.OfflineTaskUpdate{{
+		InfoHash: "hash-1", Status: driver.OfflineStatusSuccess, Progress: 100,
+	}}
+	if err := svc.Refresh(context.Background(), 7, true); err != nil {
+		t.Fatalf("刷新任务失败: %v", err)
+	}
+
+	result := svc.BatchDelete(context.Background(), []string{created[0].TaskID})
+	if result.DeletedTaskIDs == nil {
+		t.Fatal("DeletedTaskIDs 不应为 nil")
+	}
+	if result.FailedTaskIDs == nil {
+		t.Fatal("FailedTaskIDs 不应为 nil")
+	}
+	if len(result.DeletedTaskIDs) != 1 || result.DeletedTaskIDs[0] != created[0].TaskID {
+		t.Fatalf("批量删除结果不正确: %#v", result)
+	}
+	if len(result.FailedTaskIDs) != 0 {
+		t.Fatalf("不应有失败任务: %#v", result)
+	}
+}
+
 func TestValidateSchemesAcceptsThunderAndMagnet(t *testing.T) {
 	thunder := "thunder://QUFodHRwOi8vZXhhbXBsZS5jb20vZmlsZS56aXBaWg=="
 	allowed := []string{"http", "https", "ftp", "thunder", "magnet"}

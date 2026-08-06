@@ -1,6 +1,8 @@
 import { computed, onUnmounted, ref, type Ref } from "vue";
 import { offlineDownloadApi } from "@/api/offlineDownload";
 import { getApiErrorMessage } from "@/api/client";
+import { filesApi } from "@/api/files";
+import type { UploadCrumb } from "@/composables/upload/uploadTaskTypes";
 import { showConfirm } from "@/composables/useConfirm";
 import { toast } from "@/composables/useToast";
 import type { OfflineDownloadCapabilities, OfflineDownloadTask } from "@/types/offline-download";
@@ -9,6 +11,11 @@ type Deps = {
   selectedAccountId: Ref<number | null>;
   currentParentId: Ref<string>;
   refreshFiles: () => Promise<void>;
+  openDirectory: (
+    accountId: number,
+    crumbs: UploadCrumb[],
+    opts?: { forceRefresh?: boolean; silent?: boolean },
+  ) => Promise<void>;
 };
 
 const activeStatuses = new Set(["pending", "running", "retrying"]);
@@ -18,30 +25,30 @@ function sameParent(left: string, right: string) {
   return normalize(left) === normalize(right);
 }
 
+function isRootParent(value: string) {
+  return !value || value === "0";
+}
+
+function getTargetSegments(task: OfflineDownloadTask) {
+  return String(task.target_display_path || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean);
+}
+
 export function useOfflineDownloads(deps: Deps) {
   const capability = ref<OfflineDownloadCapabilities | null>(null);
   const capabilityLoading = ref(false);
   const modalOpen = ref(false);
   const tasks = ref<OfflineDownloadTask[]>([]);
-  const taskView = ref<"running" | "completed">("running");
   const loading = ref(false);
   const refreshing = ref(false);
   let pollTimer: number | undefined;
   let capabilityRequest = 0;
 
   const activeTasks = computed(() => tasks.value.filter((task) => activeStatuses.has(task.status)));
-  const runningTasks = computed(() =>
-    tasks.value.filter((task) => activeStatuses.has(task.status) || task.status === "failed"),
-  );
-  const completedTasks = computed(() => tasks.value.filter((task) => task.status === "success"));
-  const filteredTasks = computed(() =>
-    taskView.value === "completed" ? completedTasks.value : runningTasks.value,
-  );
   const failedTasks = computed(() => tasks.value.filter((task) => task.status === "failed"));
   const successfulTasks = computed(() => tasks.value.filter((task) => task.status === "success"));
-  const deletableTasks = computed(() =>
-    filteredTasks.value.filter((task) => !activeStatuses.has(task.status) || task.remote_delete),
-  );
 
   async function loadCapability(accountId = deps.selectedAccountId.value) {
     const request = ++capabilityRequest;
@@ -81,7 +88,6 @@ export function useOfflineDownloads(deps: Deps) {
     const byId = new Map(tasks.value.map((task) => [task.task_id, task]));
     for (const task of created) byId.set(task.task_id, task);
     tasks.value = [...byId.values()].sort((a, b) => b.created_at - a.created_at);
-    taskView.value = "running";
     ensurePolling();
   }
 
@@ -157,11 +163,11 @@ export function useOfflineDownloads(deps: Deps) {
     }
   }
 
-  async function batchDelete() {
-    const target = deletableTasks.value;
+  async function deleteTasks(target: OfflineDownloadTask[]) {
     if (!target.length) return;
+    const allCompleted = target.every((task) => task.status === "success");
     const result = await showConfirm({
-      title: taskView.value === "completed" ? "清空已完成任务" : "删除当前任务",
+      title: allCompleted ? "清空已完成任务" : "删除当前任务",
       message: `将处理 ${target.length} 条离线下载任务。`,
       hint: "115 任务会同步删除网盘端任务历史；已下载文件不会被删除。",
       icon: "trash",
@@ -178,6 +184,52 @@ export function useOfflineDownloads(deps: Deps) {
       else toast.success("离线下载任务已清理");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "批量删除离线下载任务失败"));
+    }
+  }
+
+  async function buildTaskBreadcrumb(task: OfflineDownloadTask): Promise<UploadCrumb[]> {
+    const rootCrumb: UploadCrumb = { id: "", name: "根目录" };
+    const targetParentId = String(task.target_parent_id || "");
+    if (isRootParent(targetParentId)) {
+      return [rootCrumb];
+    }
+
+    const segments = getTargetSegments(task);
+    if (segments.length === 0) {
+      return [rootCrumb, { id: targetParentId, name: "当前目录" }];
+    }
+
+    const breadcrumb: UploadCrumb[] = [rootCrumb];
+    let currentParentId = "";
+
+    for (let index = 0; index < segments.length; index += 1) {
+      const segment = segments[index];
+      const isLast = index === segments.length - 1;
+      try {
+        const res = await filesApi.list(task.account_id, currentParentId);
+        const matched = res.items.find((item) => item.is_dir && item.name === segment);
+        const resolvedId = matched?.id ? String(matched.id) : isLast ? targetParentId : currentParentId;
+        breadcrumb.push({ id: resolvedId, name: segment });
+        currentParentId = resolvedId;
+      } catch {
+        const fallbackId = isLast ? targetParentId : currentParentId;
+        breadcrumb.push({ id: fallbackId, name: segment });
+        currentParentId = fallbackId;
+      }
+    }
+
+    return breadcrumb;
+  }
+
+  async function handlePrimaryAction(task: OfflineDownloadTask) {
+    if (task.status !== "success") return false;
+    try {
+      const crumbs = await buildTaskBreadcrumb(task);
+      await deps.openDirectory(task.account_id, crumbs, { forceRefresh: true });
+      return true;
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "打开离线任务目录失败"));
+      return false;
     }
   }
 
@@ -220,16 +272,11 @@ export function useOfflineDownloads(deps: Deps) {
     capabilityLoading,
     modalOpen,
     tasks,
-    taskView,
     loading,
     refreshing,
     activeTasks,
-    runningTasks,
-    completedTasks,
-    filteredTasks,
     failedTasks,
     successfulTasks,
-    deletableTasks,
     loadCapability,
     openModal,
     closeModal,
@@ -238,7 +285,8 @@ export function useOfflineDownloads(deps: Deps) {
     fetchTasks,
     refreshTasks,
     deleteTask,
-    batchDelete,
+    deleteTasks,
+    handlePrimaryAction,
     statusText,
     sourceLabel,
   };

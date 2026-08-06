@@ -17,6 +17,9 @@ export type UploadTaskDeps = {
   files: Ref<FileItem[]>;
   uploadFileInput: Ref<HTMLInputElement | null>;
   uploadFolderInput: Ref<HTMLInputElement | null>;
+  removeFilesLocally: (ids: string[]) => void;
+  markDeletingFiles: (rowKeys: string[]) => void;
+  clearDeletingFiles: (rowKeys: string[]) => void;
   refreshFiles: (force?: boolean) => Promise<void>;
   loadFiles: (opts?: { forceRefresh?: boolean; silent?: boolean }) => Promise<void>;
   openDirectory: (
@@ -27,6 +30,7 @@ export type UploadTaskDeps = {
   selectAccount: (account: Account) => Promise<void>;
   getRootId: (config: Record<string, unknown>) => string;
   getCurrentBreadcrumbNameParts: () => string[];
+  refreshOfflineTasks: (refresh?: boolean, quiet?: boolean) => Promise<void>;
   relay: RelayApi;
 };
 

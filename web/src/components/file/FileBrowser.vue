@@ -134,6 +134,12 @@ const fileActions = useFileActions({
 });
 
 const relay = useRelayTasks();
+const offline = useOfflineDownloads({
+  selectedAccountId: currentAccountId,
+  currentParentId,
+  refreshFiles: () => store.loadFiles({ forceRefresh: true, silent: true }),
+  openDirectory: (accountId, crumbs, opts) => store.openDirectory(accountId, crumbs, opts),
+});
 const uploadApi = useUploadTasks({
   selectedAccountId: currentAccountId,
   selectedAccountName,
@@ -144,6 +150,9 @@ const uploadApi = useUploadTasks({
   files,
   uploadFileInput,
   uploadFolderInput,
+  removeFilesLocally: (ids) => store.removeFilesLocally(ids),
+  markDeletingFiles: (rowKeys) => fileActions.markExternalDeleteRows(rowKeys),
+  clearDeletingFiles: (rowKeys) => fileActions.clearExternalDeleteRows(rowKeys),
   refreshFiles: (force?: boolean) =>
     store.loadFiles({ forceRefresh: Boolean(force), silent: true }),
   loadFiles: (opts) => store.loadFiles(opts),
@@ -151,14 +160,10 @@ const uploadApi = useUploadTasks({
   selectAccount: (account: Account) => store.selectAccount(account.id),
   getRootId,
   getCurrentBreadcrumbNameParts,
+  refreshOfflineTasks: (refresh = true, quiet = false) => offline.fetchTasks(refresh, quiet),
   relay,
 });
 const { uploadTaskPanelOpen } = uploadApi;
-const offline = useOfflineDownloads({
-  selectedAccountId: currentAccountId,
-  currentParentId,
-  refreshFiles: () => store.loadFiles({ forceRefresh: true, silent: true }),
-});
 const transferTaskText = computed(() => {
   if (uploadApi.activeUploadTasks.value.length > 0 || uploadApi.activeRelayCount.value > 0) {
     return uploadApi.uploadTaskLabel.value;
@@ -169,8 +174,6 @@ const transferTaskText = computed(() => {
   if (offline.successfulTasks.value.length > 0) return `离线完成 ${offline.successfulTasks.value.length}`;
   return uploadApi.uploadTaskLabel.value;
 });
-const uploadTaskTitleText = transferTaskText;
-const uploadTaskLabelText = transferTaskText;
 
 const uploadTaskActive = computed(
   () => uploadApi.activeUploadTasks.value.length > 0 || uploadApi.activeRelayCount.value > 0 || offline.activeTasks.value.length > 0,
@@ -178,8 +181,7 @@ const uploadTaskActive = computed(
 const uploadTaskFailed = computed(
   () =>
     uploadApi.displayUploadTasks.value.some((task) => task.status === "failed") ||
-    uploadApi.runningRelayTasks.value.some((task) => task.status === "failed") ||
-    uploadApi.completedRelayTasks.value.some((task) => task.status === "failed") ||
+    uploadApi.failedRelayTasks.value.length > 0 ||
     offline.failedTasks.value.length > 0,
 );
 const uploadTaskSuccess = computed(() =>
@@ -489,25 +491,20 @@ async function loadPublicSystemConfig() {
   }
 }
 
-async function loadInitialTaskState() {
-  if (!isAdmin.value) return;
+async function restoreTaskPanelFromRoute() {
+  const rawPanel = typeof route.query.taskPanel === "string" ? route.query.taskPanel : "";
+  if (!rawPanel) return;
+  const nextQuery = { ...route.query };
+  delete nextQuery.taskPanel;
+  if (!isAdmin.value) {
+    await router.replace({ path: route.path, query: nextQuery });
+    return;
+  }
   try {
-    await Promise.allSettled([
-      uploadApi.fetchUploadTasks(),
-      relay.fetchRelayTasks(),
-      offline.fetchTasks(true, true),
-    ]);
-    if (relay.activeRelayCount.value > 0) {
-      await relay.openRelayMonitoring();
-    }
-    if (route.query.taskPanel === "relay") {
-      await uploadApi.openUploadTaskPanel("relay");
-      const nextQuery = { ...route.query };
-      delete nextQuery.taskPanel;
-      router.replace({ path: route.path, query: nextQuery });
-    }
-  } catch {
-    // 传输任务状态不阻塞首页首屏，失败时保持静默，轮询或用户打开面板后会再次刷新。
+    const preferredCategory = rawPanel === "relay" || rawPanel === "offline" ? rawPanel : "";
+    await uploadApi.openUploadTaskPanel(preferredCategory);
+  } finally {
+    await router.replace({ path: route.path, query: nextQuery });
   }
 }
 
@@ -515,10 +512,9 @@ async function openTaskPanel() {
   const preferOffline =
     offline.tasks.value.length > 0 &&
     uploadApi.displayUploadTasks.value.length === 0 &&
-    uploadApi.runningRelayTasks.value.length === 0 &&
-    uploadApi.completedRelayTasks.value.length === 0;
+    uploadApi.activeRelayTasks.value.length === 0 &&
+    uploadApi.failedRelayTasks.value.length === 0;
   await uploadApi.openUploadTaskPanel(preferOffline ? "offline" : "");
-  if (preferOffline) await offline.fetchTasks(true, true);
 }
 
 function handleOfflineTasksCreated(tasks: OfflineDownloadTask[]) {
@@ -807,7 +803,7 @@ onMounted(async () => {
   window.requestAnimationFrame(() => {
     favoritesTransitionReady.value = true;
   });
-  void loadInitialTaskState();
+  void restoreTaskPanelFromRoute();
 });
 
 onUnmounted(() => {
@@ -857,8 +853,7 @@ onUnmounted(() => {
         :upload-task-active="uploadTaskActive"
         :upload-task-failed="uploadTaskFailed"
         :upload-task-success="uploadTaskSuccess"
-        :upload-task-title="uploadTaskTitleText"
-        :upload-task-label="uploadTaskLabelText"
+        :upload-task-label="transferTaskText"
         :favorites-open="favoritesOpen"
         :offline-download-supported="offline.capability.value?.supported"
         @refresh="store.refreshFiles"

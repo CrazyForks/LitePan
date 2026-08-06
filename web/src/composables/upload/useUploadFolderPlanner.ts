@@ -36,7 +36,6 @@ export function useUploadFolderPlanner(ctx: UploadActionsCtx) {
     if (!selectedFiles.length) return;
     try {
       store.uploadTaskPanelOpen.value = true;
-      store.uploadTaskView.value = "running";
       store.uploadTaskPanelLoading.value = true;
       store.uploadTaskPanelLoadingText.value = "正在准备上传文件夹任务...";
       await stream.refreshUploadTaskServerConcurrency();
