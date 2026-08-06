@@ -5,6 +5,8 @@ export type AutomationStatus = "running" | "paused";
 export type AutomationCondition = "always" | "prev_success" | "prev_failed";
 export type AutomationActionType = "cache_clear" | "organize" | "strm" | "strm_scrape" | "delay" | "emby_refresh";
 
+export type EmbyRefreshMode = "global" | "library";
+
 export interface AutomationAction {
   id: string;
   type: AutomationActionType;

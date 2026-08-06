@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"litepan/internal/domain"
+	"litepan/internal/embyproxy"
 	"litepan/internal/strmscrape"
 )
 
@@ -126,7 +127,7 @@ func (s *Service) executeAction(ctx context.Context, action RuleAction) map[stri
 	case domain.AutomationActionStrmScrape:
 		return s.runStrmScrape(ctx, action.Params)
 	case domain.AutomationActionEmbyRefresh:
-		return s.runEmbyRefresh(ctx)
+		return s.runEmbyRefresh(ctx, action.Params)
 	default:
 		return map[string]any{"status": "failed", "success": false, "message": "动作类型不支持"}
 	}
@@ -464,23 +465,33 @@ func strmScrapeOutcome(progress strmscrape.Progress, policy string) (string, boo
 	return "partial", true
 }
 
-func (s *Service) runEmbyRefresh(ctx context.Context) map[string]any {
+func (s *Service) runEmbyRefresh(ctx context.Context, params map[string]any) map[string]any {
 	if s.emby == nil {
 		return map[string]any{"status": "failed", "success": false, "message": "Emby 服务未就绪"}
 	}
-	result, err := s.emby.RefreshLibrary(ctx)
+	req := embyproxy.RefreshRequest{
+		Mode:      strings.TrimSpace(anyString(params["mode"])),
+		LibraryID: strings.TrimSpace(anyString(params["library_id"])),
+	}
+	result, err := s.emby.RefreshLibrary(ctx, req)
 	if err != nil {
 		return map[string]any{"status": "failed", "success": false, "message": err.Error()}
 	}
 	cfg := s.emby.Snapshot(nil)
+	message := "已通知 Emby 刷库"
+	if result.Mode == "library" && result.LibraryName != "" {
+		message = "已通知 Emby 扫描媒体库：" + result.LibraryName
+	}
 	return map[string]any{
 		"status":  "success",
 		"success": true,
-		"message": "已通知 Emby 刷库",
+		"message": message,
 		"data": map[string]any{
-			"emby_url": cfg.EmbyURL,
-			"mode":     result.Mode,
-			"task_id":  result.TaskID,
+			"emby_url":     cfg.EmbyURL,
+			"mode":         result.Mode,
+			"task_id":      result.TaskID,
+			"library_id":   result.LibraryID,
+			"library_name": result.LibraryName,
 		},
 	}
 }

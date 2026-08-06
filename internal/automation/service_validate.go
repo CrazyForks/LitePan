@@ -73,6 +73,18 @@ func (s *Service) ValidateRule(ctx context.Context, actions []RuleAction) (Valid
 			if !hasFollowingTask {
 				issues = append(issues, ValidationIssue{Level: "error", Message: "刷新目录后面需要有整理任务或 STRM 任务", ActionIndex: index, ActionType: action.Type})
 			}
+		case domain.AutomationActionEmbyRefresh:
+			mode := strings.TrimSpace(anyString(action.Params["mode"]))
+			if mode == "" {
+				mode = "global"
+			}
+			if mode != "global" && mode != "library" {
+				issues = append(issues, ValidationIssue{Level: "error", Message: "Emby 刷库模式无效", ActionIndex: index, ActionType: action.Type})
+				continue
+			}
+			if mode == "library" && strings.TrimSpace(anyString(action.Params["library_id"])) == "" {
+				issues = append(issues, ValidationIssue{Level: "error", Message: "请选择 Emby 媒体库", ActionIndex: index, ActionType: action.Type})
+			}
 		}
 	}
 	if len(organizeActions) > 0 && len(strmActions) > 0 {

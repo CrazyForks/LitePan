@@ -191,6 +191,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Get("/emby/config", h.getEmbyConfig)
 				r.Put("/emby/config", h.updateEmbyConfig)
 				r.Post("/emby/test", h.testEmbyConfig)
+				r.Get("/emby/libraries", h.listEmbyLibraries)
 				r.Post("/emby/refresh", h.refreshEmbyLibrary)
 				r.Get("/fnos/config", h.getFnosConfig)
 				r.Put("/fnos/config", h.updateFnosConfig)

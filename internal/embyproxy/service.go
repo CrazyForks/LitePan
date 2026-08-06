@@ -77,8 +77,21 @@ type UpdateRequest struct {
 }
 
 type RefreshResult struct {
-	Mode   string `json:"mode"`
-	TaskID string `json:"task_id,omitempty"`
+	Mode        string `json:"mode"`
+	TaskID      string `json:"task_id,omitempty"`
+	LibraryID   string `json:"library_id,omitempty"`
+	LibraryName string `json:"library_name,omitempty"`
+}
+
+type RefreshRequest struct {
+	Mode      string `json:"mode"`
+	LibraryID string `json:"library_id"`
+}
+
+type Library struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	CollectionType string `json:"collection_type,omitempty"`
 }
 
 func New(opts Options) *Service {
@@ -218,7 +231,49 @@ func (s *Service) TestConfig(ctx context.Context, cfg Config) error {
 	return nil
 }
 
-func (s *Service) RefreshLibrary(ctx context.Context) (RefreshResult, error) {
+func (s *Service) ListLibraries(ctx context.Context) ([]Library, error) {
+	cfg := s.configFromSettings()
+	if strings.TrimSpace(cfg.EmbyURL) == "" {
+		return nil, domain.Errorf(domain.CodeValidation, "请先填写 Emby 地址")
+	}
+	if strings.TrimSpace(cfg.APIKey) == "" {
+		return nil, domain.Errorf(domain.CodeValidation, "请先填写 Emby API Key")
+	}
+	base := strings.TrimRight(cfg.EmbyURL, "/")
+	query := url.Values{"api_key": {cfg.APIKey}}.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/Library/SelectableMediaFolders?"+query, nil)
+	if err != nil {
+		return nil, domain.Wrap(domain.CodeInternal, err)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, embyTestConnectError(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, embyTestHTTPError(resp.StatusCode)
+	}
+	var payload []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, domain.Wrap(domain.CodeInternal, err)
+	}
+	out := make([]Library, 0, len(payload))
+	for _, item := range payload {
+		id := strings.TrimSpace(anyString(item["Id"]))
+		name := strings.TrimSpace(anyString(item["Name"]))
+		if id == "" || name == "" {
+			continue
+		}
+		out = append(out, Library{
+			ID:             id,
+			Name:           name,
+			CollectionType: strings.TrimSpace(anyString(item["CollectionType"])),
+		})
+	}
+	return out, nil
+}
+
+func (s *Service) RefreshLibrary(ctx context.Context, req RefreshRequest) (RefreshResult, error) {
 	cfg := s.configFromSettings()
 	if strings.TrimSpace(cfg.EmbyURL) == "" {
 		return RefreshResult{}, domain.Errorf(domain.CodeValidation, "请先填写 Emby 地址")
@@ -226,8 +281,19 @@ func (s *Service) RefreshLibrary(ctx context.Context) (RefreshResult, error) {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return RefreshResult{}, domain.Errorf(domain.CodeValidation, "请先填写 Emby API Key")
 	}
-	query := url.Values{"api_key": {cfg.APIKey}}.Encode()
 	base := strings.TrimRight(cfg.EmbyURL, "/")
+	mode := strings.TrimSpace(req.Mode)
+	if mode == "" {
+		mode = "global"
+	}
+	if mode == "library" {
+		return s.refreshLibraryByID(ctx, base, cfg.APIKey, strings.TrimSpace(req.LibraryID))
+	}
+	return s.refreshAllLibraries(ctx, base, cfg.APIKey)
+}
+
+func (s *Service) refreshAllLibraries(ctx context.Context, base, apiKey string) (RefreshResult, error) {
+	query := url.Values{"api_key": {apiKey}}.Encode()
 	taskID, err := s.findLibraryRefreshTask(ctx, base, query)
 	if err == nil && taskID != "" {
 		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, base+"/ScheduledTasks/Running/"+taskID+"?"+query, nil)
@@ -255,7 +321,52 @@ func (s *Service) RefreshLibrary(ctx context.Context) (RefreshResult, error) {
 	if resp.StatusCode >= 400 {
 		return RefreshResult{}, embyTestHTTPError(resp.StatusCode)
 	}
-	return RefreshResult{Mode: "library_refresh"}, nil
+	return RefreshResult{Mode: "global"}, nil
+}
+
+func (s *Service) refreshLibraryByID(ctx context.Context, base, apiKey, libraryID string) (RefreshResult, error) {
+	if libraryID == "" {
+		return RefreshResult{}, domain.Errorf(domain.CodeValidation, "请选择 Emby 媒体库")
+	}
+	libraries, err := s.ListLibraries(ctx)
+	if err != nil {
+		return RefreshResult{}, err
+	}
+	var selected *Library
+	for i := range libraries {
+		if libraries[i].ID == libraryID {
+			selected = &libraries[i]
+			break
+		}
+	}
+	if selected == nil {
+		return RefreshResult{}, domain.Errorf(domain.CodeValidation, "所选 Emby 媒体库不存在")
+	}
+	query := url.Values{
+		"Recursive":           {"true"},
+		"ImageRefreshMode":    {"Default"},
+		"MetadataRefreshMode": {"Default"},
+		"ReplaceAllImages":    {"false"},
+		"ReplaceAllMetadata":  {"false"},
+		"api_key":             {apiKey},
+	}.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/Items/"+url.PathEscape(libraryID)+"/Refresh?"+query, nil)
+	if err != nil {
+		return RefreshResult{}, domain.Wrap(domain.CodeInternal, err)
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return RefreshResult{}, embyTestConnectError(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return RefreshResult{}, embyTestHTTPError(resp.StatusCode)
+	}
+	return RefreshResult{
+		Mode:        "library",
+		LibraryID:   selected.ID,
+		LibraryName: selected.Name,
+	}, nil
 }
 
 func (s *Service) findLibraryRefreshTask(ctx context.Context, base, query string) (string, error) {

@@ -265,6 +265,24 @@ func TestValidateRuleAcceptsStrmScrapeAction(t *testing.T) {
 	}
 }
 
+func TestValidateRuleRequiresLibrarySelectionForEmbyLibraryMode(t *testing.T) {
+	t.Parallel()
+
+	service := New(Options{Rules: newAutomationRuleRepo(), Runs: &automationRunRepo{}})
+	result, err := service.ValidateRule(context.Background(), []RuleAction{
+		{ID: "emby-1", Type: domain.AutomationActionEmbyRefresh, Params: map[string]any{"mode": "library"}},
+	})
+	if err != nil {
+		t.Fatalf("ValidateRule 返回错误: %v", err)
+	}
+	if result.OK {
+		t.Fatalf("期望未选择媒体库时校验失败")
+	}
+	if len(result.Issues) == 0 || !strings.Contains(result.Issues[0].Message, "请选择 Emby 媒体库") {
+		t.Fatalf("issues=%#v", result.Issues)
+	}
+}
+
 func TestStrmScrapeOutcome(t *testing.T) {
 	t.Parallel()
 	if got := normalizeStrmScrapeFailurePolicy(nil); got != strmScrapeFailurePolicyAllFailed {

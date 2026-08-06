@@ -196,3 +196,44 @@ func TestParseLitePanSTRMURLFilenameRegressionCases(t *testing.T) {
 		})
 	}
 }
+
+func TestListLibrariesAndRefreshSpecificLibrary(t *testing.T) {
+	var gotSelectable bool
+	var gotRefreshPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/Library/SelectableMediaFolders"):
+			gotSelectable = true
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `[{"Id":"lib-1","Name":"电影"},{"Id":"lib-2","Name":"剧集"}]`)
+		case strings.HasSuffix(r.URL.Path, "/Items/lib-2/Refresh"):
+			gotRefreshPath = r.URL.RequestURI()
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	svc := testEmbyProxyService(t, upstream.URL)
+	libraries, err := svc.ListLibraries(context.Background())
+	if err != nil {
+		t.Fatalf("ListLibraries 返回错误: %v", err)
+	}
+	if !gotSelectable {
+		t.Fatalf("未请求 SelectableMediaFolders")
+	}
+	if len(libraries) != 2 || libraries[1].ID != "lib-2" {
+		t.Fatalf("媒体库列表异常: %#v", libraries)
+	}
+	result, err := svc.RefreshLibrary(context.Background(), RefreshRequest{Mode: "library", LibraryID: "lib-2"})
+	if err != nil {
+		t.Fatalf("RefreshLibrary 返回错误: %v", err)
+	}
+	if !strings.Contains(gotRefreshPath, "/Items/lib-2/Refresh?") {
+		t.Fatalf("指定库刷新路径异常: %q", gotRefreshPath)
+	}
+	if result.Mode != "library" || result.LibraryID != "lib-2" || result.LibraryName != "剧集" {
+		t.Fatalf("刷新结果异常: %#v", result)
+	}
+}

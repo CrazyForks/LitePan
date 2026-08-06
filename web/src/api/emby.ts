@@ -17,6 +17,17 @@ export interface EmbyConfigUpdate {
   proxy_port: string;
 }
 
+export interface EmbyLibrary {
+  id: string;
+  name: string;
+  collection_type?: string;
+}
+
+export interface EmbyRefreshRequest {
+  mode?: "global" | "library";
+  library_id?: string;
+}
+
 export function fetchEmbyConfig() {
   return http.get<EmbyConfig>("/admin/emby/config");
 }
@@ -29,6 +40,10 @@ export function testEmbyConfig(values: EmbyConfigUpdate) {
   return http.post<{ ok: boolean }>("/admin/emby/test", values);
 }
 
-export function refreshEmbyLibrary() {
-  return http.post<{ mode: string; task_id?: string }>("/admin/emby/refresh");
+export function fetchEmbyLibraries() {
+  return http.get<EmbyLibrary[]>("/admin/emby/libraries");
+}
+
+export function refreshEmbyLibrary(body: EmbyRefreshRequest = {}) {
+  return http.post<{ mode: string; task_id?: string; library_id?: string; library_name?: string }>("/admin/emby/refresh", body);
 }
