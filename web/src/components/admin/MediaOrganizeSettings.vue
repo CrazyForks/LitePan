@@ -396,7 +396,12 @@ defineExpose(
             <div class="settings-row__label"><span>TMDB API Key</span></div>
           </template>
           <template #control>
-            <AppInput v-model="settings.tmdb_api_key" placeholder="请填写 TMDB API Key（必填）" />
+            <AppInput
+              v-model="settings.tmdb_api_key"
+              type="password"
+              placeholder="请填写 TMDB API Key（必填）"
+              :ignore-autofill="true"
+            />
           </template>
         </SettingsRow>
 
