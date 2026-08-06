@@ -12,7 +12,6 @@ import (
 	"litepan/internal/domain"
 	"litepan/internal/driver"
 	"litepan/internal/file"
-	"litepan/internal/playback"
 	"litepan/internal/upload"
 )
 
@@ -24,12 +23,10 @@ type Service struct {
 }
 
 type Options struct {
-	Exec     *driverexec.Executor
-	Files    *file.Service
-	Playback *playback.Service
-	Uploads  *upload.Manager
-	DataDir  string
-	Log      *slog.Logger
+	Exec    *driverexec.Executor
+	Files   *file.Service
+	Uploads *upload.Manager
+	Log     *slog.Logger
 }
 
 func New(opts Options) *Service {
@@ -865,7 +862,6 @@ func (s *Service) enqueueRelayTask(ctx context.Context, in executeFileInput) err
 		TotalBytes:        f.Size,
 		ConflictPolicy:    in.conflict,
 		Phase:             upload.PhaseDownloading,
-		RelayVisible:      true,
 	})
 	return err
 }

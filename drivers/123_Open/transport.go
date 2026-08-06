@@ -101,6 +101,7 @@ func (d *Driver) rawRequest(ctx context.Context, method, path, token string, par
 }
 
 func mapAPIError(code int, msg string) error {
+	msg = strings.TrimSpace(msg)
 	switch code {
 	case 401, 4010, 4011, 4012:
 		return domain.Errorf(domain.CodeAuthExpired, "123 认证失败：%s", msg)
@@ -108,6 +109,11 @@ func mapAPIError(code int, msg string) error {
 		return domain.Errorf(domain.CodeRateLimited, "123 接口限流：%s", msg)
 	case 5066:
 		return domain.Errf(domain.CodeNotFound)
+	case 1:
+		if strings.Contains(msg, "未找到任务ID") || strings.Contains(strings.ToLower(msg), "taskid not found") {
+			return domain.Errf(domain.CodeNotFound)
+		}
+		return domain.Errorf(domain.CodeDriverError, "123 API 错误(%d)：%s", code, msg)
 	default:
 		return domain.Errorf(domain.CodeDriverError, "123 API 错误(%d)：%s", code, msg)
 	}

@@ -141,34 +141,43 @@ function toggleAllTorrentFiles() {
 
 async function submit() {
   if (!props.accountId || submitDisabled.value) return;
+  const accountId = props.accountId;
+  const mode = sourceMode.value;
+  const nextTargetParentId = targetParentId.value;
+  const nextTargetDisplayPath = targetDisplayPath.value;
+  const nextFileName = fileName.value.trim() || undefined;
+  const nextURLs = [...urlLines.value];
+  const nextTorrentPreparation = torrentPreparation.value;
+  const nextWanted = [...selectedTorrentIndexes.value];
   submitting.value = true;
+  emit("close");
+  toast.info("正在提交离线任务，可继续操作");
   try {
-    if (sourceMode.value === "bt") {
-      const prep = torrentPreparation.value;
+    if (mode === "bt") {
+      const prep = nextTorrentPreparation;
       if (!prep) return;
       const task = await offlineDownloadApi.addTorrent({
-        account_id: props.accountId,
+        account_id: accountId,
         preparation_id: prep.preparation_id,
-        wanted: selectedTorrentIndexes.value,
-        target_parent_id: targetParentId.value,
-        target_display_path: targetDisplayPath.value,
+        wanted: nextWanted,
+        target_parent_id: nextTargetParentId,
+        target_display_path: nextTargetDisplayPath,
       });
       emit("created", [task]);
       toast.success("BT 离线下载任务已提交");
     } else {
       const tasks = await offlineDownloadApi.addURLs({
-        account_id: props.accountId,
-        urls: urlLines.value,
-        file_name: fileName.value.trim() || undefined,
-        target_parent_id: targetParentId.value,
-        target_display_path: targetDisplayPath.value,
+        account_id: accountId,
+        urls: nextURLs,
+        file_name: nextFileName,
+        target_parent_id: nextTargetParentId,
+        target_display_path: nextTargetDisplayPath,
       });
       emit("created", tasks);
       const failed = tasks.filter((task) => task.status === "failed").length;
       if (failed) toast.warning(`${tasks.length - failed} 个任务提交成功，${failed} 个失败`);
       else toast.success(`${tasks.length} 个离线下载任务已提交`);
     }
-    emit("close");
   } catch (error) {
     toast.error(getApiErrorMessage(error, "离线下载任务提交失败"));
   } finally {
@@ -215,7 +224,7 @@ async function submit() {
         </label>
         <label v-if="!capability?.supports_batch_urls" class="offline-field">
           <span class="offline-field__label">自定义文件名 <em>可选</em></span>
-          <AppInput v-model="fileName" placeholder="留空时由 123 云盘识别文件名" />
+          <AppInput v-model="fileName" placeholder="留空时由 123 云盘识别文件名；自定义时请手动填写后缀名" />
         </label>
       </template>
 

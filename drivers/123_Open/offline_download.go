@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	pathOfflineDownload        = "/api/v1/offline/download"
-	pathOfflineDownloadProcess = "/api/v1/offline/download/process"
+	pathOfflineDownload         = "/api/v1/offline/download"
+	pathOfflineDownloadProcess  = "/api/v1/offline/download/process"
+	offlineTaskMissingThreshold = 3
 )
 
 type offlineDownloadCreateResp struct {
@@ -92,15 +93,27 @@ func (d *Driver) RefreshOfflineTasks(ctx context.Context, refs []driver.OfflineT
 		var result offlineDownloadProcessResp
 		if err := d.apiCall(ctx, http.MethodGet, pathOfflineDownloadProcess, params, nil, &result); err != nil {
 			if appErr, ok := domain.AsAppError(err); ok && appErr.Code == domain.CodeNotFound {
+				if d.bumpOfflineMissing(taskID) < offlineTaskMissingThreshold {
+					updates = append(updates, driver.OfflineTaskUpdate{
+						ProviderTaskID: taskID,
+						Status:         driver.OfflineStatusPending,
+						Message:        "等待 123 云盘同步任务状态",
+					})
+					continue
+				}
+				d.clearOfflineMissing(taskID)
 				updates = append(updates, driver.OfflineTaskUpdate{
 					ProviderTaskID: taskID,
-					Status:         driver.OfflineStatusPending,
-					Message:        "等待 123 云盘同步任务状态",
+					Status:         driver.OfflineStatusFailed,
+					Progress:       0,
+					Message:        "任务已在 123 云盘侧移除",
+					Error:          "123 离线任务已不存在",
 				})
 				continue
 			}
 			return nil, err
 		}
+		d.clearOfflineMissing(taskID)
 		update := driver.OfflineTaskUpdate{
 			ProviderTaskID: taskID,
 			Progress:       int(result.Process + 0.5),
@@ -127,4 +140,23 @@ func (d *Driver) RefreshOfflineTasks(ctx context.Context, refs []driver.OfflineT
 		updates = append(updates, update)
 	}
 	return updates, nil
+}
+
+func (d *Driver) bumpOfflineMissing(taskID string) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.offlineMissing == nil {
+		d.offlineMissing = make(map[string]int)
+	}
+	d.offlineMissing[taskID]++
+	return d.offlineMissing[taskID]
+}
+
+func (d *Driver) clearOfflineMissing(taskID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.offlineMissing == nil {
+		return
+	}
+	delete(d.offlineMissing, taskID)
 }

@@ -19,8 +19,8 @@ INSERT INTO upload_tasks(
     source_type, source_account_id, source_account_name, source_driver_type, source_file_id,
     rel_path, rel_dir, target_path, target_display_path, status, phase, progress,
     downloaded_bytes, uploaded_bytes, speed_bps, total_bytes, message, error, result_json,
-    relay_visible, resume_data_json, queue_order, created_at, updated_at, local_path, conflict_policy
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    resume_data_json, queue_order, created_at, updated_at, local_path, conflict_policy
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(task_id) DO UPDATE SET
     client_task_id=excluded.client_task_id,
     account_id=excluded.account_id,
@@ -46,7 +46,6 @@ ON CONFLICT(task_id) DO UPDATE SET
     message=excluded.message,
     error=excluded.error,
     result_json=excluded.result_json,
-    relay_visible=excluded.relay_visible,
     resume_data_json=excluded.resume_data_json,
     queue_order=excluded.queue_order,
     created_at=excluded.created_at,
@@ -57,7 +56,7 @@ ON CONFLICT(task_id) DO UPDATE SET
 		rec.SourceType, rec.SourceAccountID, rec.SourceAccountName, rec.SourceDriverType, rec.SourceFileID,
 		rec.RelPath, rec.RelDir, rec.TargetPath, rec.TargetDisplayPath, rec.Status, rec.Phase, rec.Progress,
 		rec.DownloadedBytes, rec.UploadedBytes, rec.SpeedBytesPerSecond, rec.TotalBytes, rec.Message, rec.Error, rec.ResultJSON,
-		rec.RelayVisible, rec.ResumeDataJSON, rec.QueueOrder,
+		rec.ResumeDataJSON, rec.QueueOrder,
 		rec.CreatedAt, rec.UpdatedAt, rec.LocalPath, rec.ConflictPolicy,
 	)
 	return wrapDB(err)
@@ -74,7 +73,7 @@ SELECT task_id, client_task_id, account_id, account_name, driver_type, file_name
        source_type, source_account_id, source_account_name, source_driver_type, source_file_id,
        rel_path, rel_dir, target_path, target_display_path, status, phase, progress,
        downloaded_bytes, uploaded_bytes, speed_bps, total_bytes, message, error, result_json,
-       relay_visible, resume_data_json, queue_order, created_at, updated_at, local_path, conflict_policy
+       resume_data_json, queue_order, created_at, updated_at, local_path, conflict_policy
 FROM upload_tasks ORDER BY queue_order ASC, created_at ASC`)
 	if err != nil {
 		return nil, wrapDB(err)
@@ -98,7 +97,7 @@ func scanUploadTask(rows *sql.Rows) (*domain.UploadTaskRecord, error) {
 		&rec.SourceType, &rec.SourceAccountID, &rec.SourceAccountName, &rec.SourceDriverType, &rec.SourceFileID,
 		&rec.RelPath, &rec.RelDir, &rec.TargetPath, &rec.TargetDisplayPath, &rec.Status, &rec.Phase, &rec.Progress,
 		&rec.DownloadedBytes, &rec.UploadedBytes, &rec.SpeedBytesPerSecond, &rec.TotalBytes, &rec.Message, &rec.Error, &rec.ResultJSON,
-		&rec.RelayVisible, &rec.ResumeDataJSON, &rec.QueueOrder,
+		&rec.ResumeDataJSON, &rec.QueueOrder,
 		&rec.CreatedAt, &rec.UpdatedAt, &rec.LocalPath, &rec.ConflictPolicy,
 	)
 	if err != nil {

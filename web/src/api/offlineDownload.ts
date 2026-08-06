@@ -78,10 +78,6 @@ export const offlineDownloadApi = {
     );
   },
 
-  deleteTask(taskId: string) {
-    return http.del<void>(`/files/offline-download/tasks/${encodeURIComponent(taskId)}`);
-  },
-
   batchDelete(taskIds: string[]) {
     return http.post<OfflineBatchDeleteResult>("/files/offline-download/tasks/batch-delete", {
       task_ids: taskIds,

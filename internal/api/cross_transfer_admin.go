@@ -288,8 +288,6 @@ type relayTaskDTO struct {
 	TargetParentID      string         `json:"target_parent_id"`
 	TargetDisplayPath   string         `json:"target_display_path"`
 	TotalBytes          int64          `json:"total_bytes"`
-	Method              string         `json:"method"`
-	ConflictPolicy      string         `json:"conflict_policy"`
 	Status              string         `json:"status"`
 	Phase               string         `json:"phase"`
 	Progress            int            `json:"progress"`
@@ -350,8 +348,6 @@ func toRelayTaskDTO(task upload.Task) relayTaskDTO {
 		TargetParentID:      task.TargetPath,
 		TargetDisplayPath:   task.TargetDisplayPath,
 		TotalBytes:          task.TotalBytes,
-		Method:              "",
-		ConflictPolicy:      "",
 		Status:              task.Status,
 		Phase:               task.Phase,
 		Progress:            task.Progress,

@@ -40,7 +40,7 @@ func TestExecuteCleansCreatedDirsWhenStreamStops(t *testing.T) {
 	drv := newCleanupDriver()
 	exec := driverexec.New(cleanupProvider{drv: drv}, nil)
 	files := file.NewService(exec, nil, nil, nil, nil, nil)
-	service := New(Options{Exec: exec, Files: files, DataDir: t.TempDir()})
+	service := New(Options{Exec: exec, Files: files})
 
 	err := service.ExecuteStream(context.Background(), ExecuteInput{
 		TargetAccountID: 1,
@@ -131,7 +131,7 @@ func TestExecuteRapidUploadInvalidatesTargetDirCache(t *testing.T) {
 	cacheSvc := cache.NewService(cache.Options{MaxItems: 32})
 	t.Cleanup(cacheSvc.Close)
 	files := file.NewService(exec, cacheSvc, nil, nil, nil, nil)
-	service := New(Options{Exec: exec, Files: files, DataDir: t.TempDir()})
+	service := New(Options{Exec: exec, Files: files})
 
 	// 先把空目录缓存住，模拟前端进入目标目录后再执行秒传。
 	items, err := files.List(context.Background(), 1, "root", false)
@@ -363,7 +363,7 @@ func newCleanupService(t *testing.T, drv driver.Driver) *Service {
 	files := file.NewService(exec, nil, nil, nil, nil, nil)
 	dataDir := t.TempDir()
 	uploads := upload.NewManager(upload.Options{Exec: exec, Files: files, DataDir: dataDir})
-	return New(Options{Exec: exec, Files: files, Uploads: uploads, DataDir: dataDir})
+	return New(Options{Exec: exec, Files: files, Uploads: uploads})
 }
 
 type cleanupProvider struct{ drv driver.Driver }

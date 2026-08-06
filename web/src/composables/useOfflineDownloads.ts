@@ -19,6 +19,7 @@ type Deps = {
 };
 
 const activeStatuses = new Set(["pending", "running", "retrying"]);
+const pollIntervalMs = 3000;
 
 function sameParent(left: string, right: string) {
   const normalize = (value: string) => (!value || value === "0" ? "" : value);
@@ -91,10 +92,6 @@ export function useOfflineDownloads(deps: Deps) {
     ensurePolling();
   }
 
-  function registerTask(task: OfflineDownloadTask) {
-    registerTasks([task]);
-  }
-
   async function replaceTasks(next: OfflineDownloadTask[]) {
     const before = new Map(tasks.value.map((task) => [task.task_id, task.status]));
     tasks.value = next;
@@ -113,11 +110,11 @@ export function useOfflineDownloads(deps: Deps) {
     try {
       const next = await offlineDownloadApi.listTasks(refresh);
       await replaceTasks(next);
-      ensurePolling();
     } catch (error) {
       if (!quiet) toast.error(getApiErrorMessage(error, "离线下载任务加载失败"));
     } finally {
       if (!quiet) loading.value = false;
+      ensurePolling();
     }
   }
 
@@ -131,35 +128,6 @@ export function useOfflineDownloads(deps: Deps) {
     } finally {
       refreshing.value = false;
       ensurePolling();
-    }
-  }
-
-  async function deleteTask(task: OfflineDownloadTask) {
-    const active = activeStatuses.has(task.status);
-    if (active && !task.remote_delete) {
-      toast.info("当前网盘官方接口不能取消进行中的离线任务");
-      return;
-    }
-    const result = await showConfirm({
-      title: active ? "取消离线下载任务" : "删除任务记录",
-      message: task.name,
-      hint: active
-        ? "这会同时删除网盘端正在执行的离线任务，但不会删除已经下载的文件。"
-        : task.remote_delete
-          ? "这会同步删除网盘端的任务历史，但不会删除已经下载的文件。"
-          : "这里只删除 LitePan 中的任务记录，不会删除网盘文件。",
-      icon: "trash",
-      confirmText: active ? "取消任务" : "删除记录",
-      cancelText: "保留",
-      danger: true,
-    }).catch(() => null);
-    if (result?.action !== "confirm") return;
-    try {
-      await offlineDownloadApi.deleteTask(task.task_id);
-      tasks.value = tasks.value.filter((item) => item.task_id !== task.task_id);
-      toast.success(active ? "离线下载任务已取消" : "任务记录已删除");
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "离线下载任务删除失败"));
     }
   }
 
@@ -240,7 +208,7 @@ export function useOfflineDownloads(deps: Deps) {
     pollTimer = window.setTimeout(async () => {
       pollTimer = undefined;
       await fetchTasks(true, true);
-    }, 5000);
+    }, pollIntervalMs);
   }
 
   function statusText(task: OfflineDownloadTask) {
@@ -281,10 +249,8 @@ export function useOfflineDownloads(deps: Deps) {
     openModal,
     closeModal,
     registerTasks,
-    registerTask,
     fetchTasks,
     refreshTasks,
-    deleteTask,
     deleteTasks,
     handlePrimaryAction,
     statusText,

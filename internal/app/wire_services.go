@@ -119,12 +119,10 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 	})
 	fuseSvc.SetUploads(uploadSvc)
 	crossTransferSvc := crosstransfer.New(crosstransfer.Options{
-		Exec:     core.exec,
-		Files:    fileSvc,
-		Playback: playbackSvc,
-		Uploads:  uploadSvc,
-		DataDir:  cfg.DataDir,
-		Log:      logs.For(logx.ModuleAPI),
+		Exec:    core.exec,
+		Files:   fileSvc,
+		Uploads: uploadSvc,
+		Log:     logs.For(logx.ModuleAPI),
 	})
 	embyProxySvc := embyproxy.New(embyproxy.Options{
 		Settings: st.settings,

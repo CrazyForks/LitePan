@@ -27,7 +27,7 @@ export function useUploadPanelActions(ctx: UploadActionsCtx) {
       store.taskPanelCategory.value = "offline";
     } else if (
       preferredCategory === "relay" ||
-      (store.activeRelayCount.value > 0 && store.runningUploadTasks.value.length === 0)
+      (store.activeRelayCount.value > 0 && store.activeUploadTasks.value.length === 0)
     ) {
       store.taskPanelCategory.value = "relay";
     } else {

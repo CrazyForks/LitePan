@@ -29,7 +29,6 @@ type UploadTaskRecord struct {
 	Message             string
 	Error               string
 	ResultJSON          string
-	RelayVisible        bool
 	ResumeDataJSON      string
 	QueueOrder          int
 	CreatedAt           float64

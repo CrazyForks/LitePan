@@ -113,7 +113,6 @@ func (db *DB) EnsureUploadTaskCrossColumns(ctx context.Context) error {
 		{name: "rel_dir", ddl: `ALTER TABLE upload_tasks ADD COLUMN rel_dir TEXT NOT NULL DEFAULT ''`},
 		{name: "phase", ddl: `ALTER TABLE upload_tasks ADD COLUMN phase TEXT NOT NULL DEFAULT ''`},
 		{name: "downloaded_bytes", ddl: `ALTER TABLE upload_tasks ADD COLUMN downloaded_bytes INTEGER NOT NULL DEFAULT 0`},
-		{name: "relay_visible", ddl: `ALTER TABLE upload_tasks ADD COLUMN relay_visible INTEGER NOT NULL DEFAULT 0`},
 	}
 	for _, item := range need {
 		if columns[item.name] {

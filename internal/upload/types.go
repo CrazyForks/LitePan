@@ -39,7 +39,6 @@ type Task struct {
 	Message             string         `json:"message"`
 	Error               string         `json:"error,omitempty"`
 	Result              map[string]any `json:"result,omitempty"`
-	RelayVisible        bool           `json:"relay_visible,omitempty"`
 	QueueOrder          int            `json:"queue_order"`
 	CreatedAt           float64        `json:"created_at"`
 	UpdatedAt           float64        `json:"updated_at"`
@@ -61,7 +60,6 @@ const (
 )
 
 const (
-	PhasePending     = "pending"
 	PhaseDownloading = "downloading"
 	PhaseUploading   = "uploading"
 )
@@ -105,7 +103,6 @@ type CreateParams struct {
 	TotalBytes        int64
 	ConflictPolicy    string
 	Phase             string
-	RelayVisible      bool
 }
 
 type BatchDeleteResult struct {

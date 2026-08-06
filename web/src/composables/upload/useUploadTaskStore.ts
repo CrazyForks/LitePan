@@ -64,11 +64,6 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
   const activeUploadTasks = computed(() =>
     displayUploadTasks.value.filter((t) => t.status === "pending" || t.status === "running"),
   );
-  const runningUploadTasks = computed(() =>
-    displayUploadTasks.value.filter((t) =>
-      ["pending", "running", "failed", "paused", "canceled"].includes(t.status),
-    ),
-  );
   const uploadTaskBadgeText = computed(() => {
     const running = activeUploadTasks.value.length;
     if (running > 0) return `上传中 ${running}`;
@@ -225,7 +220,6 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
     activeRelayCount,
     displayUploadTasks,
     activeUploadTasks,
-    runningUploadTasks,
     uploadTaskLabel,
     uploadAffectsCurrentDirectory,
     ensureUploadTaskDisplayOrder,

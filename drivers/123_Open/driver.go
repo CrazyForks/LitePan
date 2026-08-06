@@ -25,9 +25,10 @@ type Driver struct {
 	intervalGate driver.RequestIntervalGate
 	persist      driver.AuthPersistFunc
 
-	mu      sync.Mutex
-	token   string
-	refresh string
+	mu             sync.Mutex
+	token          string
+	refresh        string
+	offlineMissing map[string]int
 }
 
 func (d *Driver) SetAuthCredentials(creds domain.AuthCredentials) {

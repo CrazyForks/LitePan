@@ -42,16 +42,16 @@ type Manager struct {
 	dataDir  string
 	log      *slog.Logger
 
-	mu           sync.Mutex
-	tasks        map[string]*taskState
-	queueOrder   int
-	limit        int
+	mu               sync.Mutex
+	tasks            map[string]*taskState
+	queueOrder       int
+	limit            int
 	runningUploads   int
 	runningDownloads int
-	runCond      sync.Cond
-	subs         map[chan []byte]struct{}
-	subMu        sync.Mutex
-	tempRegistry *TempRegistry
+	runCond          sync.Cond
+	subs             map[chan []byte]struct{}
+	subMu            sync.Mutex
+	tempRegistry     *TempRegistry
 
 	resumePersistMu sync.Mutex
 	resumePersist   map[string]*time.Timer
@@ -128,10 +128,6 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (*Task, error) {
 	if localPath == "" && sourceType == SourceTypeCrossTransfer {
 		localPath = filepath.Join(m.TempDir(), id+filepath.Ext(name))
 	}
-	relayVisible := p.RelayVisible
-	if sourceType == SourceTypeCrossTransfer {
-		relayVisible = true
-	}
 	message := "等待上传"
 	if sourceType == SourceTypeCrossTransfer {
 		message = "等待源盘下载"
@@ -157,7 +153,6 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (*Task, error) {
 			Phase:             phase,
 			Message:           message,
 			TotalBytes:        p.TotalBytes,
-			RelayVisible:      relayVisible,
 			QueueOrder:        order,
 			CreatedAt:         unixFloat(now),
 			UpdatedAt:         unixFloat(now),

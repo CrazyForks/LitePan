@@ -32,7 +32,6 @@ export interface UploadTask {
   total_bytes?: number;
   message?: string;
   error?: string;
-  relay_visible?: boolean;
   result?: {
     file_id?: string;
     parent_id?: string;

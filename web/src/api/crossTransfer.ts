@@ -66,8 +66,6 @@ export interface CrossTransferRelayTask {
   target_parent_id: string;
   target_display_path: string;
   total_bytes: number;
-  method: string;
-  conflict_policy: string;
   status: string;
   phase: string;
   progress: number;
