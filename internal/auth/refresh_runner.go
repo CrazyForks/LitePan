@@ -41,7 +41,7 @@ func (s *Service) refreshUnlocked(ctx context.Context, accountID int64, caller d
 	if outcome == driver.RefreshSuccess {
 		st, _ = s.loadState(ctx, accountID)
 		s.applyTokenSchedule(drv, st)
-		now := s.nowTime()
+		now := s.now()
 		name := s.accountName(ctx, accountID)
 		if st.Status != domain.AuthActive || st.LastRefreshAt.IsZero() || now.Sub(st.LastRefreshAt) > 3*time.Second {
 			s.markSuccess(ctx, accountID, st)
@@ -81,7 +81,7 @@ func (s *Service) onCredentialsPersisted(ctx context.Context, accountID int64) {
 
 func (s *Service) applyTokenSchedule(drv driver.Driver, st *domain.AuthState) {
 	cfg := drv.Config()
-	now := s.nowTime()
+	now := s.now()
 	switch cfg.AuthType {
 	case driver.AuthToken:
 		if cfg.TokenLifetime > 0 {

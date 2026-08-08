@@ -948,7 +948,7 @@ async function start() {
     return
   }
 
-  const files = orderFilesByTree(probeFiles.value.filter(f => f.hash || f.source_file_id))
+  const files = orderFilesByTree(probeFiles.value)
   if (!files.length) {
     notify('warning', '没有可处理的文件')
     running.value = ''
@@ -1008,17 +1008,26 @@ async function start() {
             node.transferred = true
             delete node.relay
             delete node.skipped
+            delete node.transferError
           } else if (msg.mode === 'rapid') {
             node.reuse = false
             delete node.transferred
             delete node.relay
             delete node.skipped
+            delete node.transferError
           } else if (msg.mode === 'relay') {
             node.relay = true
             delete node.skipped
+            delete node.transferError
           } else if (msg.mode === 'skip' && msg.success) {
             node.skipped = true
             delete node.relay
+            delete node.transferError
+          } else if (msg.mode === 'error') {
+            node.transferError = String(msg.error || '传输失败')
+            delete node.transferred
+            delete node.relay
+            delete node.skipped
           }
           delete node.state
         }

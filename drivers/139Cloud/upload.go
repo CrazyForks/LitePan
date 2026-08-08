@@ -16,6 +16,7 @@ import (
 	"litepan/internal/driver"
 	"litepan/internal/driver/uploadutil"
 	"litepan/internal/httpx"
+	"litepan/pkg/strutil"
 )
 
 const (
@@ -123,14 +124,14 @@ func (d *Driver) UploadLocalFile(ctx context.Context, req driver.LocalUploadRequ
 			return nil, err
 		}
 		if created.RapidUpload || created.Exist {
-			finalName := firstNonEmpty(created.FileName, fileName)
+			finalName := strutil.FirstNonEmpty(created.FileName, fileName)
 			uploadutil.NotifyProgress(req.OnProgress, local.Size, local.Size, "秒传成功")
 			return &driver.LocalUploadResult{FileID: created.FileID.String(), ParentID: parentID, FileName: finalName, Size: local.Size, Message: fmt.Sprintf("文件 '%s' 秒传成功", finalName)}, nil
 		}
 		if created.FileID.String() == "" || strings.TrimSpace(created.UploadID) == "" {
 			return nil, domain.Errorf(domain.CodeDriverError, "移动云盘上传初始化未返回 fileId 或 uploadId")
 		}
-		fileName = firstNonEmpty(created.FileName, fileName)
+		fileName = strutil.FirstNonEmpty(created.FileName, fileName)
 		resume = &cloud139ResumeCtx{
 			parentID:       parentID,
 			requestedName:  requestedName,
@@ -203,7 +204,7 @@ func (d *Driver) UploadLocalFile(ctx context.Context, req driver.LocalUploadRequ
 	}, nil); err != nil {
 		return nil, err
 	}
-	finalName := firstNonEmpty(created.FileName, fileName)
+	finalName := strutil.FirstNonEmpty(created.FileName, fileName)
 	uploadutil.NotifyProgress(req.OnProgress, local.Size, local.Size, "上传成功")
 	return &driver.LocalUploadResult{FileID: created.FileID.String(), ParentID: parentID, FileName: finalName, Size: local.Size, Message: fmt.Sprintf("文件 '%s' 上传成功", finalName)}, nil
 }

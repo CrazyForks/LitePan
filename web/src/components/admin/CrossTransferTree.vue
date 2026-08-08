@@ -29,7 +29,7 @@
       <span class="t-ic file"><i class="fas fa-file"></i></span>
       <span class="t-name">{{ node.name }}</span>
       <span class="t-meta">{{ fmtSize(node.size) }}</span>
-      <span v-if="mode === 'src'" class="tag" :class="statusClass(node)">
+      <span v-if="mode === 'src'" class="tag" :class="statusClass(node)" :title="node.transferError || ''">
         <BusySpinner v-if="node.state === 'run'" :size="12" />
         <i v-else class="fas" :class="statusIcon(node)"></i>
         {{ statusText(node) }}
@@ -67,6 +67,7 @@ const statusClass = (n) => {
   if (n.transferred) return 'done'
   if (n.skipped) return 'skipped'
   if (n.relay) return 'run'
+  if (n.transferError) return 'error'
   if (n.state === 'run') return 'run'
   if (n.reuse === true) return 'ok'
   if (n.reuse === false) return 'no'
@@ -76,6 +77,7 @@ const statusIcon = (n) => {
   if (n.transferred) return 'fa-check'
   if (n.skipped) return 'fa-forward-step'
   if (n.relay) return 'fa-truck-fast'
+  if (n.transferError) return 'fa-circle-exclamation'
   if (n.state === 'run') return ''
   if (n.reuse === true) return 'fa-bolt'
   if (n.reuse === false) return 'fa-ban'
@@ -85,6 +87,7 @@ const statusText = (n) => {
   if (n.transferred) return '已转存'
   if (n.skipped) return '已跳过'
   if (n.relay) return '兜底传输中'
+  if (n.transferError) return '传输失败'
   if (n.state === 'run') return '验证中'
   if (n.reuse === true) return '可秒传'
   if (n.reuse === false) return '不可秒传'
@@ -112,6 +115,7 @@ const statusText = (n) => {
 .tag.run { color: #d97706; background: #fef3c7; }
 .tag.done { color: #16a34a; background: #dcfce7; }
 .tag.skipped { color: #64748b; background: #e2e8f0; }
+.tag.error { color: #dc2626; background: #fee2e2; }
 .tag.pending { color: #64748b; background: #f1f5f9; }
 
 :global(:root[data-skin="brutal"] .cross-transfer) .tnode,

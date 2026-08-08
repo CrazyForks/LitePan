@@ -55,7 +55,7 @@ func (d *cloudDir) Create(ctx context.Context, name string, flags uint32, _ uint
 	}
 	tmp, tmpPath, cleanup, untrack, err := createFuseTempFile(d.b.deps.Uploads, name)
 	if err != nil {
-		return nil, nil, 0, syscall.EIO
+		return nil, nil, 0, errnoFor(err)
 	}
 	node := &stagingFile{
 		b:        d.b,
@@ -172,7 +172,7 @@ func (h *stagingUploadHandle) Write(_ context.Context, data []byte, off int64) (
 		h.node.updateSize(off + int64(n))
 	}
 	if err != nil {
-		return uint32(n), syscall.EIO
+		return uint32(n), errnoFor(err)
 	}
 	return uint32(n), 0
 }
@@ -190,11 +190,11 @@ func (h *stagingUploadHandle) Flush(_ context.Context) syscall.Errno {
 		return syscall.EBADF
 	}
 	if err := h.file.Sync(); err != nil {
-		return syscall.EIO
+		return errnoFor(err)
 	}
 	st, err := h.file.Stat()
 	if err != nil {
-		return syscall.EIO
+		return errnoFor(err)
 	}
 	if h.node != nil {
 		h.node.updateFromStat(st)
@@ -226,7 +226,7 @@ func (h *stagingUploadHandle) Fsync(_ context.Context, _ uint32) syscall.Errno {
 		return syscall.EBADF
 	}
 	if err := h.file.Sync(); err != nil {
-		return syscall.EIO
+		return errnoFor(err)
 	}
 	return 0
 }

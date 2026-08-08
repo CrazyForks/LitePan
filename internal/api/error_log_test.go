@@ -30,13 +30,6 @@ func TestShouldSuppressAPIErrorLog(t *testing.T) {
 			want:       true,
 		},
 		{
-			name:       "本机跨盘任务流401静默",
-			path:       "/api/cross-transfer/relay/tasks/stream",
-			remoteAddr: "localhost:5211",
-			err:        domain.Errorf(domain.CodeAdminAuthRequired, "需要管理员权限"),
-			want:       true,
-		},
-		{
 			name:       "远端来源不静默",
 			path:       "/api/files/upload/tasks",
 			remoteAddr: "10.0.0.8:5211",

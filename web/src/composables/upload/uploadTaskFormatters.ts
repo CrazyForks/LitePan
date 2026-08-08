@@ -235,7 +235,8 @@ export async function buildUploadTaskBreadcrumb(
     const segment = directorySegments[index];
     const isLast = index === directorySegments.length - 1;
     try {
-      const res = await filesApi.list(account.id, currentParentId);
+      // 上传刚完成时父目录缓存可能仍是旧数据，直接打开必须按最新目录结构解析。
+      const res = await filesApi.list(account.id, currentParentId, { forceRefresh: true });
       const matchedFolder = res.items.find((item) => item.is_dir && item.name === segment);
       const resolvedPath = matchedFolder?.id ? String(matchedFolder.id) : isLast ? targetPath : currentParentId;
       breadcrumb.push({ id: resolvedPath, name: segment });

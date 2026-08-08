@@ -1,5 +1,3 @@
-version: "2.1"
-
 services:
   litepan:
     image: ponphil/litepan:beta
@@ -7,6 +5,9 @@ services:
     restart: unless-stopped
     ports:
       - "5211:5211"
+      # 内置 Magnet 的 TCP/uTP/DHT 监听端口；若在后台修改，需同步调整映射
+      - "42069:42069/tcp"
+      - "42069:42069/udp"
     environment:
       - TZ=Asia/Shanghai
     volumes:

@@ -9,6 +9,7 @@ import (
 
 	"litepan/internal/domain"
 	"litepan/internal/driver"
+	"litepan/pkg/strutil"
 )
 
 const (
@@ -257,7 +258,7 @@ func mapOfflineTaskUpdate(task offlineTask) (driver.OfflineTaskUpdate, bool) {
 		update.Message = "离线下载完成"
 	case 3, 5:
 		update.Status = driver.OfflineStatusFailed
-		update.Message = firstNonEmpty(strings.TrimSpace(task.ErrorMessage), strings.TrimSpace(task.Message), "离线下载失败")
+		update.Message = strutil.FirstNonEmpty(strings.TrimSpace(task.ErrorMessage), strings.TrimSpace(task.Message), "离线下载失败")
 		update.Error = offlineTaskError(task, update.Message)
 	case 4:
 		update.Status = driver.OfflineStatusRetrying
@@ -269,7 +270,7 @@ func mapOfflineTaskUpdate(task offlineTask) (driver.OfflineTaskUpdate, bool) {
 }
 
 func offlineTaskError(task offlineTask, fallback string) string {
-	message := firstNonEmpty(strings.TrimSpace(task.ErrorMessage), strings.TrimSpace(task.Message), fallback)
+	message := strutil.FirstNonEmpty(strings.TrimSpace(task.ErrorMessage), strings.TrimSpace(task.Message), fallback)
 	code := strings.TrimSpace(string(task.ErrorCode))
 	code = strings.Trim(code, `"`)
 	if code == "" || code == "0" || code == "null" {

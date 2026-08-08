@@ -4,6 +4,7 @@ package fuse
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"syscall"
@@ -358,6 +359,15 @@ func fillEntryAttr(out *fuse.EntryOut, b *backend, item domain.FileItem) {
 func errnoFor(err error) syscall.Errno {
 	if err == nil {
 		return 0
+	}
+	if errors.Is(err, syscall.ENOSPC) {
+		return syscall.ENOSPC
+	}
+	if errors.Is(err, syscall.EDQUOT) {
+		return syscall.EDQUOT
+	}
+	if errors.Is(err, syscall.EFBIG) {
+		return syscall.EFBIG
 	}
 	if ae, ok := domain.AsAppError(err); ok {
 		switch ae.Code {

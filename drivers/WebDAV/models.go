@@ -2,22 +2,23 @@ package webdav
 
 import (
 	"strings"
+	"time"
 
 	"github.com/studio-b12/gowebdav"
 
 	"litepan/internal/domain"
 )
 
-func fileToItem(path, name string, size int64, isDir bool) domain.FileItem {
+func fileToItem(path, name string, size int64, isDir bool, mod time.Time) domain.FileItem {
 	return domain.FileItem{
-		ID:     path,
-		Name:   name,
-		Size:   size,
-		IsDir:  isDir,
-		IDKind: domain.IDPath,
+		ID:      path,
+		Name:    name,
+		Size:    size,
+		IsDir:   isDir,
+		ModTime: mod,
+		IDKind:  domain.IDPath,
 	}
 }
-
 
 func mapError(err error) error {
 	if err == nil {

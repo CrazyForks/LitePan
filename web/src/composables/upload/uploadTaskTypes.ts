@@ -1,12 +1,9 @@
 import type { Ref } from "vue";
 import type { Account, FileItem } from "@/api/types";
-import type { useRelayTasks } from "@/composables/useRelayTasks";
 
 export const UPLOAD_NOTICE_KEY = "litepan:index:upload-server-transfer-notice-hidden";
 
 export type UploadCrumb = { id: string; name: string };
-export type RelayApi = ReturnType<typeof useRelayTasks>;
-
 export type UploadTaskDeps = {
   selectedAccountId: Ref<number | null>;
   selectedAccountName: Ref<string>;
@@ -31,7 +28,6 @@ export type UploadTaskDeps = {
   getRootId: (config: Record<string, unknown>) => string;
   getCurrentBreadcrumbNameParts: () => string[];
   refreshOfflineTasks: (refresh?: boolean, quiet?: boolean) => Promise<void>;
-  relay: RelayApi;
 };
 
 export type LocalUploadPayload = {

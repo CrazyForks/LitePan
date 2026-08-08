@@ -46,6 +46,13 @@ const HOMEPAGE_TAB = "homepage";
 const SERVICE_TAB = "services";
 const API_KEYS_TAB = "apiKeys";
 
+const TASK_PANEL_SETTING_KEYS = new Set([
+  "upload_task_concurrency",
+  "builtin_offline_temp_dir",
+  "builtin_offline_max_speed_mb",
+  "builtin_offline_bt_port",
+]);
+
 const SKIN_OPTIONS: { id: SkinPref; label: string; desc: string }[] = [
   { id: "default", label: "经典主题", desc: "现行品牌风格，支持深色模式与顶栏光效。" },
   { id: "brutal", label: "野兽风格", desc: "粗黑边 + 硬阴影 + 直角的高对比风格，不随深色模式变化。" },
@@ -228,7 +235,7 @@ function filterOutCacheSettings(payload: {
   items: SettingItem[];
 }) {
   const visibleItems = (payload.items ?? []).filter(
-    (it) => !isCacheSettingKey(it.key) && it.key !== "upload_task_concurrency",
+    (it) => !isCacheSettingKey(it.key) && !TASK_PANEL_SETTING_KEYS.has(it.key),
   );
   const visibleCatIds = new Set(visibleItems.map((it) => it.category));
   const visibleCategories = (payload.categories ?? []).filter((c) => visibleCatIds.has(c.id));

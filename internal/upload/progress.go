@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"litepan/pkg/speedsmoother"
+	"litepan/pkg/timeutil"
 )
 
 func (m *Manager) updateProgress(taskID string, uploaded, total int64, message string) {
@@ -48,7 +49,7 @@ func (m *Manager) updateProgress(taskID string, uploaded, total int64, message s
 	st.UploadedBytes = uploaded
 	st.TotalBytes = total
 	st.Message = message
-	st.UpdatedAt = unixFloat(now)
+	st.UpdatedAt = timeutil.UnixFloat(now)
 	m.mu.Unlock()
 	m.broadcast()
 }

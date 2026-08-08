@@ -12,6 +12,7 @@ import (
 	"litepan/internal/mediaorganize"
 	"litepan/internal/offlinedownload"
 	"litepan/internal/strm"
+	"litepan/internal/upload"
 )
 
 type accountLifecycle struct {
@@ -22,6 +23,7 @@ type accountLifecycle struct {
 	media     *mediaorganize.Service
 	favorites *favorites.Service
 	offline   *offlinedownload.Service
+	uploads   *upload.Manager
 }
 
 func (a accountLifecycle) OnAccountDisabled(ctx context.Context, accountID int64) {
@@ -85,6 +87,11 @@ func (a accountLifecycle) OnAccountDeleted(ctx context.Context, accountID int64)
 	if a.offline != nil {
 		if _, err := a.offline.RemoveTasksByAccount(ctx, accountID); err != nil {
 			return fmt.Errorf("清理离线下载任务失败: %w", err)
+		}
+	}
+	if a.uploads != nil {
+		if _, err := a.uploads.RemoveTasksByAccount(ctx, accountID); err != nil {
+			return fmt.Errorf("清理上传任务失败: %w", err)
 		}
 	}
 	return nil

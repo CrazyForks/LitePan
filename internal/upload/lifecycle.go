@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"time"
+
+	"litepan/pkg/timeutil"
 )
 
 func (m *Manager) Pause(_ context.Context, taskID string) (*Task, bool) {
@@ -12,6 +14,11 @@ func (m *Manager) Pause(_ context.Context, taskID string) (*Task, bool) {
 	if !ok {
 		m.mu.Unlock()
 		return nil, false
+	}
+	if m.stopping {
+		t := m.snapshot(st)
+		m.mu.Unlock()
+		return t, true
 	}
 	if st.Status != StatusPending && st.Status != StatusRunning {
 		t := m.snapshot(st)
@@ -28,7 +35,7 @@ func (m *Manager) Pause(_ context.Context, taskID string) (*Task, bool) {
 		st.Message = "上传已暂停"
 	}
 	st.Error = ""
-	st.UpdatedAt = unixFloat(time.Now())
+	st.UpdatedAt = timeutil.UnixFloat(time.Now())
 	cancel := st.cancel
 	snap := st
 	m.mu.Unlock()
@@ -36,7 +43,7 @@ func (m *Manager) Pause(_ context.Context, taskID string) (*Task, bool) {
 		cancel()
 	}
 	m.runCond.Broadcast()
-	m.persistTask(snap)
+	_ = m.persistTask(snap)
 	m.broadcast()
 	return m.Get(context.Background(), taskID)
 }
@@ -69,6 +76,11 @@ func (m *Manager) Resume(ctx context.Context, taskID string) (*Task, bool) {
 		m.mu.Unlock()
 		return nil, false
 	}
+	if m.stopping {
+		t := m.snapshot(st)
+		m.mu.Unlock()
+		return t, true
+	}
 	if st.Status != StatusPaused && st.Status != StatusFailed && st.Status != StatusCanceled {
 		t := m.snapshot(st)
 		m.mu.Unlock()
@@ -76,24 +88,18 @@ func (m *Manager) Resume(ctx context.Context, taskID string) (*Task, bool) {
 	}
 	if uploadNeedsLocalFile(st) {
 		if st.localPath == "" {
-			st.Status = StatusFailed
-			st.Message = "上传失败"
-			st.Error = "本地临时文件不存在，无法继续上传"
-			st.UpdatedAt = unixFloat(time.Now())
+			markMissingLocalFileFailed(st)
 			snap := st
 			m.mu.Unlock()
-			m.persistTask(snap)
+			_ = m.persistTask(snap)
 			m.broadcast()
 			return snapshotCopy(snap), true
 		}
 		if _, err := os.Stat(st.localPath); err != nil {
-			st.Status = StatusFailed
-			st.Message = "上传失败"
-			st.Error = "本地临时文件不存在，无法继续上传"
-			st.UpdatedAt = unixFloat(time.Now())
+			markMissingLocalFileFailed(st)
 			snap := st
 			m.mu.Unlock()
-			m.persistTask(snap)
+			_ = m.persistTask(snap)
 			m.broadcast()
 			return snapshotCopy(snap), true
 		}
@@ -123,7 +129,7 @@ func (m *Manager) Resume(ctx context.Context, taskID string) (*Task, bool) {
 	snap := st
 	task := m.snapshot(st)
 	m.mu.Unlock()
-	m.persistTask(snap)
+	_ = m.persistTask(snap)
 	go m.runTask(taskID)
 	m.broadcast()
 	return task, true

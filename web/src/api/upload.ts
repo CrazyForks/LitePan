@@ -14,6 +14,7 @@ export interface UploadRuntimeConfig {
   concurrency: number;
   concurrency_min?: number;
   concurrency_max?: number;
+  builtin_temp_dir?: string;
 }
 
 export const uploadApi = {

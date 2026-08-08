@@ -215,6 +215,100 @@ func TestExecuteFallbackQueuesFilesWithoutHash(t *testing.T) {
 	}
 }
 
+func TestExecuteFallbackQueuesFilesWhenRapidUploadErrors(t *testing.T) {
+	drv := &rapidOnlyDriver{
+		cleanupDriver: newCleanupDriver(),
+		uploadErrors: map[string]error{
+			"a.mkv": domain.Errorf(domain.CodeRateLimited, "目标盘今日秒传额度已用尽"),
+		},
+	}
+	service := newCleanupService(t, drv)
+	var events []StreamEvent
+
+	err := service.ExecuteStream(context.Background(), ExecuteInput{
+		SourceAccountID:   1,
+		SourceAccountName: "123",
+		SourceDriverType:  "123_open",
+		TargetAccountID:   2,
+		TargetAccountName: "189",
+		TargetDriverType:  "189_cloud",
+		TargetParentID:    "root",
+		TargetDisplayPath: "/",
+		MethodID:          "md5",
+		Fallback:          true,
+		Files: []TransferFile{
+			{SourceFileID: "source-a", RelPath: "A/a.mkv", RelDir: "A", Name: "a.mkv", Size: 1, Hash: "11111111111111111111111111111111"},
+			{SourceFileID: "source-b", RelPath: "B/b.mkv", RelDir: "B", Name: "b.mkv", Size: 1, Hash: "22222222222222222222222222222222"},
+		},
+	}, func(event StreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("兜底执行失败: %v", err)
+	}
+	if drv.uploadCalls != 2 {
+		t.Fatalf("两个文件都应尝试秒传，调用次数=%d", drv.uploadCalls)
+	}
+	if len(events) < 4 || events[1]["mode"] != "relay" || events[2]["mode"] != "relay" {
+		t.Fatalf("一个秒传报错、一个未命中时都应进入兜底队列，events=%#v", events)
+	}
+	if end := events[len(events)-1]; end["event"] != "end" || end["relay_queued"] != 2 {
+		t.Fatalf("兜底队列统计不正确: %#v", end)
+	}
+	tasks := service.uploads.List(context.Background(), 2)
+	if len(tasks) != 2 {
+		t.Fatalf("上传管理器应收到两个独立兜底任务，tasks=%#v", tasks)
+	}
+	sourceIDs := map[string]bool{}
+	for _, task := range tasks {
+		sourceIDs[task.SourceFileID] = true
+	}
+	if !sourceIDs["source-a"] || !sourceIDs["source-b"] {
+		t.Fatalf("兜底任务应完整保留两个源文件 ID，tasks=%#v", tasks)
+	}
+}
+
+func TestExecuteFallbackQueuesFileWhenTargetPreparationFails(t *testing.T) {
+	drv := newCleanupDriver()
+	drv.listErrors["root"] = domain.Errorf(domain.CodeRateLimited, "目标盘接口限流")
+	service := newCleanupService(t, drv)
+	var events []StreamEvent
+
+	err := service.ExecuteStream(context.Background(), ExecuteInput{
+		SourceAccountID:   1,
+		SourceAccountName: "123",
+		SourceDriverType:  "123_open",
+		TargetAccountID:   2,
+		TargetAccountName: "189",
+		TargetDriverType:  "189_cloud",
+		TargetParentID:    "root",
+		TargetDisplayPath: "/",
+		MethodID:          "md5",
+		Fallback:          true,
+		Files: []TransferFile{{
+			SourceFileID: "source-a",
+			RelPath:      "A/a.mkv",
+			RelDir:       "A",
+			Name:         "a.mkv",
+			Size:         1,
+			Hash:         "11111111111111111111111111111111",
+		}},
+	}, func(event StreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("兜底执行失败: %v", err)
+	}
+	if len(events) < 3 || events[1]["mode"] != "relay" {
+		t.Fatalf("目标盘前置检查失败时仍应创建兜底任务，events=%#v", events)
+	}
+	if tasks := service.uploads.List(context.Background(), 2); len(tasks) != 1 || tasks[0].SourceFileID != "source-a" {
+		t.Fatalf("上传管理器应收到完整兜底任务，tasks=%#v", tasks)
+	}
+}
+
 func TestScanSourceDeepTreeDoesNotDeadlock(t *testing.T) {
 	drv := newCleanupDriver()
 	parentID := ""
@@ -460,11 +554,15 @@ func (d *probeOnlyDriver) RapidUploadByHash(context.Context, driver.RapidUploadR
 
 type rapidOnlyDriver struct {
 	*cleanupDriver
-	uploadCalls int
+	uploadCalls  int
+	uploadErrors map[string]error
 }
 
-func (d *rapidOnlyDriver) RapidUploadByHash(context.Context, driver.RapidUploadRequest) (*driver.RapidUploadResult, error) {
+func (d *rapidOnlyDriver) RapidUploadByHash(_ context.Context, req driver.RapidUploadRequest) (*driver.RapidUploadResult, error) {
 	d.uploadCalls++
+	if err := d.uploadErrors[req.FileName]; err != nil {
+		return nil, err
+	}
 	return &driver.RapidUploadResult{Reuse: false}, nil
 }
 

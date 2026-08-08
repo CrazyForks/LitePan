@@ -5,7 +5,17 @@ import (
 	"encoding/hex"
 	"sort"
 	"time"
+
+	"litepan/pkg/timeutil"
 )
+
+// markMissingLocalFileFailed 把因本地文件缺失而无法继续的任务标记为失败。
+func markMissingLocalFileFailed(st *taskState) {
+	st.Status = StatusFailed
+	st.Message = "上传失败"
+	st.Error = "本地临时文件不存在，无法继续上传"
+	st.UpdatedAt = timeutil.UnixFloat(time.Now())
+}
 
 func (m *Manager) patch(taskID string, fn func(*taskState)) {
 	m.mu.Lock()
@@ -15,10 +25,10 @@ func (m *Manager) patch(taskID string, fn func(*taskState)) {
 		return
 	}
 	fn(st)
-	st.UpdatedAt = unixFloat(time.Now())
+	st.UpdatedAt = timeutil.UnixFloat(time.Now())
 	snap := st
 	m.mu.Unlock()
-	m.persistTask(snap)
+	_ = m.persistTask(snap)
 	m.broadcast()
 }
 

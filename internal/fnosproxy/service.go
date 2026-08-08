@@ -23,8 +23,10 @@ import (
 	"litepan/internal/domain"
 	"litepan/internal/httpx"
 	"litepan/internal/playback"
+	"litepan/internal/proxybase"
 	"litepan/internal/settings"
 	"litepan/internal/strm"
+	"litepan/pkg/strutil"
 )
 
 const (
@@ -37,10 +39,7 @@ var (
 	playbackInfoPathRE   = regexp.MustCompile(`(?i)^(?:/?emby)?/?Items/([^/]+)/PlaybackInfo$`)
 	itemFilePathRE       = regexp.MustCompile(`(?i)^(?:/?emby)?/?Items/([^/]+)/(Download|File)$`)
 	baseHTMLPlayerPathRE = regexp.MustCompile(`(?i)^(?:/?emby)?/?web/modules/htmlvideoplayer/basehtmlplayer\.js$`)
-	strmPlayPathRE       = regexp.MustCompile(`(?i)^/api/strm/play/(\d+)/([^/]+)/t/([^/]+)/n/([^/?#\s]+)(?:/s/([^/?#\s]+))?$`)
 	htmlCrossOriginRE    = regexp.MustCompile(`mediaSource\.IsRemote\s*&&\s*(?:"DirectPlay"\s*===\s*playMethod|playMethod\s*===\s*"DirectPlay")\s*\?\s*null\s*:\s*"anonymous"`)
-	hopByHopHeaderNames  = map[string]struct{}{"connection": {}, "keep-alive": {}, "proxy-authenticate": {}, "proxy-authorization": {}, "te": {}, "trailers": {}, "transfer-encoding": {}, "upgrade": {}, "host": {}}
-	testRequestTimeout   = 20 * time.Second
 	playbackInfoRetries  = 2
 	playbackInfoRetryGap = 500 * time.Millisecond
 )
@@ -138,7 +137,7 @@ func (s *Service) Snapshot(r *http.Request) Config {
 	cfg := s.configFromSettings()
 	cfg.StrmDir = s.strmDir
 	if cfg.Port != "" {
-		cfg.ProxyURL = publicBase(r, cfg.Port)
+		cfg.ProxyURL = proxybase.PublicBase(r, cfg.Port)
 	}
 	s.mu.Lock()
 	cfg.Running = s.server != nil
@@ -155,7 +154,7 @@ func (s *Service) Update(ctx context.Context, in UpdateRequest) (Config, error) 
 	if err != nil {
 		return Config{}, err
 	}
-	port, err := normalizeOptionalPort(in.Port)
+	port, err := proxybase.NormalizeOptionalPort(in.Port)
 	if err != nil {
 		return Config{}, err
 	}
@@ -212,7 +211,7 @@ func (s *Service) TestConfig(ctx context.Context, cfg Config) error {
 	if strings.TrimSpace(cfg.FnosURL) == "" {
 		return domain.Errorf(domain.CodeValidation, "请先填写飞牛影视地址")
 	}
-	testCtx, cancel := context.WithTimeout(ctx, testRequestTimeout)
+	testCtx, cancel := context.WithTimeout(ctx, proxybase.TestRequestTimeout)
 	defer cancel()
 	candidates := []string{
 		cfg.FnosURL + "/System/Info/Public",
@@ -250,7 +249,7 @@ func ConfigFromUpdate(in UpdateRequest) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	port, err := normalizeOptionalPort(in.Port)
+	port, err := proxybase.NormalizeOptionalPort(in.Port)
 	if err != nil {
 		return Config{}, err
 	}
@@ -357,7 +356,7 @@ func (s *Service) configFromSettings() Config {
 }
 
 func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
-	if strmPlayPathRE.MatchString(r.URL.Path) {
+	if proxybase.StrmPlayPathRE.MatchString(r.URL.Path) {
 		s.serveSTRM(w, r)
 		return
 	}
@@ -410,7 +409,7 @@ func (s *Service) serveSTRM(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "STRM playback is unavailable", http.StatusNotImplemented)
 		return
 	}
-	m := strmPlayPathRE.FindStringSubmatch(r.URL.Path)
+	m := proxybase.StrmPlayPathRE.FindStringSubmatch(r.URL.Path)
 	if len(m) < 5 {
 		http.NotFound(w, r)
 		return
@@ -490,7 +489,7 @@ func (s *Service) serveLitePanPlayback(w http.ResponseWriter, r *http.Request, p
 	if !isLitePanSTRMURL(playURL) {
 		return false
 	}
-	accountID, fileID, ok := parseLitePanSTRMURL(playURL)
+	accountID, fileID, ok := proxybase.ParseLitePanSTRMURL(playURL)
 	if !ok {
 		s.log.Warn("飞牛反代无法解析 LitePan STRM", "url", playURL)
 		http.Error(w, "invalid litepan strm url", http.StatusBadGateway)
@@ -683,7 +682,7 @@ func (s *Service) rewriteStrmMediaSource(mediaSource map[string]any, itemID stri
 	playURL := s.readStrmURL(rawPath, cfg)
 	s.rememberSource(mediaSourceID, itemID, rawPath, playURL)
 	s.prewarmPlayback(playURL, r.UserAgent())
-	id := firstNonEmpty(itemID, stripMediaSourcePrefix(mediaSourceID))
+	id := strutil.FirstNonEmpty(itemID, stripMediaSourcePrefix(mediaSourceID))
 	mediaSource["SupportsDirectStream"] = true
 	mediaSource["SupportsDirectPlay"] = true
 	mediaSource["SupportsTranscoding"] = false
@@ -724,25 +723,8 @@ func proxiedVideoPath(r *http.Request, itemID, mediaSourceID string) string {
 	return "/Videos/" + itemID + "/stream?" + q.Encode()
 }
 
-func parseLitePanSTRMURL(value string) (int64, string, bool) {
-	path := litepanPath(value)
-	m := strmPlayPathRE.FindStringSubmatch(path)
-	if len(m) < 3 {
-		return 0, "", false
-	}
-	accountID, err := strconv.ParseInt(m[1], 10, 64)
-	if err != nil || accountID <= 0 {
-		return 0, "", false
-	}
-	fileID, err := strm.DecodeFileKey(m[2])
-	if err != nil || fileID == "" {
-		return 0, "", false
-	}
-	return accountID, fileID, true
-}
-
 func strmFileNameFromPlayURL(playURL string) string {
-	m := strmPlayPathRE.FindStringSubmatch(litepanPath(playURL))
+	m := proxybase.StrmPlayPathRE.FindStringSubmatch(proxybase.LitePanPath(playURL))
 	if len(m) < 5 {
 		return ""
 	}
@@ -751,15 +733,6 @@ func strmFileNameFromPlayURL(playURL string) string {
 		return m[4]
 	}
 	return name
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 // withEmbyAPIPrefix 保证飞牛 API 走 /emby 前缀，避免 POST 落到 SPA HTML。
@@ -920,7 +893,7 @@ func (s *Service) prewarmPlayback(playURL, ua string) {
 	if s.playback == nil {
 		return
 	}
-	accountID, fileID, ok := parseLitePanSTRMURL(playURL)
+	accountID, fileID, ok := proxybase.ParseLitePanSTRMURL(playURL)
 	if !ok {
 		return
 	}
@@ -1073,7 +1046,7 @@ func (s *Service) readStrmURL(rawPath string, cfg Config) string {
 			continue
 		}
 		for _, rawLine := range strings.Split(string(data), "\n") {
-			line := cleanWrappedURL(rawLine)
+			line := proxybase.CleanWrappedURL(rawLine)
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue
 			}
@@ -1214,75 +1187,8 @@ func normalizeFnosURL(raw string, required bool) (string, error) {
 	return v, nil
 }
 
-func normalizeOptionalPort(raw string) (string, error) {
-	v := strings.TrimSpace(raw)
-	if v == "" {
-		return "", nil
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 1 || n > 65535 {
-		return "", domain.Errorf(domain.CodeValidation, "反代端口必须是 1-65535")
-	}
-	return strconv.Itoa(n), nil
-}
-
-func publicBase(r *http.Request, port string) string {
-	if r == nil {
-		if port == "" {
-			return ""
-		}
-		return "http://127.0.0.1:" + port
-	}
-	scheme := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
-	if scheme == "" {
-		scheme = "http"
-		if r.TLS != nil {
-			scheme = "https"
-		}
-	}
-	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
-	if host == "" {
-		host = r.Host
-	}
-	if port != "" {
-		if h, _, err := net.SplitHostPort(host); err == nil {
-			host = net.JoinHostPort(h, port)
-		} else {
-			host = net.JoinHostPort(strings.Split(host, ":")[0], port)
-		}
-	}
-	return scheme + "://" + host
-}
-
 func isLitePanSTRMURL(value string) bool {
-	return strings.HasPrefix(strings.ToLower(litepanPath(value)), "/api/strm/play/")
-}
-
-func litepanPath(value string) string {
-	text := cleanWrappedURL(value)
-	if text == "" {
-		return ""
-	}
-	if strings.HasPrefix(text, "http://") || strings.HasPrefix(text, "https://") {
-		u, err := url.Parse(text)
-		if err != nil {
-			return ""
-		}
-		return u.EscapedPath()
-	}
-	pathOnly, _, _ := strings.Cut(text, "?")
-	return pathOnly
-}
-
-func cleanWrappedURL(value string) string {
-	text := strings.TrimSpace(value)
-	for {
-		trimmed := strings.Trim(text, "`\"' ")
-		if trimmed == text {
-			return trimmed
-		}
-		text = strings.TrimSpace(trimmed)
-	}
+	return strings.HasPrefix(strings.ToLower(proxybase.LitePanPath(value)), "/api/strm/play/")
 }
 
 func extractItemID(fullPath string) string {
@@ -1300,7 +1206,7 @@ func extractItemID(fullPath string) string {
 func responseHeaders(src http.Header) http.Header {
 	dst := make(http.Header, len(src))
 	for k, values := range src {
-		if _, skip := hopByHopHeaderNames[strings.ToLower(k)]; skip {
+		if _, skip := proxybase.HopByHopHeaderNames[strings.ToLower(k)]; skip {
 			continue
 		}
 		for _, v := range values {
@@ -1312,7 +1218,7 @@ func responseHeaders(src http.Header) http.Header {
 
 func copyRequestHeaders(dst, src http.Header, identity bool) {
 	for k, values := range src {
-		if _, skip := hopByHopHeaderNames[strings.ToLower(k)]; skip {
+		if _, skip := proxybase.HopByHopHeaderNames[strings.ToLower(k)]; skip {
 			continue
 		}
 		for _, v := range values {
@@ -1341,7 +1247,7 @@ func writeUpstreamBody(w http.ResponseWriter, resp *http.Response, body []byte) 
 func rewriteLocation(location string, cfg Config, r *http.Request) string {
 	fnosURL := strings.TrimRight(cfg.FnosURL, "/")
 	if strings.HasPrefix(location, fnosURL) {
-		return strings.TrimRight(publicBase(r, cfg.Port), "/") + strings.TrimPrefix(location, fnosURL)
+		return strings.TrimRight(proxybase.PublicBase(r, cfg.Port), "/") + strings.TrimPrefix(location, fnosURL)
 	}
 	return location
 }

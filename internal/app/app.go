@@ -16,12 +16,13 @@ import (
 	"litepan/internal/config"
 	"litepan/internal/driver"
 	"litepan/internal/embyproxy"
-	"litepan/internal/fnosproxy"
 	"litepan/internal/eventbus"
 	"litepan/internal/file"
+	"litepan/internal/fnosproxy"
 	"litepan/internal/fusemount"
 	"litepan/internal/logx"
 	"litepan/internal/mediaorganize"
+	"litepan/internal/offlinedownload"
 	"litepan/internal/playback"
 	"litepan/internal/settings"
 	"litepan/internal/store"
@@ -31,29 +32,30 @@ import (
 
 // App 按依赖顺序构造与关闭各子系统。
 type App struct {
-	cfg            config.Config
-	logs           *logx.Manager
-	log            *slog.Logger
-	db             *store.DB
-	store          *store.Store
-	settings       *settings.Service
-	bus            *eventbus.Bus
-	cache          *cache.Service
-	drivers        *driver.Manager
-	auth           *auth.Service
-	sched          *auth.Scheduler
-	files          *file.Service
-	uploads        *upload.Manager
-	playback       *playback.Service
-	strm           *strm.Service
-	mediaOrganize  *mediaorganize.Service
-	automation     *automation.Service
-	fuse           *fusemount.Service
-	cacheRetention *cacheretention.Service
-	embyProxy      *embyproxy.Service
-	fnosProxy      *fnosproxy.Service
-	httpSrv        *http.Server
-	httpBaseCancel context.CancelFunc
+	cfg              config.Config
+	logs             *logx.Manager
+	log              *slog.Logger
+	db               *store.DB
+	store            *store.Store
+	settings         *settings.Service
+	bus              *eventbus.Bus
+	cache            *cache.Service
+	drivers          *driver.Manager
+	auth             *auth.Service
+	sched            *auth.Scheduler
+	files            *file.Service
+	uploads          *upload.Manager
+	offlineDownloads *offlinedownload.Service
+	playback         *playback.Service
+	strm             *strm.Service
+	mediaOrganize    *mediaorganize.Service
+	automation       *automation.Service
+	fuse             *fusemount.Service
+	cacheRetention   *cacheretention.Service
+	embyProxy        *embyproxy.Service
+	fnosProxy        *fnosproxy.Service
+	httpSrv          *http.Server
+	httpBaseCancel   context.CancelFunc
 }
 
 // Options 是构造 App 所需的外部依赖。
@@ -100,29 +102,30 @@ func New(ctx context.Context, opts Options) (*App, error) {
 
 	log.Info("应用初始化完成", "db", cfg.DBPath, "log_level", logs.Level())
 	return &App{
-		cfg:            cfg,
-		logs:           logs,
-		log:            log,
-		db:             stBundle.db,
-		store:          stBundle.store,
-		settings:       stBundle.settings,
-		bus:            core.bus,
-		cache:          core.cache,
-		drivers:        core.drivers,
-		auth:           core.auth,
-		sched:          core.sched,
-		files:          svc.files,
-		uploads:        svc.uploads,
-		playback:       svc.playback,
-		strm:           svc.strm,
-		mediaOrganize:  svc.mediaOrganize,
-		automation:     svc.automation,
-		fuse:           svc.fuse,
-		cacheRetention: svc.cacheRetention,
-		embyProxy:      svc.embyProxy,
-		fnosProxy:      svc.fnosProxy,
-		httpSrv:        httpSrv,
-		httpBaseCancel: httpBaseCancel,
+		cfg:              cfg,
+		logs:             logs,
+		log:              log,
+		db:               stBundle.db,
+		store:            stBundle.store,
+		settings:         stBundle.settings,
+		bus:              core.bus,
+		cache:            core.cache,
+		drivers:          core.drivers,
+		auth:             core.auth,
+		sched:            core.sched,
+		files:            svc.files,
+		uploads:          svc.uploads,
+		offlineDownloads: svc.offlineDownloads,
+		playback:         svc.playback,
+		strm:             svc.strm,
+		mediaOrganize:    svc.mediaOrganize,
+		automation:       svc.automation,
+		fuse:             svc.fuse,
+		cacheRetention:   svc.cacheRetention,
+		embyProxy:        svc.embyProxy,
+		fnosProxy:        svc.fnosProxy,
+		httpSrv:          httpSrv,
+		httpBaseCancel:   httpBaseCancel,
 	}, nil
 }
 
@@ -149,6 +152,9 @@ func (a *App) Run(ctx context.Context) error {
 	if a.uploads != nil {
 		a.uploads.StartTempCleanup(ctx)
 	}
+	if a.offlineDownloads != nil {
+		a.offlineDownloads.Start(ctx)
+	}
 	if a.embyProxy != nil {
 		a.embyProxy.Start(ctx)
 	}
@@ -173,9 +179,11 @@ func (a *App) Run(ctx context.Context) error {
 }
 
 const (
-	shutdownHTTPBudget = 8 * time.Second
-	shutdownFuseBudget = 12 * time.Second
-	shutdownBusBudget  = 3 * time.Second
+	shutdownHTTPBudget    = 8 * time.Second
+	shutdownFuseBudget    = 12 * time.Second
+	shutdownBusBudget     = 3 * time.Second
+	shutdownOfflineBudget = 20 * time.Second
+	shutdownUploadBudget  = 20 * time.Second
 )
 
 // Shutdown 按依赖反序优雅关闭：先停 HTTP，再卸载 FUSE，最后关 DB。
@@ -183,9 +191,6 @@ func (a *App) Shutdown(ctx context.Context) error {
 	a.log.Info("正在优雅关闭各组件")
 	if a.sched != nil {
 		a.sched.Stop()
-	}
-	if a.uploads != nil {
-		a.uploads.FlushPendingResume()
 	}
 	if a.httpBaseCancel != nil {
 		a.httpBaseCancel()
@@ -207,10 +212,25 @@ func (a *App) Shutdown(ctx context.Context) error {
 		}
 	}
 
+	if a.offlineDownloads != nil {
+		offlineCtx, cancelOffline := context.WithTimeout(ctx, shutdownOfflineBudget)
+		if err := a.offlineDownloads.Stop(offlineCtx); err != nil {
+			a.log.Warn("内置离线下载停止异常", "err", err)
+		}
+		cancelOffline()
+	}
 	if a.fuse != nil {
 		fuseCtx, cancelFuse := context.WithTimeout(ctx, shutdownFuseBudget)
 		a.fuse.Stop(fuseCtx)
 		cancelFuse()
+	}
+	if a.uploads != nil {
+		uploadCtx, cancelUpload := context.WithTimeout(ctx, shutdownUploadBudget)
+		if err := a.uploads.Stop(uploadCtx); err != nil {
+			a.log.Warn("上传任务停止异常", "err", err)
+		}
+		cancelUpload()
+		a.uploads.FlushPendingResume()
 	}
 
 	busCtx, cancelBus := context.WithTimeout(ctx, shutdownBusBudget)

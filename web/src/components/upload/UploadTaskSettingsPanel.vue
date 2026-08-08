@@ -1,7 +1,23 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
+import { getApiErrorMessage } from "@/api/client";
+import { fetchSettings, saveSettings, type SettingItem } from "@/api/settings";
 import { uploadApi } from "@/api/upload";
 import { toast } from "@/composables/useToast";
+import AccountFolderField from "@/components/admin/AccountFolderField.vue";
+import LocalDirBrowserModal from "@/components/common/LocalDirBrowserModal.vue";
+
+const OFFLINE_KEYS = {
+  tempDir: "builtin_offline_temp_dir",
+  maxSpeed: "builtin_offline_max_speed_mb",
+  btPort: "builtin_offline_bt_port",
+} as const;
+
+type OfflineForm = {
+  tempDir: string;
+  maxSpeed: string | number;
+  btPort: string | number;
+};
 
 const props = defineProps<{
   open: boolean;
@@ -14,222 +30,568 @@ const emit = defineEmits<{
 }>();
 
 const loading = ref(true);
-const saving = ref(false);
-const concurrency = ref(3);
-const minLimit = ref(1);
-const maxLimit = ref(5);
 const loadedOnce = ref(false);
+const transferSaving = ref(false);
+const transferConcurrency = ref(3);
+const transferMin = ref(1);
+const transferMax = ref(5);
 
-async function loadRuntime() {
-  loading.value = !loadedOnce.value;
-  try {
-    const data = await uploadApi.getRuntime();
-    concurrency.value = data.concurrency;
-    minLimit.value = data.concurrency_min ?? 1;
-    maxLimit.value = data.concurrency_max ?? 5;
-    emit("update:serverConcurrency", data.concurrency);
-    loadedOnce.value = true;
-  } catch {
-    concurrency.value = props.serverConcurrency || 3;
-    loadedOnce.value = true;
-  } finally {
-    loading.value = false;
-  }
+const offlineSaving = ref(false);
+const offlineAvailable = ref(true);
+const offlineLoadError = ref("");
+const offlineItems = ref(new Map<string, SettingItem>());
+const resolvedTempDir = ref("");
+const localDirPickerOpen = ref(false);
+const offlineForm = reactive<OfflineForm>({
+  tempDir: "data/builtin_offline",
+  maxSpeed: "0",
+  btPort: "42069",
+});
+const savedOfflineForm = reactive<OfflineForm>({ ...offlineForm });
+
+function itemRange(key: string, fallbackMin: number, fallbackMax: number) {
+  const item = offlineItems.value.get(key);
+  return {
+    min: item?.min ?? fallbackMin,
+    max: item?.max ?? fallbackMax,
+  };
 }
 
-async function applyConcurrency(next: number) {
-  if (next < minLimit.value || next > maxLimit.value || saving.value) return;
-  const prev = concurrency.value;
-  concurrency.value = next;
-  saving.value = true;
+const maxSpeedRange = computed(() => itemRange(OFFLINE_KEYS.maxSpeed, 0, 10240));
+const btPortRange = computed(() => itemRange(OFFLINE_KEYS.btPort, 0, 65535));
+
+function settingValue(item: SettingItem, fallback: string) {
+  const value = String(item.value || item.default || "").trim();
+  return value || fallback;
+}
+
+function applyOfflineItems(items: SettingItem[]) {
+  const byKey = new Map(items.map((item) => [item.key, item]));
+  if (Object.values(OFFLINE_KEYS).some((key) => !byKey.has(key))) {
+    offlineAvailable.value = false;
+    offlineLoadError.value = "当前版本的内置下载设置不完整";
+    return;
+  }
+
+  offlineItems.value = byKey;
+  const next: OfflineForm = {
+    tempDir: settingValue(byKey.get(OFFLINE_KEYS.tempDir)!, "data/builtin_offline"),
+    maxSpeed: settingValue(byKey.get(OFFLINE_KEYS.maxSpeed)!, "0"),
+    btPort: settingValue(byKey.get(OFFLINE_KEYS.btPort)!, "42069"),
+  };
+  Object.assign(offlineForm, next);
+  Object.assign(savedOfflineForm, next);
+  offlineAvailable.value = true;
+  offlineLoadError.value = "";
+}
+
+async function loadPanelSettings() {
+  loading.value = !loadedOnce.value;
+  const [runtimeResult, settingsResult] = await Promise.allSettled([
+    uploadApi.getRuntime(),
+    fetchSettings(),
+  ]);
+
+  if (runtimeResult.status === "fulfilled") {
+    const data = runtimeResult.value;
+    transferConcurrency.value = data.concurrency;
+    transferMin.value = data.concurrency_min ?? 1;
+    transferMax.value = data.concurrency_max ?? 5;
+    resolvedTempDir.value = data.builtin_temp_dir ?? "";
+    emit("update:serverConcurrency", data.concurrency);
+  } else {
+    transferConcurrency.value = props.serverConcurrency || 3;
+  }
+
+  if (settingsResult.status === "fulfilled") {
+    applyOfflineItems(settingsResult.value.items);
+  } else {
+    offlineAvailable.value = false;
+    offlineLoadError.value = getApiErrorMessage(settingsResult.reason, "读取内置下载设置失败");
+  }
+
+  loadedOnce.value = true;
+  loading.value = false;
+}
+
+async function applyTransferConcurrency(next: number) {
+  if (next < transferMin.value || next > transferMax.value || transferSaving.value) return;
+  const previous = transferConcurrency.value;
+  transferConcurrency.value = next;
+  transferSaving.value = true;
   try {
     const data = await uploadApi.updateRuntime(next);
-    concurrency.value = data.concurrency;
+    transferConcurrency.value = data.concurrency;
     emit("update:serverConcurrency", data.concurrency);
-    toast.success("传输并发已更新");
-  } catch (e) {
-    concurrency.value = prev;
-    toast.error(e instanceof Error ? e.message : "更新传输并发失败");
+    toast.success("任务并发已更新");
+  } catch (error) {
+    transferConcurrency.value = previous;
+    toast.error(getApiErrorMessage(error, "更新任务并发失败"));
   } finally {
-    saving.value = false;
+    transferSaving.value = false;
   }
 }
 
-function step(delta: number) {
-  void applyConcurrency(concurrency.value + delta);
+function stepTransfer(delta: number) {
+  void applyTransferConcurrency(transferConcurrency.value + delta);
+}
+
+function integerError(value: string | number, min: number, max: number, label: string) {
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) return `${label}需为整数`;
+  const number = Number(raw);
+  if (number < min || number > max) return `${label}范围为 ${min}–${max}`;
+  return "";
+}
+
+const maxSpeedError = computed(() => {
+  const range = maxSpeedRange.value;
+  return integerError(offlineForm.maxSpeed, range.min, range.max, "下载限速");
+});
+const btPortError = computed(() => {
+  const range = btPortRange.value;
+  return integerError(offlineForm.btPort, range.min, range.max, "磁力下载端口");
+});
+const tempDirDisplay = computed(
+  () => resolvedTempDir.value || String(offlineForm.tempDir || "").trim(),
+);
+
+async function saveOfflineValue(
+  key: (typeof OFFLINE_KEYS)[keyof typeof OFFLINE_KEYS],
+  value: string,
+  successMessage: string,
+) {
+  if (!offlineAvailable.value || offlineSaving.value) return false;
+  offlineSaving.value = true;
+  try {
+    const payload = await saveSettings({ [key]: value });
+    applyOfflineItems(payload.items);
+    toast.success(successMessage);
+    return true;
+  } catch (error) {
+    Object.assign(offlineForm, savedOfflineForm);
+    toast.error(getApiErrorMessage(error, "保存任务设置失败"));
+    return false;
+  } finally {
+    offlineSaving.value = false;
+  }
+}
+
+async function commitMaxSpeed() {
+  if (maxSpeedError.value) {
+    toast.error(maxSpeedError.value);
+    Object.assign(offlineForm, savedOfflineForm);
+    return;
+  }
+  const value = String(Number(offlineForm.maxSpeed));
+  if (value === String(savedOfflineForm.maxSpeed)) return;
+  await saveOfflineValue(OFFLINE_KEYS.maxSpeed, value, "下载限速已更新");
+}
+
+async function commitBTPort() {
+  if (btPortError.value) {
+    toast.error(btPortError.value);
+    Object.assign(offlineForm, savedOfflineForm);
+    return;
+  }
+  const value = String(Number(offlineForm.btPort));
+  if (value === String(savedOfflineForm.btPort)) return;
+  await saveOfflineValue(OFFLINE_KEYS.btPort, value, "磁力下载端口已更新");
+}
+
+async function selectTempDir(path: string) {
+  localDirPickerOpen.value = false;
+  const value = path.trim();
+  if (!value || value === tempDirDisplay.value) return;
+  offlineForm.tempDir = value;
+  if (await saveOfflineValue(OFFLINE_KEYS.tempDir, value, "临时下载目录已更新")) {
+    resolvedTempDir.value = value;
+  }
 }
 
 watch(
   () => props.open,
   (open) => {
-    if (open && !loadedOnce.value) void loadRuntime();
+    if (open && !loading.value && (!loadedOnce.value || !offlineAvailable.value)) {
+      void loadPanelSettings();
+    }
+    if (!open) localDirPickerOpen.value = false;
   },
 );
 
 onMounted(() => {
-  void loadRuntime();
+  void loadPanelSettings();
 });
 </script>
 
 <template>
-  <div class="upload-settings-panel" role="dialog" aria-label="传输设置" @click.stop>
-    <div class="upload-settings-panel__head">
-      <span class="upload-settings-panel__title">传输设置</span>
-      <button type="button" class="upload-settings-panel__close" aria-label="关闭" @click="emit('close')">
-        ×
-      </button>
-    </div>
+  <Transition name="task-settings">
+    <div
+      v-if="open && !loading"
+      class="upload-settings-panel task-settings"
+      role="dialog"
+      aria-label="任务设置"
+      @click.stop
+    >
+      <header class="task-settings__head">
+        <strong>任务设置</strong>
+        <button type="button" aria-label="关闭" @click="emit('close')">×</button>
+      </header>
 
-    <div v-if="loading" class="upload-settings-panel__loading">加载中…</div>
-    <section v-else class="upload-settings-panel__body">
-      <p class="upload-settings-panel__hint">上传队列和跨盘下载队列分别最多并发几个任务，跨盘下载完成后会交棒到上传队列继续执行。</p>
-      <div class="upload-settings-panel__stepper">
-        <button
-          type="button"
-          class="upload-settings-panel__step"
-          :disabled="saving || concurrency <= minLimit"
-          aria-label="减少并发"
-          @click="step(-1)"
-        >
-          −
-        </button>
-        <div class="upload-settings-panel__value-wrap">
-          <span class="upload-settings-panel__value">{{ concurrency }}</span>
-          <span class="upload-settings-panel__unit">个任务</span>
+      <div class="task-settings__body">
+        <p v-if="!offlineAvailable" class="task-settings__error">
+          {{ offlineLoadError }}，关闭后重新打开可重试。
+        </p>
+
+        <div class="task-settings__grid">
+          <div class="task-settings__item task-settings__item--stepper">
+            <div class="task-settings__label">
+              <strong>任务并发</strong>
+              <small>三个队列独立使用此上限</small>
+            </div>
+            <div class="task-settings__stepper">
+              <button
+                type="button"
+                :disabled="transferSaving || transferConcurrency <= transferMin"
+                aria-label="减少任务并发"
+                @click="stepTransfer(-1)"
+              >
+                −
+              </button>
+              <span>{{ transferConcurrency }}</span>
+              <button
+                type="button"
+                :disabled="transferSaving || transferConcurrency >= transferMax"
+                aria-label="增加任务并发"
+                @click="stepTransfer(1)"
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          <label class="task-settings__item task-settings__field">
+            <span class="task-settings__label">
+              <strong>下载限速</strong>
+              <small :class="{ 'is-error': maxSpeedError }">{{ maxSpeedError || "0 = 不限速" }}</small>
+            </span>
+            <span class="task-settings__input">
+              <input
+                v-model="offlineForm.maxSpeed"
+                type="number"
+                inputmode="numeric"
+                step="1"
+                :min="maxSpeedRange.min"
+                :max="maxSpeedRange.max"
+                :disabled="!offlineAvailable || offlineSaving"
+                @change="commitMaxSpeed"
+                @blur="commitMaxSpeed"
+                @keyup.enter="commitMaxSpeed"
+              />
+              <span>MB/s</span>
+            </span>
+          </label>
+
+          <label class="task-settings__item task-settings__item--wide task-settings__field">
+            <span class="task-settings__label">
+              <strong>磁力下载端口</strong>
+              <small
+                :class="{ 'is-error': btPortError }"
+                title="用于磁力/BT 下载连接其他节点；Docker Bridge 网络需映射同一 TCP/UDP 端口，Host 网络无需映射"
+              >
+                {{ btPortError || "用于连接 BT 下载节点" }}
+              </small>
+            </span>
+            <span class="task-settings__input">
+              <input
+                v-model="offlineForm.btPort"
+                type="number"
+                inputmode="numeric"
+                step="1"
+                :min="btPortRange.min"
+                :max="btPortRange.max"
+                :disabled="!offlineAvailable || offlineSaving"
+                @change="commitBTPort"
+                @blur="commitBTPort"
+                @keyup.enter="commitBTPort"
+              />
+            </span>
+          </label>
+
+          <div class="task-settings__item task-settings__item--wide task-settings__path">
+            <div class="task-settings__label">
+              <strong>临时下载目录</strong>
+              <small>选择容器内目录</small>
+            </div>
+            <AccountFolderField
+              :display="tempDirDisplay"
+              :title="tempDirDisplay"
+              placeholder="选择临时下载目录"
+              browse-label="浏览"
+              @browse="localDirPickerOpen = true"
+            />
+          </div>
         </div>
-        <button
-          type="button"
-          class="upload-settings-panel__step"
-          :disabled="saving || concurrency >= maxLimit"
-          aria-label="增加并发"
-          @click="step(1)"
-        >
-          +
-        </button>
       </div>
-      <p class="upload-settings-panel__range">可调范围 {{ minLimit }}–{{ maxLimit }}，修改后立即生效</p>
-    </section>
-  </div>
+    </div>
+  </Transition>
+
+  <LocalDirBrowserModal
+    :open="localDirPickerOpen"
+    :initial-path="tempDirDisplay"
+    title="选择临时下载目录"
+    confirm-text="使用当前目录"
+    @close="localDirPickerOpen = false"
+    @select="selectTempDir"
+  />
 </template>
 
 <style scoped>
-.upload-settings-panel {
+.task-settings {
   position: absolute;
-  top: calc(100% + 8px);
+  top: calc(100% + 10px);
   right: 0;
-  left: auto;
-  width: 248px;
-  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  width: 720px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(min(720px, 86vh) - 58px);
+  overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 16px;
+  background: var(--surface);
   box-shadow: var(--shadow-pop);
   z-index: 130;
-  overflow: hidden;
 }
 
-.upload-settings-panel__head {
+.task-settings-enter-active,
+.task-settings-leave-active {
+  transform-origin: top right;
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.task-settings-enter-from,
+.task-settings-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.985);
+}
+
+.task-settings__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
+  flex: none;
+  padding: 16px 20px;
   border-bottom: 1px solid var(--border-soft);
   background: var(--panel-head-bg, var(--surface-sunken));
 }
 
-.upload-settings-panel__title {
-  font-size: 13px;
-  font-weight: 700;
+.task-settings__head strong {
   color: var(--text);
+  font-size: 18px;
 }
 
-.upload-settings-panel__close {
-  border: none;
+.task-settings__head button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
   background: transparent;
   color: var(--text-muted);
-  font-size: 18px;
+  font-size: 25px;
   line-height: 1;
   cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 6px;
 }
 
-.upload-settings-panel__close:hover {
+.task-settings__head button:hover {
   background: var(--surface-hover);
   color: var(--text);
 }
 
-.upload-settings-panel__loading {
-  padding: 20px 12px;
-  font-size: 13px;
-  color: var(--text-muted);
-  text-align: center;
+.task-settings__body {
+  flex: 1;
+  min-height: 0;
+  padding: 18px;
+  overflow-y: auto;
 }
 
-.upload-settings-panel__body {
-  padding: 12px;
+.task-settings__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
 }
 
-.upload-settings-panel__hint {
-  margin: 0 0 12px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-muted);
+.task-settings__item {
+  min-width: 0;
+  min-height: 78px;
+  padding: 15px 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--surface-sunken);
 }
 
-.upload-settings-panel__stepper {
+.task-settings__item--wide {
+  grid-column: 1 / -1;
+}
+
+.task-settings__item--stepper,
+.task-settings__field {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
+  justify-content: space-between;
+  gap: 16px;
 }
 
-.upload-settings-panel__step {
-  width: 34px;
-  height: 34px;
+.task-settings__label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.task-settings__label strong {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.task-settings__label small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-settings__label small.is-error,
+.task-settings__error {
+  color: var(--danger);
+}
+
+.task-settings__stepper {
+  display: grid;
+  grid-template-columns: 38px 44px 38px;
+  align-items: center;
+  flex: none;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--surface-sunken);
+  background: var(--surface);
+}
+
+.task-settings__stepper button {
+  height: 38px;
+  border: 0;
+  background: transparent;
   color: var(--text);
-  font-size: 18px;
-  line-height: 1;
+  font-size: 20px;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.upload-settings-panel__step:hover:not(:disabled) {
+.task-settings__stepper button:hover:not(:disabled) {
   background: var(--surface-hover);
-  border-color: color-mix(in srgb, var(--brand) 35%, var(--border));
 }
 
-.upload-settings-panel__step:disabled {
-  opacity: 0.45;
+.task-settings__stepper button:disabled {
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
-.upload-settings-panel__value-wrap {
-  min-width: 72px;
-  text-align: center;
-}
-
-.upload-settings-panel__value {
-  display: block;
-  font-size: 22px;
-  font-weight: 700;
+.task-settings__stepper span {
   color: var(--text);
-  line-height: 1.1;
-}
-
-.upload-settings-panel__unit {
-  display: block;
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.upload-settings-panel__range {
-  margin: 10px 0 0;
-  font-size: 11px;
-  color: var(--text-muted);
+  font-size: 15px;
+  font-weight: 700;
   text-align: center;
+}
+
+.task-settings__input {
+  display: flex;
+  align-items: center;
+  width: 154px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.task-settings__input:focus-within {
+  border-color: var(--brand);
+}
+
+.task-settings__input input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.task-settings__input > span {
+  flex: none;
+  padding-right: 11px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.task-settings__path {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.task-settings__path :deep(.account-folder-field) {
+  min-height: 42px;
+}
+
+.task-settings__error {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  font-size: 12px;
+}
+
+:global(.upload-task-panel.is-expanded) .task-settings {
+  max-height: calc(100vh - 64px);
+}
+
+@media (max-width: 768px) {
+  .task-settings {
+    max-height: calc(100vh - 78px);
+  }
+
+  .task-settings__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .task-settings {
+    max-width: calc(100vw - 20px);
+  }
+
+  .task-settings__head {
+    padding: 14px 16px;
+  }
+
+  .task-settings__body {
+    padding: 12px;
+  }
+
+  .task-settings__item {
+    padding: 13px;
+  }
+
+  .task-settings__path {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

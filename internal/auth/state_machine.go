@@ -28,7 +28,7 @@ func (s *Service) markSuccess(ctx context.Context, accountID int64, st *domain.A
 	st.LastError = ""
 	st.LastFailureKind = ""
 	st.NextRetryAt = time.Time{}
-	st.LastRefreshAt = s.nowTime()
+	st.LastRefreshAt = s.now()
 	if err := s.authStates.Upsert(ctx, st); err != nil {
 		s.log.Warn("auth mark success", "account", accountID, "err", err)
 		return
@@ -49,7 +49,7 @@ func (s *Service) RecoverAccount(ctx context.Context, accountID int64) {
 }
 
 func (s *Service) handleFailure(ctx context.Context, accountID int64, st *domain.AuthState, outcome driver.RefreshOutcome, caller driver.RefreshCaller, cause error) {
-	now := s.nowTime()
+	now := s.now()
 	kind := classifyFailureKind(outcome, cause)
 	if outcome == driver.RefreshFatal {
 		msg := "认证令牌已失效，需要重新授权"
@@ -110,7 +110,7 @@ func (s *Service) toTokenExpired(ctx context.Context, accountID int64, st *domai
 	st.Status = domain.AuthTokenExpired
 	st.LastError = msg
 	st.LastFailureKind = domain.AuthFailureAuth
-	st.NextRetryAt = s.nowTime().Add(failedRetryCooldown)
+	st.NextRetryAt = s.now().Add(failedRetryCooldown)
 	if err := s.authStates.Upsert(ctx, st); err != nil {
 		s.log.Warn("auth token expired", "account", accountID, "err", err)
 	}
@@ -122,7 +122,7 @@ func (s *Service) toFailed(ctx context.Context, accountID int64, st *domain.Auth
 	st.Status = domain.AuthFailed
 	st.LastError = msg
 	st.LastFailureKind = domain.AuthFailureAuth
-	st.NextRetryAt = s.nowTime().Add(failedRetryCooldown)
+	st.NextRetryAt = s.now().Add(failedRetryCooldown)
 	if err := s.authStates.Upsert(ctx, st); err != nil {
 		s.log.Warn("auth failed", "account", accountID, "err", err)
 	}

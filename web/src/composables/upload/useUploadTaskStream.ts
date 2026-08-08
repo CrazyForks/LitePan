@@ -54,8 +54,9 @@ export function useUploadTaskStream(deps: UploadTaskDeps, store: UploadTaskStore
       store.uploadTasks.value.forEach(store.ensureUploadTaskDisplayOrder);
       store.pruneLocalUploadTasksByStableKeys(store.uploadTasks.value.map((task) => getUploadTaskStableKey(task)));
       refreshCurrentDirectoryForNewSuccess(store.uploadTasks.value);
-      if (store.activeUploadTasks.value.length === 0 && !store.uploadTaskPanelOpen.value) {
-        stopUploadTaskPolling();
+      if (!store.uploadTaskPanelOpen.value) {
+        if (store.activeUploadTasks.value.length > 0) startUploadTaskPolling();
+        else stopUploadTaskPolling();
       }
       await hooks.startScheduler();
     } catch (e) {

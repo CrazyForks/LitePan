@@ -30,6 +30,8 @@ type UploadTaskRecord struct {
 	Error               string
 	ResultJSON          string
 	ResumeDataJSON      string
+	CleanupLocalMode    string
+	CleanupLocalPath    string
 	QueueOrder          int
 	CreatedAt           float64
 	UpdatedAt           float64

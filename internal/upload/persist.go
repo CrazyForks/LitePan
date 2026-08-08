@@ -9,16 +9,18 @@ import (
 	"litepan/internal/domain"
 )
 
-func (m *Manager) persistTask(st *taskState) {
+func (m *Manager) persistTask(st *taskState) error {
 	if m.repo == nil || st == nil {
-		return
+		return nil
 	}
 	rec := recordFromState(st)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := m.repo.Upsert(ctx, rec); err != nil && m.log != nil {
+	err := m.repo.Upsert(ctx, rec)
+	if err != nil && m.log != nil {
 		m.log.Warn("upload task persist failed", "task_id", st.TaskID, "err", err)
 	}
+	return err
 }
 
 func (m *Manager) deletePersisted(taskID string) {
@@ -60,14 +62,10 @@ func (m *Manager) restoreTasks() {
 		}
 		if uploadNeedsLocalFile(st) {
 			if st.localPath == "" {
-				st.Status = StatusFailed
-				st.Message = "上传失败"
-				st.Error = "本地临时文件不存在，无法继续上传"
+				markMissingLocalFileFailed(st)
 				changed = true
 			} else if _, err := os.Stat(st.localPath); err != nil {
-				st.Status = StatusFailed
-				st.Message = "上传失败"
-				st.Error = "本地临时文件不存在，无法继续上传"
+				markMissingLocalFileFailed(st)
 				changed = true
 			}
 		}
@@ -87,7 +85,7 @@ func (m *Manager) restoreTasks() {
 	}
 	m.mu.Unlock()
 	for _, st := range persist {
-		m.persistTask(st)
+		_ = m.persistTask(st)
 	}
 	for _, id := range resume {
 		go m.runTask(id)
@@ -151,6 +149,8 @@ func recordFromState(st *taskState) *domain.UploadTaskRecord {
 		Error:               st.Error,
 		ResultJSON:          resultJSON,
 		ResumeDataJSON:      resumeJSON,
+		CleanupLocalMode:    st.CleanupLocalMode,
+		CleanupLocalPath:    st.CleanupLocalPath,
 		QueueOrder:          st.QueueOrder,
 		CreatedAt:           st.CreatedAt,
 		UpdatedAt:           st.UpdatedAt,
@@ -186,6 +186,8 @@ func stateFromRecord(row *domain.UploadTaskRecord) *taskState {
 			TotalBytes:          row.TotalBytes,
 			Message:             row.Message,
 			Error:               row.Error,
+			CleanupLocalMode:    row.CleanupLocalMode,
+			CleanupLocalPath:    row.CleanupLocalPath,
 			QueueOrder:          row.QueueOrder,
 			CreatedAt:           row.CreatedAt,
 			UpdatedAt:           row.UpdatedAt,
@@ -210,6 +212,15 @@ func stateFromRecord(row *domain.UploadTaskRecord) *taskState {
 	}
 	if st.SourceType == "" {
 		st.SourceType = SourceTypeManual
+	}
+	if st.CleanupLocalPath == "" {
+		st.CleanupLocalPath = st.localPath
+	}
+	if st.CleanupLocalMode == "" && st.localPath != "" {
+		switch st.SourceType {
+		case SourceTypeManual, SourceTypeCrossTransfer:
+			st.CleanupLocalMode = CleanupLocalFileOnSuccess
+		}
 	}
 	if st.Phase == "" {
 		if st.SourceType == SourceTypeCrossTransfer {

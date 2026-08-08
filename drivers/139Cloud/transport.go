@@ -18,6 +18,7 @@ import (
 	"litepan/internal/domain"
 	"litepan/internal/driver"
 	"litepan/internal/httpx"
+	"litepan/pkg/strutil"
 )
 
 const (
@@ -104,7 +105,7 @@ func (d *Driver) personalCloudHost(ctx context.Context) (string, error) {
 	}
 	for _, item := range route.RoutePolicyList {
 		if strings.EqualFold(strings.TrimSpace(item.ModName), "personal") {
-			host = strings.TrimRight(firstNonEmpty(item.HTTPSURL, item.HTTPURL), "/")
+			host = strings.TrimRight(strutil.FirstNonEmpty(item.HTTPSURL, item.HTTPURL), "/")
 			if host != "" {
 				d.mu.Lock()
 				d.personalHost = host
@@ -249,13 +250,4 @@ func isAuthError(err error) bool {
 
 func parseInt64(value string) (int64, error) {
 	return strconv.ParseInt(strings.TrimSpace(value), 10, 64)
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
 }

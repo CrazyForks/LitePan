@@ -8,7 +8,6 @@ import { useFileSort } from "@/composables/useFileSort";
 import { fileKey, useFileSelection } from "@/composables/useFileSelection";
 import { useFileActions, type DeleteMode } from "@/composables/useFileActions";
 import { showConfirm } from "@/composables/useConfirm";
-import { useRelayTasks } from "@/composables/useRelayTasks";
 import { useUploadTasks } from "@/composables/useUploadTasks";
 import { useOfflineDownloads } from "@/composables/useOfflineDownloads";
 import { toast } from "@/composables/useToast";
@@ -57,7 +56,7 @@ const route = useRoute();
 const router = useRouter();
 const { accounts, currentAccountId, breadcrumb, favorites, favoritesOpen, files, filesResortTick, loading, refreshing, error, responseTime, cacheRate, currentParentId } =
   storeToRefs(store);
-const { isAdmin } = storeToRefs(auth);
+const { isAdmin, loaded: authLoaded } = storeToRefs(auth);
 
 const view = ref<"list" | "grid">(
   (localStorage.getItem("litepan_view") as "list" | "grid") || "list",
@@ -73,6 +72,7 @@ const favoriteNameInputRef = ref<FocusableInput | null>(null);
 const favoriteNameMode = ref<"create" | "rename">("create");
 const favoriteRenameTargetId = ref("");
 const browserBootstrapping = ref(true);
+const browserContextReady = ref(false);
 const favoritesTransitionReady = ref(false);
 const nameAlignOpen = ref(false);
 const nameAlignLoading = ref(false);
@@ -94,6 +94,13 @@ const floatingAccountSwitchEnabled = computed(
 
 const browserFileLoading = computed(() => browserBootstrapping.value || loading.value);
 const showBrowserFrame = computed(() => browserBootstrapping.value || accounts.value.length > 0);
+const browseAccessMode = computed<"pending" | "admin" | "public">(() => {
+  if (!authLoaded.value) return "pending";
+  return isAdmin.value ? "admin" : "public";
+});
+const browserRenderKey = computed(
+  () => `${browseAccessMode.value}:${currentAccountId.value ?? "none"}`,
+);
 
 const selectedAccountName = computed(
   () => accounts.value.find((a) => a.id === currentAccountId.value)?.name || "",
@@ -137,7 +144,6 @@ const fileActions = useFileActions({
   reloadFiles: (opts) => store.loadFiles({ ...opts, silent: true }),
 });
 
-const relay = useRelayTasks();
 const offline = useOfflineDownloads({
   selectedAccountId: currentAccountId,
   currentParentId,
@@ -165,7 +171,6 @@ const uploadApi = useUploadTasks({
   getRootId,
   getCurrentBreadcrumbNameParts,
   refreshOfflineTasks: (refresh = true, quiet = false) => offline.fetchTasks(refresh, quiet),
-  relay,
 });
 const { uploadTaskPanelOpen } = uploadApi;
 const transferTaskText = computed(() => {
@@ -824,9 +829,26 @@ watch([currentAccountId, breadcrumb], () => {
   persistBrowserLocation();
 }, { deep: true });
 
-watch(currentAccountId, () => {
-  void offline.loadCapability();
+watch([currentAccountId, isAdmin], ([, admin]) => {
+  void offline.loadCapability(admin ? currentAccountId.value : null);
 }, { immediate: true });
+
+watch(browseAccessMode, async (mode, prevMode) => {
+  if (!browserContextReady.value || mode === "pending" || mode === prevMode) return;
+  await store.loadAccounts({ reconcile: true });
+  await store.loadFavorites(undefined, { silent: true });
+  selectedIds.value = [];
+  activePreview.value = null;
+  if (!accounts.value.length) return;
+  if (currentAccountId.value == null) {
+    await store.resetToDefaultAccount();
+    return;
+  }
+  await store.loadFiles({ forceRefresh: true, silent: true });
+  if (error.value) {
+    await store.resetToDefaultAccount();
+  }
+});
 
 onMounted(async () => {
   // 守卫进入首页时已拉取过认证状态，有缓存则跳过，避免重复的 /auth/status 往返。
@@ -850,6 +872,13 @@ onMounted(async () => {
   window.requestAnimationFrame(() => {
     favoritesTransitionReady.value = true;
   });
+  if (isAdmin.value) {
+    void Promise.allSettled([
+      uploadApi.fetchUploadTasks(),
+      offline.fetchTasks(false, true),
+    ]);
+  }
+  browserContextReady.value = true;
   void restoreTaskPanelFromRoute();
 });
 
@@ -969,6 +998,7 @@ onUnmounted(() => {
 
         <div class="browser__main">
           <FileTable
+            :key="browserRenderKey"
             :files="files"
             :view="view"
             :loading="browserFileLoading"
@@ -1089,7 +1119,7 @@ onUnmounted(() => {
       @created="handleOfflineTasksCreated"
     />
 
-    <TaskPanel v-if="uploadTaskPanelOpen" :upload-api="uploadApi" :relay="relay" :offline="offline" />
+    <TaskPanel v-if="uploadTaskPanelOpen" :upload-api="uploadApi" :offline="offline" />
 
     <FilePreviewHost
       v-if="activePreview && currentAccountId != null"
@@ -1133,7 +1163,7 @@ onUnmounted(() => {
 }
 .browser__content {
   display: grid;
-  grid-template-columns: 0 minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 0;
 }
 .browser__content--with-favorites {

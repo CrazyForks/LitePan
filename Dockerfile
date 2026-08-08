@@ -51,7 +51,7 @@ ENV LITEPAN_DATA_DIR=/app/data \
     LITEPAN_LOG_LEVEL=info \
     TZ=Asia/Shanghai
 
-EXPOSE 5211
+EXPOSE 5211 42069/tcp 42069/udp
 
 VOLUME ["/app/data", "/app/strm", "/app/mounts"]
 

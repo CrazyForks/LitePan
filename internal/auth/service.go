@@ -78,8 +78,6 @@ func NewService(opts Options) *Service {
 	return s
 }
 
-func (s *Service) nowTime() time.Time { return s.now() }
-
 // Gate 返回被动刷新闸门（与 Service 共享状态）。
 func (s *Service) Gate() *Gate { return &Gate{svc: s} }
 

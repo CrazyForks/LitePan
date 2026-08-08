@@ -2,6 +2,8 @@ package upload
 
 import (
 	"time"
+
+	"litepan/pkg/timeutil"
 )
 
 const resumePersistDebounce = 2 * time.Second
@@ -23,7 +25,7 @@ func (m *Manager) applyResumeState(taskID string, state map[string]any) {
 	if v, ok := mapInt(state["progress"]); ok {
 		st.Progress = v
 	}
-	st.UpdatedAt = unixFloat(time.Now())
+	st.UpdatedAt = timeutil.UnixFloat(time.Now())
 	m.mu.Unlock()
 	m.scheduleResumePersist(taskID)
 }
@@ -82,7 +84,7 @@ func (m *Manager) flushResumePersist(taskID string) {
 	}
 	snap := st
 	m.mu.Unlock()
-	m.persistTask(snap)
+	_ = m.persistTask(snap)
 }
 
 func resumedProgress(st *taskState) (progress int, uploaded int64) {

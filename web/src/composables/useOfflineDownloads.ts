@@ -49,7 +49,7 @@ export function useOfflineDownloads(deps: Deps) {
 
   const activeTasks = computed(() => tasks.value.filter((task) => activeStatuses.has(task.status)));
   const failedTasks = computed(() => tasks.value.filter((task) => task.status === "failed"));
-  const successfulTasks = computed(() => tasks.value.filter((task) => task.status === "success"));
+  const successfulTasks = computed(() => tasks.value.filter((task) => task.status === "success" && task.provider_kind !== "builtin"));
 
   async function loadCapability(accountId = deps.selectedAccountId.value) {
     const request = ++capabilityRequest;
@@ -99,6 +99,7 @@ export function useOfflineDownloads(deps: Deps) {
       (task) =>
         before.get(task.task_id) !== "success" &&
         task.status === "success" &&
+        task.provider_kind !== "builtin" &&
         task.account_id === deps.selectedAccountId.value &&
         sameParent(task.target_parent_id, deps.currentParentId.value),
     );
@@ -212,6 +213,11 @@ export function useOfflineDownloads(deps: Deps) {
   }
 
   function statusText(task: OfflineDownloadTask) {
+    if (task.provider_kind === "builtin") {
+      if (task.status === "running" && task.phase === "verifying") return "校验中";
+      if (task.status === "running" && task.phase === "handoff") return "准备上传";
+      if (task.status === "success") return "已转入上传";
+    }
     switch (task.status) {
       case "pending": return "等待中";
       case "running": return "下载中";
@@ -223,12 +229,60 @@ export function useOfflineDownloads(deps: Deps) {
   }
 
   function sourceLabel(task: OfflineDownloadTask) {
+    const providerPrefix = task.provider_kind === "builtin" ? "内置" : "原生";
     if (task.source_kind === "bt") return "BT";
     try {
-      return new URL(task.source).protocol.replace(":", "").toUpperCase();
+      return `${providerPrefix} ${new URL(task.source).protocol.replace(":", "").toUpperCase()}`;
     } catch {
-      return "链接";
+      return `${providerPrefix} 链接`;
     }
+  }
+
+  function providerLabel(task: OfflineDownloadTask) {
+    return task.provider_kind === "builtin" ? "内置" : "原生";
+  }
+
+  function magnetDiagnosticsText(task: OfflineDownloadTask) {
+    if (task.provider_kind !== "builtin" || task.executor_type !== "url_magnet") return "";
+    const diagnostics = task.magnet_diagnostics;
+    if (!diagnostics) return "";
+    const parts: string[] = [];
+    const active = diagnostics.active_peers || 0;
+    const pending = diagnostics.pending_peers || 0;
+    const total = diagnostics.total_peers || 0;
+    const sources = active || total || pending;
+    parts.push(`来源 ${sources}`);
+    parts.push(`做种 ${diagnostics.connected_seeders || 0}`);
+    parts.push(`节点 ${diagnostics.dht_good_nodes || diagnostics.dht_nodes || 0}`);
+    return parts.join(" · ");
+  }
+
+  function detailText(task: OfflineDownloadTask) {
+    if (task.error) {
+      const message = String(task.error).replace(/^[A-Z_]+:\s*/, "");
+      if (message.includes("获取磁力文件信息超时") || message.includes("获取磁力元数据超时")) {
+        return "磁力文件信息获取超时，请稍后重试";
+      }
+      return message;
+    }
+    const diagnosticsText = magnetDiagnosticsText(task);
+    if (diagnosticsText && task.message) return `${task.message} · ${diagnosticsText}`;
+    return diagnosticsText || task.message || "";
+  }
+
+  function speedText(task: OfflineDownloadTask) {
+    if (task.provider_kind !== "builtin") return "-";
+    const speed = Number(task.speed_bytes || 0);
+    if (!(speed > 0)) return "-";
+    const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+    let value = speed;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex += 1;
+    }
+    const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+    return `${value.toFixed(digits)} ${units[unitIndex]}`;
   }
 
   onUnmounted(() => {
@@ -255,6 +309,10 @@ export function useOfflineDownloads(deps: Deps) {
     handlePrimaryAction,
     statusText,
     sourceLabel,
+    providerLabel,
+    magnetDiagnosticsText,
+    detailText,
+    speedText,
   };
 }
 

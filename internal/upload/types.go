@@ -39,6 +39,8 @@ type Task struct {
 	Message             string         `json:"message"`
 	Error               string         `json:"error,omitempty"`
 	Result              map[string]any `json:"result,omitempty"`
+	CleanupLocalMode    string         `json:"cleanup_local_mode,omitempty"`
+	CleanupLocalPath    string         `json:"cleanup_local_path,omitempty"`
 	QueueOrder          int            `json:"queue_order"`
 	CreatedAt           float64        `json:"created_at"`
 	UpdatedAt           float64        `json:"updated_at"`
@@ -55,8 +57,9 @@ const (
 )
 
 const (
-	SourceTypeManual        = "manual"
-	SourceTypeCrossTransfer = "cross_transfer"
+	SourceTypeManual         = "manual"
+	SourceTypeCrossTransfer  = "cross_transfer"
+	SourceTypeOfflineHandoff = "offline_handoff"
 )
 
 const (
@@ -64,9 +67,12 @@ const (
 	PhaseUploading   = "uploading"
 )
 
-func unixFloat(t time.Time) float64 {
-	return float64(t.UnixNano()) / 1e9
-}
+const (
+	CleanupLocalNone          = ""
+	CleanupLocalFileOnSuccess = "file_on_success"
+	CleanupLocalPathOnSuccess = "path_on_success"
+	CleanupLocalTreeOnSuccess = "tree_on_success"
+)
 
 type taskState struct {
 	Task
@@ -100,9 +106,27 @@ type CreateParams struct {
 	TargetPath        string
 	TargetDisplayPath string
 	LocalPath         string
+	CleanupLocalMode  string
+	CleanupLocalPath  string
 	TotalBytes        int64
 	ConflictPolicy    string
 	Phase             string
+}
+
+type ServerLocalCreateParams struct {
+	ClientTaskID      string
+	AccountID         int64
+	AccountName       string
+	DriverType        string
+	FileName          string
+	DisplayName       string
+	TargetPath        string
+	TargetDisplayPath string
+	LocalPath         string
+	CleanupLocalMode  string
+	CleanupLocalPath  string
+	TotalBytes        int64
+	ConflictPolicy    string
 }
 
 type BatchDeleteResult struct {

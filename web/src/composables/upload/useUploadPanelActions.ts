@@ -14,13 +14,11 @@ export type UploadActionsCtx = {
 
 export function useUploadPanelActions(ctx: UploadActionsCtx) {
   const { deps, store, stream } = ctx;
-  const { connectRelayStream, disconnectRelayStream, fetchRelayTasks } = deps.relay;
 
   async function openUploadTaskPanel(preferredCategory: "" | "relay" | "offline" = "") {
     store.uploadTaskPanelOpen.value = true;
     await Promise.all([
       stream.fetchUploadTasks(),
-      fetchRelayTasks(),
       deps.refreshOfflineTasks(true, true),
     ]);
     if (preferredCategory === "offline") {
@@ -34,7 +32,6 @@ export function useUploadPanelActions(ctx: UploadActionsCtx) {
       store.taskPanelCategory.value = "upload";
     }
     stream.connectUploadTaskStream();
-    connectRelayStream(true);
     if (typeof EventSource === "undefined") {
       stream.startUploadTaskPolling();
     }
@@ -43,7 +40,6 @@ export function useUploadPanelActions(ctx: UploadActionsCtx) {
   function closeUploadTaskPanel() {
     store.uploadTaskPanelOpen.value = false;
     stream.disconnectUploadTaskStream();
-    disconnectRelayStream();
     if (store.activeUploadTasks.value.length === 0) stream.stopUploadTaskPolling();
   }
 

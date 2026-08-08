@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -53,9 +54,9 @@ type blockingResumeDriver struct {
 }
 
 type blockingCrossTransferDriver struct {
-	resolved chan string
-	started  chan string
-	release  chan struct{}
+	resolved  chan string
+	started   chan string
+	release   chan struct{}
 	serverURL string
 }
 
@@ -64,9 +65,103 @@ type queuedUploadDriver struct {
 	releases map[string]chan struct{}
 }
 
+type toggleUploadDriver struct {
+	mu   sync.Mutex
+	fail map[string]bool
+}
+
+type cancelUploadDriver struct {
+	started  chan struct{}
+	canceled chan struct{}
+}
+
+func (d *toggleUploadDriver) Config() driver.Config      { return driver.Config{Name: "mock"} }
+func (d *toggleUploadDriver) GetAddition() any           { return &struct{}{} }
+func (d *toggleUploadDriver) Init(context.Context) error { return nil }
+func (d *toggleUploadDriver) Drop(context.Context) error { return nil }
+func (d *toggleUploadDriver) Ping(context.Context) error { return nil }
+func (d *toggleUploadDriver) ListFiles(context.Context, string) ([]domain.FileItem, error) {
+	return nil, nil
+}
+
+func (d *cancelUploadDriver) Config() driver.Config      { return driver.Config{Name: "mock"} }
+func (d *cancelUploadDriver) GetAddition() any           { return &struct{}{} }
+func (d *cancelUploadDriver) Init(context.Context) error { return nil }
+func (d *cancelUploadDriver) Drop(context.Context) error { return nil }
+func (d *cancelUploadDriver) Ping(context.Context) error { return nil }
+func (d *cancelUploadDriver) ListFiles(context.Context, string) ([]domain.FileItem, error) {
+	return nil, nil
+}
+func (d *cancelUploadDriver) UploadLocalFile(ctx context.Context, _ driver.LocalUploadRequest) (*driver.LocalUploadResult, error) {
+	close(d.started)
+	<-ctx.Done()
+	close(d.canceled)
+	return nil, ctx.Err()
+}
+func (d *toggleUploadDriver) UploadLocalFile(_ context.Context, req driver.LocalUploadRequest) (*driver.LocalUploadResult, error) {
+	d.mu.Lock()
+	failed := d.fail[req.FileName]
+	d.mu.Unlock()
+	if failed {
+		return nil, errors.New("mock upload failed")
+	}
+	return &driver.LocalUploadResult{
+		FileID: req.FileName + "-id", ParentID: req.ParentID, FileName: req.FileName,
+		Size: 4, Message: "上传成功",
+	}, nil
+}
+
+func (d *toggleUploadDriver) setFailed(name string, failed bool) {
+	d.mu.Lock()
+	d.fail[name] = failed
+	d.mu.Unlock()
+}
+
+type failingUploadTaskRepo struct {
+	mu      sync.Mutex
+	rows    map[string]*domain.UploadTaskRecord
+	upserts int
+	failAt  int
+}
+
+func (r *failingUploadTaskRepo) Upsert(_ context.Context, rec *domain.UploadTaskRecord) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.upserts++
+	if r.upserts == r.failAt {
+		return errors.New("mock persist failed")
+	}
+	copy := *rec
+	r.rows[rec.TaskID] = &copy
+	return nil
+}
+
+func (r *failingUploadTaskRepo) Delete(_ context.Context, taskID string) error {
+	r.mu.Lock()
+	delete(r.rows, taskID)
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *failingUploadTaskRepo) List(context.Context) ([]*domain.UploadTaskRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]*domain.UploadTaskRecord, 0, len(r.rows))
+	for _, row := range r.rows {
+		copy := *row
+		out = append(out, &copy)
+	}
+	return out, nil
+}
+
 type priorityCrossTransferDriver struct {
 	resolved  chan string
 	serverURL string
+}
+
+type rangeDownloadDriver struct {
+	serverURL string
+	size      int64
 }
 
 func (d *blockingCrossTransferDriver) Config() driver.Config      { return driver.Config{Name: "mock"} }
@@ -154,6 +249,18 @@ func (d *priorityCrossTransferDriver) UploadLocalFile(_ context.Context, req dri
 		Size:     4,
 		Message:  "上传成功",
 	}, nil
+}
+
+func (d *rangeDownloadDriver) Config() driver.Config      { return driver.Config{Name: "mock"} }
+func (d *rangeDownloadDriver) GetAddition() any           { return &struct{}{} }
+func (d *rangeDownloadDriver) Init(context.Context) error { return nil }
+func (d *rangeDownloadDriver) Drop(context.Context) error { return nil }
+func (d *rangeDownloadDriver) Ping(context.Context) error { return nil }
+func (d *rangeDownloadDriver) ListFiles(context.Context, string) ([]domain.FileItem, error) {
+	return nil, nil
+}
+func (d *rangeDownloadDriver) ResolveDownload(context.Context, driver.DownloadRequest) (*domain.DownloadInfo, error) {
+	return &domain.DownloadInfo{URL: d.serverURL, Size: d.size}, nil
 }
 
 func (d *blockingResumeDriver) Config() driver.Config      { return driver.Config{Name: "mock"} }
@@ -535,6 +642,467 @@ func TestResumePendingUploadTaskRunsBeforeNormalPending(t *testing.T) {
 	}
 }
 
+func TestOfflineHandoffUploadSuccessRemovesSourceDirectory(t *testing.T) {
+	drv := &queuedUploadDriver{started: make(chan string, 1)}
+	m := NewManager(Options{
+		Exec:     driverexec.New(fakeProvider{drv: drv}, nil),
+		Accounts: fakeUploadAccounts{},
+		DataDir:  t.TempDir(),
+	})
+	sourceDir := filepath.Join(t.TempDir(), "builtin_offline", "task-1")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sourceFile := filepath.Join(sourceDir, "movie.mkv")
+	if err := os.WriteFile(sourceFile, []byte("12345678"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	task, err := m.CreateServerLocalTask(context.Background(), ServerLocalCreateParams{
+		AccountID:         1,
+		AccountName:       "测试账号",
+		DriverType:        "mock",
+		FileName:          "movie.mkv",
+		DisplayName:       "movie.mkv",
+		TargetPath:        "0",
+		TargetDisplayPath: "/资料",
+		LocalPath:         sourceFile,
+		CleanupLocalMode:  CleanupLocalPathOnSuccess,
+		CleanupLocalPath:  sourceDir,
+		TotalBytes:        8,
+		ConflictPolicy:    "overwrite",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		got, ok := m.Get(context.Background(), task.TaskID)
+		if ok && got.Status == StatusSuccess {
+			if _, err := os.Stat(sourceDir); !os.IsNotExist(err) {
+				t.Fatalf("source dir still exists: %v", err)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("离线交棒上传任务未完成")
+}
+
+func waitUploadStatus(t *testing.T, m *Manager, taskID string, statuses ...string) *Task {
+	t.Helper()
+	wanted := make(map[string]struct{}, len(statuses))
+	for _, status := range statuses {
+		wanted[status] = struct{}{}
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if task, ok := m.Get(context.Background(), taskID); ok {
+			if _, matched := wanted[task.Status]; matched {
+				return task
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("任务 %s 未在超时前进入状态 %v", taskID, statuses)
+	return nil
+}
+
+func TestOfflineHandoffBatchKeepsFailedFileAndCleansTreeAfterRetry(t *testing.T) {
+	driver := &toggleUploadDriver{fail: map[string]bool{"b.mkv": true}}
+	bus := eventbus.New(nil)
+	t.Cleanup(func() { _ = bus.Close(context.Background()) })
+	completed := make(chan eventbus.OfflineDownloadCompleted, 2)
+	eventbus.Subscribe(bus, func(_ context.Context, event eventbus.OfflineDownloadCompleted) {
+		completed <- event
+	})
+	m := NewManager(Options{
+		Exec: driverexec.New(fakeProvider{drv: driver}, nil), Accounts: fakeUploadAccounts{},
+		Bus: bus, DataDir: t.TempDir(),
+	})
+
+	root := filepath.Join(t.TempDir(), "builtin_offline", "group-1")
+	direct := filepath.Join(root, "合集", "a.mkv")
+	nested := filepath.Join(root, "合集", "season-1", "b.mkv")
+	if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(direct, []byte("aaaa"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(nested, []byte("bbbb"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tasks, err := m.CreateServerLocalTasks(context.Background(), []ServerLocalCreateParams{
+		{
+			ClientTaskID: OfflineHandoffClientID("group-1", 0), AccountID: 1, AccountName: "目标盘", DriverType: "mock",
+			FileName: "a.mkv", TargetPath: "top", TargetDisplayPath: "/电影/合集", LocalPath: direct,
+			CleanupLocalMode: CleanupLocalTreeOnSuccess, CleanupLocalPath: root, TotalBytes: 4, ConflictPolicy: "overwrite",
+		},
+		{
+			ClientTaskID: OfflineHandoffClientID("group-1", 1), AccountID: 1, AccountName: "目标盘", DriverType: "mock",
+			FileName: "b.mkv", TargetPath: "season", TargetDisplayPath: "/电影/合集/season-1", LocalPath: nested,
+			CleanupLocalMode: CleanupLocalTreeOnSuccess, CleanupLocalPath: root, TotalBytes: 4, ConflictPolicy: "overwrite",
+		},
+	})
+	if err != nil || len(tasks) != 2 {
+		t.Fatalf("创建交棒任务失败: tasks=%#v err=%v", tasks, err)
+	}
+	waitUploadStatus(t, m, tasks[0].TaskID, StatusSuccess)
+	waitUploadStatus(t, m, tasks[1].TaskID, StatusFailed)
+	if _, err := os.Stat(direct); !os.IsNotExist(err) {
+		t.Fatalf("成功文件应已清理: %v", err)
+	}
+	if _, err := os.Stat(nested); err != nil {
+		t.Fatalf("失败文件必须保留供重试: %v", err)
+	}
+	select {
+	case event := <-completed:
+		t.Fatalf("同组仍有失败上传时不应发布完成事件: %#v", event)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	driver.setFailed("b.mkv", false)
+	if _, ok := m.Resume(context.Background(), tasks[1].TaskID); !ok {
+		t.Fatal("恢复失败上传任务失败")
+	}
+	waitUploadStatus(t, m, tasks[1].TaskID, StatusSuccess)
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("同组全部上传成功后任务根目录应清空: %v", err)
+	}
+	select {
+	case event := <-completed:
+		if event.TaskID != "group-1" || event.AccountID != 1 || event.TargetDisplayPath != "/电影/合集" {
+			t.Fatalf("离线交棒完成事件不正确: %#v", event)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("同组全部完成后没有发布离线下载完成事件")
+	}
+	select {
+	case event := <-completed:
+		t.Fatalf("同一交棒组不应重复发布完成事件: %#v", event)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestStopWaitsForActiveUploadAndRejectsNewTasks(t *testing.T) {
+	drv := &cancelUploadDriver{started: make(chan struct{}), canceled: make(chan struct{})}
+	m := NewManager(Options{
+		Exec:     driverexec.New(fakeProvider{drv: drv}, nil),
+		Accounts: fakeUploadAccounts{},
+		DataDir:  t.TempDir(),
+	})
+	localPath := filepath.Join(t.TempDir(), "active.bin")
+	if err := os.WriteFile(localPath, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Create(context.Background(), CreateParams{
+		AccountID: 1, FileName: "active.bin", LocalPath: localPath, TotalBytes: 4,
+		TargetPath: "target", ConflictPolicy: "overwrite",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-drv.started:
+	case <-time.After(time.Second):
+		t.Fatal("上传未启动")
+	}
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := m.Stop(stopCtx); err != nil {
+		t.Fatalf("上传管理器未在超时前停止: %v", err)
+	}
+	select {
+	case <-drv.canceled:
+	default:
+		t.Fatal("停止上传管理器未取消驱动调用")
+	}
+	if tasks := m.List(context.Background(), 1); len(tasks) != 1 || tasks[0].Status != StatusPaused {
+		t.Fatalf("关机取消的上传应保留为可继续状态: %#v", tasks)
+	}
+	if _, err := m.Create(context.Background(), CreateParams{
+		AccountID: 1, FileName: "late.bin", LocalPath: localPath, TotalBytes: 4,
+	}); err == nil {
+		t.Fatal("上传管理器停止后不应接受新任务")
+	}
+}
+
+func TestCreateServerLocalTasksIsIdempotentAfterSourceCleanup(t *testing.T) {
+	driver := &toggleUploadDriver{fail: map[string]bool{}}
+	m := NewManager(Options{
+		Exec: driverexec.New(fakeProvider{drv: driver}, nil), Accounts: fakeUploadAccounts{}, DataDir: t.TempDir(),
+	})
+	root := filepath.Join(t.TempDir(), "builtin_offline", "group-2")
+	file := filepath.Join(root, "movie.mkv")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("demo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	params := []ServerLocalCreateParams{{
+		ClientTaskID: OfflineHandoffClientID("group-2", 0), AccountID: 1, AccountName: "目标盘", DriverType: "mock",
+		FileName: "movie.mkv", TargetPath: "0", TargetDisplayPath: "/电影", LocalPath: file,
+		CleanupLocalMode: CleanupLocalTreeOnSuccess, CleanupLocalPath: root, TotalBytes: 4, ConflictPolicy: "overwrite",
+	}}
+	first, err := m.CreateServerLocalTasks(context.Background(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitUploadStatus(t, m, first[0].TaskID, StatusSuccess)
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Fatalf("首轮上传完成后源文件应已清理: %v", err)
+	}
+	second, err := m.CreateServerLocalTasks(context.Background(), params)
+	if err != nil {
+		t.Fatalf("源文件已清理后，重复交棒仍应命中已有任务: %v", err)
+	}
+	if second[0].TaskID != first[0].TaskID || len(m.List(context.Background(), 1)) != 1 {
+		t.Fatalf("重复交棒创建了新任务: first=%#v second=%#v", first, second)
+	}
+}
+
+func TestCreateServerLocalTasksRollsBackWhenPersistenceFails(t *testing.T) {
+	repo := &failingUploadTaskRepo{rows: make(map[string]*domain.UploadTaskRecord), failAt: 2}
+	m := NewManager(Options{Repo: repo, DataDir: t.TempDir()})
+	root := t.TempDir()
+	paths := []string{filepath.Join(root, "a.mkv"), filepath.Join(root, "b.mkv")}
+	for _, path := range paths {
+		if err := os.WriteFile(path, []byte("demo"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := m.CreateServerLocalTasks(context.Background(), []ServerLocalCreateParams{
+		{ClientTaskID: "persist:0", AccountID: 1, AccountName: "目标盘", DriverType: "mock", FileName: "a.mkv", LocalPath: paths[0]},
+		{ClientTaskID: "persist:1", AccountID: 1, AccountName: "目标盘", DriverType: "mock", FileName: "b.mkv", LocalPath: paths[1]},
+	})
+	if err == nil {
+		t.Fatal("第二条持久化失败时整批创建应失败")
+	}
+	if tasks := m.List(context.Background(), 0); len(tasks) != 0 {
+		t.Fatalf("持久化失败后内存任务未回滚: %#v", tasks)
+	}
+	rows, _ := repo.List(context.Background())
+	if len(rows) != 0 {
+		t.Fatalf("持久化失败后数据库任务未回滚: %#v", rows)
+	}
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("交棒未入队时不应删除源文件 %s: %v", path, err)
+		}
+	}
+}
+
+func TestDeleteOfflineHandoffTaskRemovesSourceDirectory(t *testing.T) {
+	m := NewManager(Options{DataDir: t.TempDir()})
+	sourceDir := filepath.Join(t.TempDir(), "builtin_offline", "task-2")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "movie.mkv"), []byte("1234"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const taskID = "offline-upload-1"
+	m.mu.Lock()
+	m.tasks[taskID] = &taskState{
+		Task: Task{
+			TaskID:           taskID,
+			AccountID:        1,
+			AccountName:      "测试账号",
+			DriverType:       "mock",
+			FileName:         "movie.mkv",
+			SourceType:       SourceTypeOfflineHandoff,
+			Status:           StatusFailed,
+			Message:          "上传失败",
+			CleanupLocalMode: CleanupLocalPathOnSuccess,
+			CleanupLocalPath: sourceDir,
+		},
+		localPath: sourceDir,
+		runDone:   make(chan struct{}),
+	}
+	close(m.tasks[taskID].runDone)
+	m.mu.Unlock()
+	found, err := m.Delete(context.Background(), taskID, false)
+	if !found || err != nil {
+		t.Fatalf("delete found=%v err=%v", found, err)
+	}
+	if _, err := os.Stat(sourceDir); !os.IsNotExist(err) {
+		t.Fatalf("source dir still exists: %v", err)
+	}
+}
+
+func TestCrossTransferDownloadRecoversFromInvalidResumeResponse(t *testing.T) {
+	tests := []struct {
+		name        string
+		resumeReply func(http.ResponseWriter)
+	}{
+		{
+			name: "416 与本地大小不符",
+			resumeReply: func(w http.ResponseWriter) {
+				w.Header().Set("Content-Range", "bytes */6")
+				w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			},
+		},
+		{
+			name: "206 起点不符",
+			resumeReply: func(w http.ResponseWriter) {
+				w.Header().Set("Content-Range", "bytes 4-5/6")
+				w.WriteHeader(http.StatusPartialContent)
+				_, _ = w.Write([]byte("ef"))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if r.Header.Get("Range") != "" {
+					tt.resumeReply(w)
+					return
+				}
+				_, _ = w.Write([]byte("abcdef"))
+			}))
+			defer server.Close()
+
+			localPath := filepath.Join(t.TempDir(), "cross_transfer", "task.bin")
+			if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(localPath, []byte("abc"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			drv := &rangeDownloadDriver{serverURL: server.URL, size: 6}
+			exec := driverexec.New(fakeProvider{drv: drv}, nil)
+			m := NewManager(Options{
+				Exec:     exec,
+				Files:    file.NewService(exec, nil, nil, nil, nil, nil),
+				Playback: playback.NewService(exec, nil),
+				DataDir:  t.TempDir(),
+			})
+			const taskID = "range-restart"
+			m.mu.Lock()
+			m.tasks[taskID] = &taskState{
+				Task: Task{
+					TaskID:          taskID,
+					AccountID:       1,
+					SourceType:      SourceTypeCrossTransfer,
+					SourceAccountID: 2,
+					SourceFileID:    "source-file",
+					TargetPath:      "target-folder",
+					Status:          StatusPending,
+					Phase:           PhaseDownloading,
+					TotalBytes:      6,
+				},
+				localPath: localPath,
+			}
+			m.mu.Unlock()
+
+			if !m.executeCrossTransferDownload(context.Background(), taskID) {
+				t.Fatal("断点响应异常后应从头下载成功")
+			}
+			if calls.Load() != 2 {
+				t.Fatalf("HTTP calls=%d want 2", calls.Load())
+			}
+			got, err := os.ReadFile(localPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != "abcdef" {
+				t.Fatalf("local content=%q want abcdef", got)
+			}
+			task, ok := m.Get(context.Background(), taskID)
+			if !ok || task.Status != StatusPending || task.Phase != PhaseUploading || task.DownloadedBytes != 6 {
+				t.Fatalf("task=%+v ok=%v", task, ok)
+			}
+		})
+	}
+}
+
+func TestCrossTransferDownloadRejectsTruncatedBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Transfer-Encoding", "chunked")
+		_, _ = w.Write([]byte("abc"))
+	}))
+	defer server.Close()
+
+	localPath := filepath.Join(t.TempDir(), "cross_transfer", "task.bin")
+	drv := &rangeDownloadDriver{serverURL: server.URL, size: 6}
+	exec := driverexec.New(fakeProvider{drv: drv}, nil)
+	m := NewManager(Options{
+		Exec:     exec,
+		Files:    file.NewService(exec, nil, nil, nil, nil, nil),
+		Playback: playback.NewService(exec, nil),
+		DataDir:  t.TempDir(),
+	})
+	const taskID = "truncated-body"
+	m.mu.Lock()
+	m.tasks[taskID] = &taskState{
+		Task: Task{
+			TaskID:          taskID,
+			AccountID:       1,
+			SourceType:      SourceTypeCrossTransfer,
+			SourceAccountID: 2,
+			SourceFileID:    "source-file",
+			TargetPath:      "target-folder",
+			Status:          StatusPending,
+			Phase:           PhaseDownloading,
+			TotalBytes:      6,
+		},
+		localPath: localPath,
+	}
+	m.mu.Unlock()
+
+	if m.executeCrossTransferDownload(context.Background(), taskID) {
+		t.Fatal("不完整响应不应进入上传阶段")
+	}
+	task, ok := m.Get(context.Background(), taskID)
+	if !ok || task.Status != StatusFailed || task.Phase != PhaseDownloading {
+		t.Fatalf("task=%+v ok=%v", task, ok)
+	}
+}
+
+func TestDownloadContentRangeHelpers(t *testing.T) {
+	start, end, total, ok := parseDownloadContentRange("bytes 3-5/6")
+	if !ok || start != 3 || end != 5 || total != 6 {
+		t.Fatalf("range=%d-%d/%d ok=%v", start, end, total, ok)
+	}
+	if _, _, _, ok := parseDownloadContentRange("bytes 3-6/6"); ok {
+		t.Fatal("越界 Content-Range 不应通过")
+	}
+	if size, ok := unsatisfiedDownloadRangeSize("bytes */6"); !ok || size != 6 {
+		t.Fatalf("size=%d ok=%v", size, ok)
+	}
+}
+
+func TestCreateServerLocalTaskRejectsDirectory(t *testing.T) {
+	m := NewManager(Options{DataDir: t.TempDir()})
+	sourceDir := filepath.Join(t.TempDir(), "builtin_offline", "multi-file-task")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := m.CreateServerLocalTask(context.Background(), ServerLocalCreateParams{
+		AccountID:         1,
+		AccountName:       "测试账号",
+		DriverType:        "mock",
+		FileName:          "合集",
+		DisplayName:       "合集",
+		TargetPath:        "folder",
+		TargetDisplayPath: "/folder",
+		LocalPath:         sourceDir,
+		CleanupLocalMode:  CleanupLocalPathOnSuccess,
+		CleanupLocalPath:  sourceDir,
+	})
+	if err == nil {
+		t.Fatal("目录路径不应被接受为离线交棒上传源")
+	}
+	if appErr, ok := domain.AsAppError(err); !ok || appErr.Code != domain.CodeValidation {
+		t.Fatalf("应返回校验类错误: %v", err)
+	}
+}
+
 func TestResumePendingCrossTransferDownloadRunsBeforeNormalPending(t *testing.T) {
 	releaseSrc1 := make(chan struct{})
 	defer func() {
@@ -563,6 +1131,13 @@ func TestResumePendingCrossTransferDownloadRunsBeforeNormalPending(t *testing.T)
 		Playback: playback.NewService(exec, nil),
 		Accounts: fakeUploadAccounts{},
 		DataDir:  t.TempDir(),
+	})
+	t.Cleanup(func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := m.Stop(stopCtx); err != nil {
+			t.Errorf("停止上传管理器失败: %v", err)
+		}
 	})
 	m.mu.Lock()
 	m.limit = 1

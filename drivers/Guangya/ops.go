@@ -11,6 +11,7 @@ import (
 
 	"litepan/internal/domain"
 	"litepan/internal/driver"
+	"litepan/pkg/strutil"
 )
 
 const (
@@ -383,7 +384,7 @@ func (d *Driver) CreateFolder(ctx context.Context, parentID, name string) (*doma
 	}
 	item := domain.FileItem{
 		ID:     data.FileID,
-		Name:   firstNonEmpty(data.FileName, name),
+		Name:   strutil.FirstNonEmpty(data.FileName, name),
 		Size:   0,
 		IsDir:  true,
 		IDKind: domain.IDStable,

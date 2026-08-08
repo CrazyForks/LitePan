@@ -6,15 +6,36 @@ export interface OfflineDownloadCapabilities {
   url_schemes: string[];
   root_target_allowed: boolean;
   remote_delete: boolean;
+  builtin_enabled: boolean;
+  builtin_supports_urls: boolean;
+  builtin_url_schemes?: string[];
+  builtin_supports_torrent: boolean;
 }
 
 export type OfflineDownloadStatus = "pending" | "running" | "retrying" | "success" | "failed";
+
+export interface OfflineMagnetDiagnostics {
+  stage?: string;
+  tracker_count?: number;
+  dht_nodes?: number;
+  dht_good_nodes?: number;
+  dht_outstanding_queries?: number;
+  active_peers?: number;
+  pending_peers?: number;
+  total_peers?: number;
+  connected_seeders?: number;
+  half_open_peers?: number;
+  metadata_ready?: boolean;
+  last_sample_at?: number;
+}
 
 export interface OfflineDownloadTask {
   task_id: string;
   account_id: number;
   account_name: string;
   driver_type: string;
+  provider_kind?: "native" | "builtin";
+  executor_type?: string;
   source_kind: "url" | "bt";
   source: string;
   name: string;
@@ -23,8 +44,13 @@ export interface OfflineDownloadTask {
   target_parent_id: string;
   target_display_path: string;
   status: OfflineDownloadStatus;
+  phase?: "downloading" | "verifying" | "handoff" | "done";
   progress: number;
   size: number;
+  downloaded_bytes?: number;
+  speed_bytes?: number;
+  local_temp_path?: string;
+  magnet_diagnostics?: OfflineMagnetDiagnostics;
   file_id?: string;
   message: string;
   error?: string;

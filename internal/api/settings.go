@@ -7,7 +7,6 @@ import (
 	"litepan/internal/settings"
 )
 
-
 func (h *Handler) getSettings(w http.ResponseWriter, _ *http.Request) {
 	if h.settings == nil {
 		writeOK(w, map[string]any{"categories": nil, "items": nil})
@@ -67,6 +66,6 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	h.applyUploadConcurrencyFromSettings(r.Context(), in)
+	h.applyTaskRuntimeFromSettings(r.Context(), in)
 	writeOK(w, h.settings.Snapshot())
 }

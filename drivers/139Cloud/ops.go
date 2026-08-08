@@ -9,6 +9,7 @@ import (
 	"litepan/internal/domain"
 	"litepan/internal/driver"
 	"litepan/internal/driver/uploadutil"
+	"litepan/pkg/strutil"
 )
 
 const (
@@ -47,13 +48,13 @@ func (d *Driver) ResolveDownload(ctx context.Context, req driver.DownloadRequest
 	if err := d.apiRequest(ctx, pathDownload, map[string]any{"fileId": fileID}, &data); err != nil {
 		return nil, err
 	}
-	downloadURL := firstNonEmpty(data.CDNURL, data.URL)
+	downloadURL := strutil.FirstNonEmpty(data.CDNURL, data.URL)
 	if downloadURL == "" {
 		return nil, domain.Errorf(domain.CodeDriverError, "移动云盘未返回下载链接")
 	}
 	size, _ := data.Size.Int64()
 	headers := http.Header{}
-	headers.Set("User-Agent", firstNonEmpty(req.UA, userAgent))
+	headers.Set("User-Agent", strutil.FirstNonEmpty(req.UA, userAgent))
 	headers.Set("Referer", webOrigin+"/")
 	headers.Set("Origin", webOrigin)
 	mode := domain.DownloadRedirect
@@ -93,7 +94,7 @@ func (d *Driver) CreateFolder(ctx context.Context, parentID, name string) (*doma
 	}, &data); err != nil {
 		return nil, err
 	}
-	folderName := firstNonEmpty(data.Name, name)
+	folderName := strutil.FirstNonEmpty(data.Name, name)
 	return &domain.FileItem{ID: data.FileID.String(), Name: folderName, IsDir: true, IDKind: domain.IDStable}, nil
 }
 

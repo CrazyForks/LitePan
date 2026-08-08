@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"litepan/internal/settings"
+	"litepan/pkg/timeutil"
 )
 
 type queueSlotKind int
@@ -139,7 +140,7 @@ func (m *Manager) acquireRunSlot(taskID string, done chan struct{}, cancel conte
 	waitingUpdated := false
 	for {
 		st, ok := m.tasks[taskID]
-		if !ok || st.runDone != done || st.Status != StatusPending {
+		if !ok || m.stopping || st.runDone != done || st.Status != StatusPending {
 			m.mu.Unlock()
 			if waitingUpdated {
 				m.broadcast()
@@ -160,7 +161,7 @@ func (m *Manager) acquireRunSlot(taskID string, done chan struct{}, cancel conte
 		message := pendingMessage(st)
 		if st.Message != message {
 			st.Message = message
-			st.UpdatedAt = unixFloat(time.Now())
+			st.UpdatedAt = timeutil.UnixFloat(time.Now())
 			waitingUpdated = true
 		}
 		m.runCond.Wait()
@@ -175,6 +176,7 @@ func (m *Manager) runTask(taskID string) {
 		return
 	}
 	done := st.runDone
+	rootCtx := m.runCtx
 	m.mu.Unlock()
 
 	defer func() {
@@ -188,7 +190,7 @@ func (m *Manager) runTask(taskID string) {
 		}
 	}()
 
-	runCtx, cancel := context.WithCancel(context.Background())
+	runCtx, cancel := context.WithCancel(rootCtx)
 	defer cancel()
 
 	for {

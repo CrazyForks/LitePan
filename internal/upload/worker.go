@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -92,43 +93,104 @@ func (m *Manager) executeCrossTransferDownload(ctx context.Context, taskID strin
 		totalBytes = res.File.Size
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, res.Link.URL, nil)
-	if err != nil {
-		m.finishCrossTransferDownloadError(ctx, taskID, err.Error())
-		return false
-	}
-	if existingDownloaded > 0 {
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", existingDownloaded))
-	}
-	for key, values := range res.Link.Headers {
-		for _, value := range values {
-			req.Header.Add(key, value)
+	var resp *http.Response
+	restarted := false
+	for {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, res.Link.URL, nil)
+		if reqErr != nil {
+			m.finishCrossTransferDownloadError(ctx, taskID, reqErr.Error())
+			return false
 		}
-	}
+		if existingDownloaded > 0 {
+			req.Header.Set("Range", fmt.Sprintf("bytes=%d-", existingDownloaded))
+		}
+		for key, values := range res.Link.Headers {
+			for _, value := range values {
+				req.Header.Add(key, value)
+			}
+		}
 
-	resp, err := (&http.Client{Timeout: 0}).Do(req)
-	if err != nil {
-		m.finishCrossTransferDownloadError(ctx, taskID, err.Error())
-		return false
+		resp, err = (&http.Client{Timeout: 0}).Do(req)
+		if err != nil {
+			m.finishCrossTransferDownloadError(ctx, taskID, err.Error())
+			return false
+		}
+
+		if resp.StatusCode == http.StatusRequestedRangeNotSatisfiable && existingDownloaded > 0 {
+			remoteSize, valid := unsatisfiedDownloadRangeSize(resp.Header.Get("Content-Range"))
+			_ = resp.Body.Close()
+			if valid && remoteSize == existingDownloaded && (totalBytes <= 0 || totalBytes == remoteSize) {
+				return m.finishCrossTransferDownloadSuccess(ctx, taskID, existingDownloaded, remoteSize)
+			}
+			if restarted {
+				m.finishCrossTransferDownloadError(ctx, taskID, "源盘拒绝断点续传，且完整重试失败")
+				return false
+			}
+			if err := os.Truncate(localPath, 0); err != nil {
+				m.finishCrossTransferDownloadError(ctx, taskID, err.Error())
+				return false
+			}
+			existingDownloaded = 0
+			restarted = true
+			continue
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			_ = resp.Body.Close()
+			m.finishCrossTransferDownloadError(ctx, taskID, domain.Errorf(domain.CodeDriverError, "源盘下载 HTTP %d", resp.StatusCode).Error())
+			return false
+		}
+
+		if resp.StatusCode == http.StatusPartialContent {
+			start, _, remoteSize, valid := parseDownloadContentRange(resp.Header.Get("Content-Range"))
+			if !valid || start != existingDownloaded {
+				_ = resp.Body.Close()
+				if restarted {
+					m.finishCrossTransferDownloadError(ctx, taskID, "源盘返回的分片范围不正确")
+					return false
+				}
+				if err := os.Truncate(localPath, 0); err != nil {
+					m.finishCrossTransferDownloadError(ctx, taskID, err.Error())
+					return false
+				}
+				existingDownloaded = 0
+				restarted = true
+				continue
+			}
+			if totalBytes > 0 && remoteSize > 0 && totalBytes != remoteSize {
+				_ = resp.Body.Close()
+				m.finishCrossTransferDownloadError(ctx, taskID, "源盘文件大小已变化，请重试")
+				return false
+			}
+			if remoteSize > 0 {
+				totalBytes = remoteSize
+			}
+		} else {
+			if existingDownloaded > 0 {
+				existingDownloaded = 0
+			}
+			if resp.ContentLength >= 0 {
+				if totalBytes > 0 && totalBytes != resp.ContentLength {
+					_ = resp.Body.Close()
+					m.finishCrossTransferDownloadError(ctx, taskID, "源盘文件大小已变化，请重试")
+					return false
+				}
+				totalBytes = resp.ContentLength
+			}
+		}
+		break
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if existingDownloaded > 0 && resp.StatusCode == http.StatusRequestedRangeNotSatisfiable {
-			return m.finishCrossTransferDownloadSuccess(ctx, taskID, existingDownloaded, maxInt64(totalBytes, existingDownloaded))
-		}
-		m.finishCrossTransferDownloadError(ctx, taskID, domain.Errorf(domain.CodeDriverError, "源盘下载 HTTP %d", resp.StatusCode).Error())
-		return false
-	}
 	resumed := existingDownloaded > 0 && resp.StatusCode == http.StatusPartialContent
-	if existingDownloaded > 0 && !resumed {
-		existingDownloaded = 0
-	}
 	file, err := openCrossTransferTempFile(localPath, resumed)
 	if err != nil {
 		m.finishCrossTransferDownloadError(ctx, taskID, err.Error())
 		return false
 	}
-	defer file.Close()
+	defer func() {
+		if file != nil {
+			_ = file.Close()
+		}
+	}()
 	if resumed {
 		if _, err := file.Seek(existingDownloaded, io.SeekStart); err != nil {
 			m.finishCrossTransferDownloadError(ctx, taskID, err.Error())
@@ -179,6 +241,19 @@ func (m *Manager) executeCrossTransferDownload(ctx context.Context, taskID strin
 	if totalBytes <= 0 {
 		totalBytes = downloaded
 	}
+	if downloaded != totalBytes {
+		m.finishCrossTransferDownloadError(ctx, taskID, fmt.Sprintf("源盘下载不完整：已下载 %d 字节，预期 %d 字节", downloaded, totalBytes))
+		return false
+	}
+	if err := file.Sync(); err != nil {
+		m.finishCrossTransferDownloadError(ctx, taskID, err.Error())
+		return false
+	}
+	if err := file.Close(); err != nil {
+		m.finishCrossTransferDownloadError(ctx, taskID, err.Error())
+		return false
+	}
+	file = nil
 	return m.finishCrossTransferDownloadSuccess(ctx, taskID, downloaded, totalBytes)
 }
 
@@ -219,6 +294,8 @@ func (m *Manager) executeUpload(ctx context.Context, taskID string) {
 	progress, uploaded := resumedProgress(st)
 	accountID := st.AccountID
 	localPath := st.localPath
+	cleanupLocalMode := st.CleanupLocalMode
+	cleanupLocalPath := st.CleanupLocalPath
 	fileName := st.FileName
 	targetPath := st.TargetPath
 	conflictPolicy := st.conflictPolicy
@@ -322,6 +399,7 @@ func (m *Manager) executeUpload(ctx context.Context, taskID string) {
 	if result.Skipped {
 		status = StatusSkipped
 	}
+	m.cleanupLocalSource(localPath, cleanupLocalPath, cleanupLocalMode)
 	m.patch(taskID, func(st *taskState) {
 		st.Status = status
 		st.Phase = PhaseUploading
@@ -339,7 +417,6 @@ func (m *Manager) executeUpload(ctx context.Context, taskID string) {
 			"size":      result.Size,
 		}
 	})
-	m.removeLocalFile(localPath)
 	if m.files == nil && m.bus != nil {
 		parentID := result.ParentID
 		if parentID == "" {
@@ -352,6 +429,7 @@ func (m *Manager) executeUpload(ctx context.Context, taskID string) {
 			FileID:    result.FileID,
 		})
 	}
+	m.publishOfflineHandoffCompleted(taskID)
 }
 
 func shouldResetResumeState(errMsg string) bool {
@@ -454,11 +532,35 @@ func openCrossTransferTempFile(localPath string, resume bool) (*os.File, error) 
 	return os.Create(localPath)
 }
 
-func maxInt64(a, b int64) int64 {
-	if a > b {
-		return a
+func parseDownloadContentRange(raw string) (start, end, total int64, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, "bytes ") {
+		return 0, 0, 0, false
 	}
-	return b
+	rangeAndTotal := strings.SplitN(strings.TrimPrefix(raw, "bytes "), "/", 2)
+	if len(rangeAndTotal) != 2 || rangeAndTotal[1] == "*" {
+		return 0, 0, 0, false
+	}
+	bounds := strings.SplitN(rangeAndTotal[0], "-", 2)
+	if len(bounds) != 2 {
+		return 0, 0, 0, false
+	}
+	start, errStart := strconv.ParseInt(bounds[0], 10, 64)
+	end, errEnd := strconv.ParseInt(bounds[1], 10, 64)
+	total, errTotal := strconv.ParseInt(rangeAndTotal[1], 10, 64)
+	if errStart != nil || errEnd != nil || errTotal != nil || start < 0 || end < start || total <= end {
+		return 0, 0, 0, false
+	}
+	return start, end, total, true
+}
+
+func unsatisfiedDownloadRangeSize(raw string) (int64, bool) {
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, "bytes */") {
+		return 0, false
+	}
+	total, err := strconv.ParseInt(strings.TrimPrefix(raw, "bytes */"), 10, 64)
+	return total, err == nil && total >= 0
 }
 
 func (m *Manager) deleteUploadedFile(ctx context.Context, st *taskState) error {

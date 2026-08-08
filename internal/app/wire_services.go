@@ -70,6 +70,9 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		Exec:     core.exec,
 		Accounts: st.store.Accounts,
 		Repo:     st.store.OfflineDownloads,
+		Folders:  fileSvc,
+		Settings: st.settings,
+		DataDir:  cfg.DataDir,
 		Bus:      core.bus,
 		Log:      logs.For(logx.ModuleFileOp),
 	})
@@ -85,7 +88,7 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		Log:       logs.For(logx.ModuleSystem),
 	})
 	_ = fuseSvc.PrepareMountRoot()
-	lifecycle := accountLifecycle{
+	lifecycle := &accountLifecycle{
 		fuse:      fuseSvc,
 		readCache: fuseReadCache,
 		strm:      coord,
@@ -117,6 +120,8 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		DataDir:  cfg.DataDir,
 		Log:      logs.For(logx.ModuleFileOp),
 	})
+	lifecycle.uploads = uploadSvc
+	offlineDownloadSvc.SetUploads(uploadSvc)
 	fuseSvc.SetUploads(uploadSvc)
 	crossTransferSvc := crosstransfer.New(crosstransfer.Options{
 		Exec:    core.exec,

@@ -9,6 +9,7 @@ import (
 	"litepan/internal/domain"
 	"litepan/internal/driver"
 	"litepan/internal/httpx"
+	"litepan/pkg/strutil"
 )
 
 const (
@@ -143,7 +144,7 @@ func (d *Driver) rawAPIRequest(ctx context.Context, path, token string, body map
 		return domain.Wrap(domain.CodeDriverError, err)
 	}
 	if env.Code != 0 && !containsInt(allowedCodes, env.Code) {
-		return mapAPIError(env.Code, firstNonEmpty(env.Msg, "光鸭业务请求失败"))
+		return mapAPIError(env.Code, strutil.FirstNonEmpty(env.Msg, "光鸭业务请求失败"))
 	}
 	if out != nil && len(env.Data) > 0 && string(env.Data) != "null" {
 		if err := json.Unmarshal(env.Data, out); err != nil {
@@ -200,13 +201,4 @@ func containsInt(list []int, target int) bool {
 		}
 	}
 	return false
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if s := strings.TrimSpace(v); s != "" {
-			return s
-		}
-	}
-	return ""
 }

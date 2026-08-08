@@ -106,6 +106,7 @@ export function useUploadTasks(deps: UploadTaskDeps) {
     activeRelayTasks: store.activeRelayTasks,
     failedRelayTasks: store.failedRelayTasks,
     activeRelayCount: store.activeRelayCount,
+    relayTasks: store.relayTasks,
     cleanupUploadTasks: stream.cleanupUploadTasks,
   };
 }

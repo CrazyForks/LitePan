@@ -6,6 +6,7 @@ import { getApiErrorMessage } from "@/api/client";
 import type { BrowserFavoriteItem, BrowserFavoritesState, FileItem } from "@/api/types";
 import { toast } from "@/composables/useToast";
 import { useAccountsStore } from "./accounts";
+import { useAuthStore } from "./auth";
 
 export interface Crumb {
   id: string;
@@ -25,6 +26,7 @@ export interface LoadFilesOptions {
 
 export const useBrowserStore = defineStore("browser", () => {
   const accountsStore = useAccountsStore();
+  const authStore = useAuthStore();
   const currentAccountId = ref<number | null>(null);
   const breadcrumb = ref<Crumb[]>([ROOT]);
   const files = ref<FileItem[]>([]);
@@ -72,6 +74,11 @@ export const useBrowserStore = defineStore("browser", () => {
   }
 
   async function loadFavorites(accountId = currentAccountId.value, opts?: { silent?: boolean }) {
+    if (!authStore.isAdmin) {
+      favoritesStateSeq += 1;
+      clearFavoritesState();
+      return;
+    }
     if (accountId == null) {
       favoritesStateSeq += 1;
       clearFavoritesState();
@@ -94,6 +101,7 @@ export const useBrowserStore = defineStore("browser", () => {
   }
 
   async function persistFavoritesState(nextState: BrowserFavoritesState, opts?: { successMessage?: string; silent?: boolean }) {
+    if (!authStore.isAdmin) return false;
     const accountId = currentAccountId.value;
     if (accountId == null) return false;
     const operationSeq = ++favoritesStateSeq;

@@ -14,6 +14,7 @@ import (
 
 type addOfflineURLsReq struct {
 	AccountID         int64    `json:"account_id"`
+	ProviderKind      string   `json:"provider_kind"`
 	URLs              []string `json:"urls"`
 	FileName          string   `json:"file_name"`
 	TargetParentID    string   `json:"target_parent_id"`
@@ -57,6 +58,7 @@ func (h *Handler) addOfflineURLs(w http.ResponseWriter, r *http.Request) {
 	}
 	tasks, err := h.offlineDownloads.AddURLs(r.Context(), offlinedownload.AddURLParams{
 		AccountID:         req.AccountID,
+		ProviderKind:      req.ProviderKind,
 		URLs:              req.URLs,
 		FileName:          req.FileName,
 		TargetParentID:    req.TargetParentID,

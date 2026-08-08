@@ -1,15 +1,12 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
 
 	"litepan/internal/crosstransfer"
 	"litepan/internal/domain"
-	"litepan/internal/upload"
 )
 
 func (h *Handler) crossTransferRoutes(w http.ResponseWriter, r *http.Request) {
@@ -215,150 +212,5 @@ func (h *Handler) streamCrossTransferNDJSON(w http.ResponseWriter, r *http.Reque
 
 	if err := fn(writeLine); err != nil {
 		_ = writeLine(crosstransfer.StreamEvent{"event": "error", "message": err.Error()})
-	}
-}
-
-func (h *Handler) crossTransferRelayTasks(w http.ResponseWriter, r *http.Request) {
-	if !ensureServiceReady(w, h.uploads != nil) {
-		return
-	}
-	writeOK(w, h.listRelayTasks(r.Context()))
-}
-
-func (h *Handler) crossTransferRelayStream(w http.ResponseWriter, r *http.Request) {
-	if !ensureServiceReady(w, h.uploads != nil) {
-		return
-	}
-	s, err := newSSEWriter(w)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	initial, _ := json.Marshal(map[string]any{"tasks": h.listRelayTasks(r.Context())})
-	s.writeEvent("tasks", string(initial))
-	ch := h.uploads.Subscribe()
-	defer h.uploads.Unsubscribe(ch)
-	ticker := time.NewTicker(defaultSSEPingInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case _, ok := <-ch:
-			if !ok {
-				return
-			}
-			payload, _ := json.Marshal(map[string]any{"tasks": h.listRelayTasks(r.Context())})
-			s.writeEvent("tasks", string(payload))
-		case <-ticker.C:
-			s.writeEvent("ping", "{}")
-		}
-	}
-}
-
-type crossTransferRelayDeleteReq struct {
-	TaskIDs []string `json:"task_ids"`
-}
-
-func (h *Handler) crossTransferRelayBatchDelete(w http.ResponseWriter, r *http.Request) {
-	if !ensureServiceReady(w, h.uploads != nil) {
-		return
-	}
-	var req crossTransferRelayDeleteReq
-	if err := decodeJSON(r, &req); err != nil {
-		writeErr(w, err)
-		return
-	}
-	removed := h.deleteRelayTasks(r.Context(), req.TaskIDs)
-	writeOK(w, map[string]any{"removed": removed})
-}
-
-type relayTaskDTO struct {
-	TaskID              string         `json:"task_id"`
-	SourceAccountID     int64          `json:"source_account_id"`
-	SourceAccountName   string         `json:"source_account_name"`
-	SourceDriverType    string         `json:"source_driver_type"`
-	TargetAccountID     int64          `json:"target_account_id"`
-	TargetAccountName   string         `json:"target_account_name"`
-	TargetDriverType    string         `json:"target_driver_type"`
-	SourceFileID        string         `json:"source_file_id"`
-	FileName            string         `json:"file_name"`
-	RelPath             string         `json:"rel_path"`
-	RelDir              string         `json:"rel_dir"`
-	TargetParentID      string         `json:"target_parent_id"`
-	TargetDisplayPath   string         `json:"target_display_path"`
-	TotalBytes          int64          `json:"total_bytes"`
-	Status              string         `json:"status"`
-	Phase               string         `json:"phase"`
-	Progress            int            `json:"progress"`
-	DownloadedBytes     int64          `json:"downloaded_bytes"`
-	UploadedBytes       int64          `json:"uploaded_bytes"`
-	SpeedBytesPerSecond float64        `json:"speed_bytes_per_second"`
-	Message             string         `json:"message"`
-	Error               string         `json:"error"`
-	Result              map[string]any `json:"result,omitempty"`
-	QueueOrder          int            `json:"queue_order,omitempty"`
-	CreatedAt           float64        `json:"created_at"`
-	UpdatedAt           float64        `json:"updated_at"`
-}
-
-func (h *Handler) listRelayTasks(ctx context.Context) []relayTaskDTO {
-	if h.uploads == nil {
-		return nil
-	}
-	tasks := h.uploads.List(ctx, 0)
-	out := make([]relayTaskDTO, 0, len(tasks))
-	for _, task := range tasks {
-		if task.SourceType != upload.SourceTypeCrossTransfer || task.Phase != upload.PhaseDownloading {
-			continue
-		}
-		out = append(out, toRelayTaskDTO(task))
-	}
-	return out
-}
-
-func (h *Handler) deleteRelayTasks(ctx context.Context, taskIDs []string) int {
-	removed := 0
-	for _, id := range taskIDs {
-		task, ok := h.uploads.Get(ctx, id)
-		if !ok || task.SourceType != upload.SourceTypeCrossTransfer || task.Phase != upload.PhaseDownloading {
-			continue
-		}
-		found, err := h.uploads.Delete(ctx, id, false)
-		if found && err == nil {
-			removed++
-		}
-	}
-	return removed
-}
-
-func toRelayTaskDTO(task upload.Task) relayTaskDTO {
-	return relayTaskDTO{
-		TaskID:              task.TaskID,
-		SourceAccountID:     task.SourceAccountID,
-		SourceAccountName:   task.SourceAccountName,
-		SourceDriverType:    task.SourceDriverType,
-		TargetAccountID:     task.AccountID,
-		TargetAccountName:   task.AccountName,
-		TargetDriverType:    task.DriverType,
-		SourceFileID:        task.SourceFileID,
-		FileName:            task.FileName,
-		RelPath:             task.RelPath,
-		RelDir:              task.RelDir,
-		TargetParentID:      task.TargetPath,
-		TargetDisplayPath:   task.TargetDisplayPath,
-		TotalBytes:          task.TotalBytes,
-		Status:              task.Status,
-		Phase:               task.Phase,
-		Progress:            task.Progress,
-		DownloadedBytes:     task.DownloadedBytes,
-		UploadedBytes:       task.UploadedBytes,
-		SpeedBytesPerSecond: task.SpeedBytesPerSecond,
-		Message:             task.Message,
-		Error:               task.Error,
-		Result:              task.Result,
-		QueueOrder:          task.QueueOrder,
-		CreatedAt:           task.CreatedAt,
-		UpdatedAt:           task.UpdatedAt,
 	}
 }

@@ -33,7 +33,6 @@
         </button>
         <div class="panel-settings-wrap">
           <UploadTaskSettingsPanel
-            v-show="settingsOpen"
             :open="settingsOpen"
             :server-concurrency="uploadTaskServerConcurrency"
             @update:server-concurrency="onConcurrencyUpdated"
@@ -114,7 +113,7 @@
         <template v-else>
           <div v-if="visibleRows.length > 0" class="table-head">
             <div>文件名</div>
-            <div>来源</div>
+        <div>{{ taskPanelCategory === "offline" ? "下载器" : "来源" }}</div>
             <div>状态</div>
             <div>{{ tailColumnLabel }}</div>
           </div>
@@ -138,7 +137,7 @@
                   />
                   <div class="file-name">{{ row.name }}</div>
                 </div>
-                <div class="source-cell">{{ row.source }}</div>
+                <div class="source-cell">{{ taskPanelCategory === "offline" ? row.provider || row.source : row.source }}</div>
                 <div class="status-cell" :class="row.statusClass">
                   <span v-if="showStatusPulse(row)" class="status-pulse" :class="statusPulseClass(row)" aria-hidden="true"></span>
                   <span class="status-text">{{ row.status }}</span>
@@ -191,6 +190,8 @@ import { getUploadTaskStableKey } from "@/composables/upload/uploadTaskFormatter
 import { toast } from "@/composables/useToast";
 import { formatSize } from "@/utils/format";
 import type { UploadTask } from "@/types/upload";
+import type { useUploadTasks } from "@/composables/useUploadTasks";
+import type { useOfflineDownloads } from "@/composables/useOfflineDownloads";
 
 type CategoryKey = "upload" | "relay" | "offline";
 type StateKey = "active" | "done" | "failed";
@@ -202,6 +203,7 @@ type PanelRow = {
   raw: any;
   name: string;
   source: string;
+  provider?: string;
   status: string;
   statusDetail: string;
   statusClass: string;
@@ -219,14 +221,12 @@ type PanelRow = {
 };
 
 const props = defineProps<{
-  uploadApi: Record<string, unknown>;
-  relay: Record<string, unknown>;
-  offline: Record<string, unknown>;
+  uploadApi: ReturnType<typeof useUploadTasks>;
+  offline: ReturnType<typeof useOfflineDownloads>;
 }>();
 
-const api = props.uploadApi as Record<string, any>;
-const relay = props.relay as Record<string, any>;
-const offline = props.offline as Record<string, any>;
+const api = props.uploadApi;
+const offline = props.offline;
 
 const {
   displayUploadTasks,
@@ -305,6 +305,8 @@ function onDocumentClick(event: MouseEvent) {
   if (!settingsOpen.value) return;
   const target = event.target as HTMLElement | null;
   if (target?.closest(".panel-head-actions")) return;
+  // 目录选择器传送到 body，不在设置面板 DOM 内；操作子弹层时不应关闭后面的设置。
+  if (target?.closest(".overlay--nested")) return;
   settingsOpen.value = false;
 }
 
@@ -313,7 +315,7 @@ const uploadTasks = computed<UploadTask[]>(() =>
     (task: UploadTask) => !(task.source_type === "cross_transfer" && task.phase === "downloading"),
   ),
 );
-const relayTasks = computed<any[]>(() => relay.relayTasks?.value || []);
+const relayTasks = computed<UploadTask[]>(() => api.relayTasks.value || []);
 const offlineTasks = computed<any[]>(() => offline.tasks?.value || []);
 
 function uploadStateOf(task: UploadTask): StateKey {
@@ -323,7 +325,7 @@ function uploadStateOf(task: UploadTask): StateKey {
   return "active";
 }
 
-function relayStateOf(task: any): StateKey {
+function relayStateOf(task: UploadTask): StateKey {
   const status = relayDisplayStatus(task);
   if (status === "failed" || status === "canceled") return "failed";
   return "active";
@@ -389,17 +391,13 @@ function uploadStageLabel(message: string) {
   return "";
 }
 
-function relayStatusLabel(task: any) {
-  if (task.status === "running") return `跨盘下载中（${clampProgress(task.progress || 0).toFixed(1)}%）`;
-  if (task.status === "pending") return "等待下载";
-  if (task.status === "paused") return "已暂停";
-  if (task.status === "failed") return "下载失败";
-  if (task.status === "canceled") return "已取消";
+function relayStatusLabel(task: UploadTask, status = String(task.status || "")) {
+  if (status === "running") return `跨盘下载中（${clampProgress(task.progress || 0).toFixed(1)}%）`;
+  if (status === "pending") return "等待下载";
+  if (status === "paused") return "已暂停";
+  if (status === "failed") return "下载失败";
+  if (status === "canceled") return "已取消";
   return "等待下载";
-}
-
-function findLinkedUploadTask(taskId: string) {
-  return ((displayUploadTasks?.value || []) as UploadTask[]).find((task) => String(task.task_id) === String(taskId)) || null;
 }
 
 function uploadDisplayStatus(task: UploadTask) {
@@ -413,17 +411,15 @@ function uploadResumePending(task: UploadTask) {
   return String(task.message || "").includes("准备继续");
 }
 
-function relayDisplayStatus(task: any) {
-  const linkedTask = findLinkedUploadTask(task.task_id);
-  return linkedTask ? uploadDisplayStatus(linkedTask) : String(task.status || "");
+function relayDisplayStatus(task: UploadTask) {
+  return uploadDisplayStatus(task);
 }
 
-function relayResumePending(task: any) {
-  const linkedTask = findLinkedUploadTask(task.task_id);
-  return linkedTask ? uploadResumePending(linkedTask) : false;
+function relayResumePending(task: UploadTask) {
+  return uploadResumePending(task);
 }
 
-function relayStatusClass(task: any) {
+function relayStatusClass(task: UploadTask) {
   const status = relayDisplayStatus(task);
   if (status === "running") return "downloading";
   if (status === "pending") return "pending";
@@ -450,7 +446,7 @@ function uploadStatusDetail(task: UploadTask) {
   return details.join(" · ");
 }
 
-function relayStatusDetail(task: any) {
+function relayStatusDetail(task: UploadTask) {
   const details: string[] = [];
   if (task.error) details.push(String(task.error));
   const message = stripChunkDetail(String(task.message || "").trim());
@@ -475,14 +471,19 @@ function buildUploadRow(task: UploadTask): PanelRow {
     kind: "upload",
     raw: task,
     name: task.file_name,
-    source: task.source_type === "cross_transfer" ? "跨盘接棒" : "手动上传",
+    source:
+      task.source_type === "cross_transfer"
+        ? "跨盘接棒"
+        : task.source_type === "offline_handoff"
+          ? "离线接棒"
+          : "手动上传",
     status: uploadStatusLabel(task),
     statusDetail: uploadStatusDetail(task),
     statusClass: displayStatus,
     tail: completed ? "" : speed,
     tailActive: !completed && speed !== "---",
     progress,
-    progressClass: task.source_type === "cross_transfer" ? "uploading" : "uploading",
+    progressClass: "uploading",
     showProgress: (displayStatus === "running" && progress > 0 && !stageRunning) || (displayStatus === "pending" && progress > 0 && !localDispatching),
     actionLabel: completed ? "打开" : retryable ? "重试" : undefined,
     sortOrder: taskOrder(task),
@@ -493,7 +494,7 @@ function buildUploadRow(task: UploadTask): PanelRow {
   };
 }
 
-function buildRelayRow(task: any): PanelRow {
+function buildRelayRow(task: UploadTask): PanelRow {
   const badge = getRelayTaskDriverBadge(task);
   const speed = formatRelaySpeed(task) || "---";
   const status = relayDisplayStatus(task);
@@ -503,7 +504,7 @@ function buildRelayRow(task: any): PanelRow {
     raw: task,
     name: task.file_name,
     source: task.source_account_name || "源盘",
-    status: relayStatusLabel({ ...task, status }),
+    status: relayStatusLabel(task, status),
     statusDetail: relayStatusDetail(task),
     statusClass: relayStatusClass(task),
     tail: speed,
@@ -515,33 +516,35 @@ function buildRelayRow(task: any): PanelRow {
     badgeLogo: badge.logo || "",
     badgeName: String(badge.name || "网盘").slice(0, 2),
     badgeColor: badge.color || "#7b8697",
-    searchText: [task.file_name, task.source_account_name, task.target_account_name, task.target_display_path, task.message, task.error].join(" "),
+    searchText: [task.file_name, task.source_account_name, task.account_name, task.target_display_path, task.message, task.error].join(" "),
   };
 }
 
 function buildOfflineRow(task: any): PanelRow {
   const badge = getUploadTaskDriverBadge(task);
-  const sizeText = task.size > 0 ? formatSize(task.size) : "---";
+  const speedText = offline.speedText(task);
+  const detailText = offline.detailText(task);
   return {
     id: task.task_id,
     kind: "offline",
     raw: task,
     name: task.name,
     source: offline.sourceLabel(task),
+    provider: offline.providerLabel(task),
     status: offline.statusText(task),
-    statusDetail: task.error || task.message || "",
+    statusDetail: detailText,
     statusClass: task.status === "success" ? "success" : task.status === "failed" ? "error" : "downloading",
-    tail: sizeText,
-    tailActive: false,
+    tail: speedText,
+    tailActive: speedText !== "-",
     progress: Number(task.progress || 0),
     progressClass: task.status === "failed" ? "error" : "downloading",
     showProgress: ["pending", "running", "retrying"].includes(task.status),
-    actionLabel: task.status === "success" ? "打开" : undefined,
+    actionLabel: task.status === "success" && task.provider_kind !== "builtin" ? "打开" : undefined,
     sortOrder: offlineTaskOrder(task),
     badgeLogo: badge.logo || "",
     badgeName: String(badge.name || "任务").slice(0, 2),
-    badgeColor: badge.color || "#5d6673",
-    searchText: [task.name, task.source, task.target_display_path, task.error].join(" "),
+    badgeColor: task.provider_kind === "builtin" ? "#4f7cff" : (badge.color || "#5d6673"),
+    searchText: [task.name, task.source, task.target_display_path, task.error, offline.providerLabel(task), detailText].join(" "),
   };
 }
 
@@ -567,7 +570,9 @@ const currentRows = computed(() =>
       const filter = stateFilterOf(taskPanelCategory.value);
       if (taskPanelCategory.value === "upload" && uploadStateOf(row.raw) !== filter) return false;
       if (taskPanelCategory.value === "relay" && relayStateOf(row.raw) !== filter) return false;
-      if (taskPanelCategory.value === "offline" && offlineStateOf(row.raw) !== filter) return false;
+      if (taskPanelCategory.value === "offline") {
+        if (offlineStateOf(row.raw) !== filter) return false;
+      }
       return true;
     })
     .sort((a, b) => a.sortOrder - b.sortOrder),
@@ -592,7 +597,7 @@ const detailBarVisible = computed(() => Boolean(detailRow.value));
 function resolveUploadTaskForRow(row: PanelRow): UploadTask | null {
   if (row.kind === "upload") return row.raw as UploadTask;
   if (row.kind === "relay") {
-    return (displayUploadTasks?.value || []).find((task: UploadTask) => task.task_id === row.id) || null;
+    return row.raw as UploadTask;
   }
   return null;
 }
@@ -626,7 +631,7 @@ const tailColumnLabel = computed(() => {
   if (taskPanelCategory.value === "upload" && uploadStateFilter.value === "done") return "操作";
   if (taskPanelCategory.value === "upload" && uploadStateFilter.value === "failed") return "操作";
   if (taskPanelCategory.value === "offline" && offlineStateFilter.value === "done") return "操作";
-  if (taskPanelCategory.value === "offline") return "大小";
+  if (taskPanelCategory.value === "offline") return "速度";
   return "速度";
 });
 
@@ -737,8 +742,13 @@ const detailExtra = computed(() => {
   }
   if (row.kind === "offline") {
     const task = row.raw;
-    const targetPath = String(task?.target_display_path || "").trim();
-    if (targetPath) details.push(`目标 ${targetPath}`);
+    const downloaded = Number(task?.downloaded_bytes || 0);
+    const total = Number(task?.size || 0);
+    if (task?.provider_kind === "builtin" && total > 0) {
+      details.push(`${formatSize(downloaded)} / ${formatSize(total)}`);
+    } else if (total > 0) {
+      details.push(`大小 ${formatSize(total)}`);
+    }
     return details.join(" · ");
   }
   return details.join(" · ");
@@ -784,6 +794,7 @@ function toggleSelectAll() {
 }
 
 function canDeleteOfflineTask(task: any) {
+  if (task?.provider_kind === "builtin") return true;
   const status = String(task?.status || "");
   const active = ["pending", "running", "retrying"].includes(status);
   return !active || Boolean(task?.remote_delete);

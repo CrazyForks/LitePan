@@ -122,7 +122,7 @@ func (d *Driver) ListFiles(ctx context.Context, parentID string) ([]domain.FileI
 			wdPath = d.childPath(dir, fi.Name())
 		}
 		wdPath = trimSlash(wdPath)
-		items = append(items, fileToItem(wdPath, fi.Name(), fi.Size(), fi.IsDir()))
+		items = append(items, fileToItem(wdPath, fi.Name(), fi.Size(), fi.IsDir(), fi.ModTime()))
 	}
 	return items, nil
 }
@@ -151,7 +151,7 @@ func (d *Driver) GetFileInfo(ctx context.Context, fileID string) (*domain.FileIt
 		wdPath = path
 	}
 	wdPath = trimSlash(wdPath)
-	item := fileToItem(wdPath, fi.Name(), fi.Size(), fi.IsDir())
+	item := fileToItem(wdPath, fi.Name(), fi.Size(), fi.IsDir(), fi.ModTime())
 	return &item, nil
 }
 

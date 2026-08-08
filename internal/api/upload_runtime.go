@@ -24,11 +24,15 @@ func (h *Handler) uploadConcurrencyLimit(ctx context.Context) int {
 }
 
 func (h *Handler) getUploadRuntime(w http.ResponseWriter, r *http.Request) {
-	writeOK(w, map[string]any{
+	payload := map[string]any{
 		"concurrency":     h.uploadConcurrencyLimit(r.Context()),
 		"concurrency_min": uploadConcurrencyMin,
 		"concurrency_max": uploadConcurrencyMax,
-	})
+	}
+	if h.offlineDownloads != nil {
+		payload["builtin_temp_dir"] = h.offlineDownloads.BuiltinTempDir()
+	}
+	writeOK(w, payload)
 }
 
 type updateUploadRuntimeReq struct {
@@ -42,28 +46,37 @@ func (h *Handler) updateUploadRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Concurrency < uploadConcurrencyMin || req.Concurrency > uploadConcurrencyMax {
-		writeErr(w, domain.Errorf(domain.CodeValidation, "传输任务并发数必须是 %d-%d 之间的整数", uploadConcurrencyMin, uploadConcurrencyMax))
+		writeErr(w, domain.Errorf(domain.CodeValidation, "任务并发数必须是 %d-%d 之间的整数", uploadConcurrencyMin, uploadConcurrencyMax))
 		return
 	}
-	h.applyUploadConcurrencyHotReload(r.Context(), &req.Concurrency)
+	if err := h.applyUploadConcurrencyHotReload(r.Context(), &req.Concurrency); err != nil {
+		writeErr(w, err)
+		return
+	}
 	writeOK(w, map[string]any{"concurrency": req.Concurrency})
 }
 
-func (h *Handler) applyUploadConcurrencyHotReload(ctx context.Context, value *int) {
-	if value == nil || h.uploads == nil {
-		return
+func (h *Handler) applyUploadConcurrencyHotReload(ctx context.Context, value *int) error {
+	if value == nil {
+		return nil
+	}
+	changed := map[string]string{
+		settings.KeyUploadTaskConcurrency: strconv.Itoa(*value),
 	}
 	if h.settings != nil {
-		_ = h.settings.Update(ctx, map[string]string{
-			settings.KeyUploadTaskConcurrency: strconv.Itoa(*value),
-		})
+		if err := h.settings.Update(ctx, changed); err != nil {
+			return err
+		}
 	}
-	h.uploads.RefreshConcurrencyLimit(ctx)
+	h.applyTaskRuntimeFromSettings(ctx, changed)
+	return nil
 }
 
-func (h *Handler) applyUploadConcurrencyFromSettings(ctx context.Context, in map[string]string) {
-	if _, ok := in[settings.KeyUploadTaskConcurrency]; !ok || h.uploads == nil {
-		return
+func (h *Handler) applyTaskRuntimeFromSettings(ctx context.Context, in map[string]string) {
+	if _, ok := in[settings.KeyUploadTaskConcurrency]; ok && h.uploads != nil {
+		h.uploads.RefreshConcurrencyLimit(ctx)
 	}
-	h.uploads.RefreshConcurrencyLimit(ctx)
+	if h.offlineDownloads != nil {
+		h.offlineDownloads.RefreshRuntimeSettings(in)
+	}
 }

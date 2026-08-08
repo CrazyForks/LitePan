@@ -23,6 +23,7 @@ import (
 	"litepan/internal/driver"
 	"litepan/internal/driver/uploadutil"
 	"litepan/internal/httpx"
+	"litepan/pkg/strutil"
 )
 
 var uploadTaskPollCodes = []int{145, 146, 147, 155, 163}
@@ -169,7 +170,7 @@ func (d *Driver) rawAPIRequestEnvelope(ctx context.Context, path, token string, 
 		return 0, nil, domain.Wrap(domain.CodeDriverError, err)
 	}
 	if env.Code != 0 && !containsInt(allowedCodes, env.Code) {
-		return env.Code, nil, mapAPIError(env.Code, firstNonEmpty(env.Msg, "光鸭业务请求失败"))
+		return env.Code, nil, mapAPIError(env.Code, strutil.FirstNonEmpty(env.Msg, "光鸭业务请求失败"))
 	}
 	return env.Code, env.Data, nil
 }

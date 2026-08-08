@@ -21,7 +21,11 @@ func (m *Manager) Delete(ctx context.Context, taskID string, deleteUploadedFile 
 	if popped == nil {
 		return false, nil
 	}
-	m.removeLocalFile(popped.localPath)
+	if popped.CleanupLocalMode != "" {
+		m.cleanupLocalSource(popped.localPath, popped.CleanupLocalPath, popped.CleanupLocalMode)
+	} else {
+		m.removeLocalFile(popped.localPath)
+	}
 	m.broadcast()
 	return true, nil
 }
@@ -57,7 +61,11 @@ func (m *Manager) BatchDelete(ctx context.Context, taskIDs []string, deleteUploa
 			result.MissingTaskIDs = append(result.MissingTaskIDs, id)
 			continue
 		}
-		m.removeLocalFile(popped.localPath)
+		if popped.CleanupLocalMode != "" {
+			m.cleanupLocalSource(popped.localPath, popped.CleanupLocalPath, popped.CleanupLocalMode)
+		} else {
+			m.removeLocalFile(popped.localPath)
+		}
 		result.DeletedTaskIDs = append(result.DeletedTaskIDs, id)
 	}
 	if len(result.DeletedTaskIDs) > 0 {

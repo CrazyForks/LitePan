@@ -38,8 +38,8 @@ export function useUploadBatchActions(ctx: UploadActionsCtx, closePanel: () => v
 
   function formatCloudDeleteStartToast(count: number) {
     return count > 1
-      ? `已从任务列表移除，正在后台删除 ${count} 个云端文件...`
-      : "已从任务列表移除，正在后台删除云端文件...";
+      ? `任务已移除，${count} 个云端文件删除中…`
+      : "任务已移除，云端文件删除中…";
   }
 
   function formatCloudDeleteResultToast(successCount: number, failedCount: number) {
@@ -230,7 +230,29 @@ export function useUploadBatchActions(ctx: UploadActionsCtx, closePanel: () => v
     const crumbs = await buildUploadTaskBreadcrumb(account, task, deps.getRootId);
     deps.selectedFilesList.value = [];
     await deps.openDirectory(account.id, crumbs, { forceRefresh: true });
+    const openedParentId = String(deps.currentPath.value || "");
     closePanel();
+    void refreshOpenedUploadDirectory(task, account.id, openedParentId);
+  }
+
+  function uploadResultVisible(task: UploadTask) {
+    const fileId = String(task.result?.file_id || "");
+    const fileName = String(task.result?.file_name || task.file_name || "");
+    if (!fileId && !fileName) return true;
+    return deps.files.value.some((file) =>
+      (fileId && String(file.id || "") === fileId) ||
+      (fileName && String(file.name || "") === fileName),
+    );
+  }
+
+  async function refreshOpenedUploadDirectory(task: UploadTask, accountId: number, parentId: string) {
+    for (const delay of [500, 1200, 2500]) {
+      if (uploadResultVisible(task)) return;
+      await new Promise((resolve) => window.setTimeout(resolve, delay));
+      if (String(deps.selectedAccountId.value) !== String(accountId)) return;
+      if (String(deps.currentPath.value || "") !== parentId) return;
+      await deps.loadFiles({ forceRefresh: true, silent: true });
+    }
   }
 
   async function handleDeleteUploadTasks(tasks: UploadTask[]) {
@@ -325,12 +347,21 @@ export function useUploadBatchActions(ctx: UploadActionsCtx, closePanel: () => v
 }
 
 export function useUploadRelayActions(ctx: UploadActionsCtx) {
-  const { batchDeleteRelayTasks } = ctx.deps.relay;
-
   async function handleDeleteRelayTasks(ids: string[]) {
     if (!ids.length) return;
     try {
-      await batchDeleteRelayTasks(ids);
+      const relayTaskIds = new Set(ctx.store.relayTasks.value.map((task) => String(task.task_id)));
+      const taskIds = ids.map(String).filter((id) => relayTaskIds.has(id));
+      if (!taskIds.length) return;
+      const result = await uploadApi.batchDelete(taskIds, false);
+      for (const taskId of result.deleted_task_ids || []) {
+        ctx.store.removeRemoteUploadTask(String(taskId));
+      }
+      void ctx.stream.fetchUploadTasks();
+      if ((result.failed_task_ids || []).length > 0) {
+        toast.warning(`已删除 ${result.deleted_task_ids.length} 个跨盘任务，${result.failed_task_ids.length} 个失败`);
+        return;
+      }
       toast.success("跨盘任务已删除");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "删除跨盘任务失败");

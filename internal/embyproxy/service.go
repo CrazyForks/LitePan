@@ -21,8 +21,10 @@ import (
 	"litepan/internal/domain"
 	"litepan/internal/httpx"
 	"litepan/internal/playback"
+	"litepan/internal/proxybase"
 	"litepan/internal/settings"
 	"litepan/internal/strm"
+	"litepan/pkg/strutil"
 )
 
 const maskedSecret = "******"
@@ -31,10 +33,7 @@ var (
 	videoStreamPathRE    = regexp.MustCompile(`(?i)^(?:/?emby)?/?Videos/([^/]+)/(stream|original)(?:\.\w+)?$`)
 	playbackInfoPathRE   = regexp.MustCompile(`(?i)^(?:/?emby)?/?Items/([^/]+)/PlaybackInfo$`)
 	baseHTMLPlayerPathRE = regexp.MustCompile(`(?i)^(?:/?emby)?/?web/modules/htmlvideoplayer/basehtmlplayer\.js$`)
-	strmPlayPathRE       = regexp.MustCompile(`(?i)^/api/strm/play/(\d+)/([^/]+)/t/([^/]+)/n/([^/?#\s]+)(?:/s/([^/?#\s]+))?$`)
 	htmlCrossOriginRE    = regexp.MustCompile(`mediaSource\.IsRemote\s*&&\s*(?:"DirectPlay"\s*===\s*playMethod|playMethod\s*===\s*"DirectPlay")\s*\?\s*null\s*:\s*"anonymous"`)
-	hopByHopHeaderNames  = map[string]struct{}{"connection": {}, "keep-alive": {}, "proxy-authenticate": {}, "proxy-authorization": {}, "te": {}, "trailers": {}, "transfer-encoding": {}, "upgrade": {}, "host": {}}
-	testRequestTimeout   = 20 * time.Second
 )
 
 type Service struct {
@@ -122,7 +121,7 @@ func (s *Service) Snapshot(r *http.Request) Config {
 	cfg := s.configFromSettings()
 	cfg.APIKey = maskSecret(cfg.APIKey)
 	if cfg.Port != "" {
-		cfg.ProxyURL = publicBase(r, cfg.Port)
+		cfg.ProxyURL = proxybase.PublicBase(r, cfg.Port)
 	}
 	s.mu.Lock()
 	cfg.Running = s.server != nil
@@ -139,7 +138,7 @@ func (s *Service) Update(ctx context.Context, in UpdateRequest) (Config, error) 
 	if err != nil {
 		return Config{}, err
 	}
-	port, err := normalizeOptionalPort(in.Port)
+	port, err := proxybase.NormalizeOptionalPort(in.Port)
 	if err != nil {
 		return Config{}, err
 	}
@@ -213,7 +212,7 @@ func (s *Service) TestConfig(ctx context.Context, cfg Config) error {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return domain.Errorf(domain.CodeValidation, "请先填写 Emby API Key")
 	}
-	testCtx, cancel := context.WithTimeout(ctx, testRequestTimeout)
+	testCtx, cancel := context.WithTimeout(ctx, proxybase.TestRequestTimeout)
 	defer cancel()
 	testURL := cfg.EmbyURL + "/System/Info?" + url.Values{"api_key": {cfg.APIKey}}.Encode()
 	req, err := http.NewRequestWithContext(testCtx, http.MethodGet, testURL, nil)
@@ -401,7 +400,7 @@ func ConfigFromUpdate(in UpdateRequest) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	port, err := normalizeOptionalPort(in.Port)
+	port, err := proxybase.NormalizeOptionalPort(in.Port)
 	if err != nil {
 		return Config{}, err
 	}
@@ -507,7 +506,7 @@ func (s *Service) configFromSettings() Config {
 }
 
 func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
-	if strmPlayPathRE.MatchString(r.URL.Path) {
+	if proxybase.StrmPlayPathRE.MatchString(r.URL.Path) {
 		s.serveSTRM(w, r)
 		return
 	}
@@ -537,7 +536,7 @@ func (s *Service) serveSTRM(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "STRM playback is unavailable", http.StatusNotImplemented)
 		return
 	}
-	m := strmPlayPathRE.FindStringSubmatch(r.URL.Path)
+	m := proxybase.StrmPlayPathRE.FindStringSubmatch(r.URL.Path)
 	if len(m) < 5 {
 		http.NotFound(w, r)
 		return
@@ -586,7 +585,7 @@ func (s *Service) playbackServe(w http.ResponseWriter, r *http.Request, req play
 }
 
 func (s *Service) serveLitePanPlayback(w http.ResponseWriter, r *http.Request, litepanURL string) bool {
-	accountID, fileID, ok := parseLitePanSTRMURL(litepanURL)
+	accountID, fileID, ok := proxybase.ParseLitePanSTRMURL(litepanURL)
 	if !ok {
 		return false
 	}
@@ -677,7 +676,7 @@ func (s *Service) modifyPlaybackInfo(w http.ResponseWriter, r *http.Request, cfg
 		if litepanURL == "" {
 			continue
 		}
-		directPath := proxiedVideoPath(r, cfg, firstNonEmpty(itemID, stripMediaSourcePrefix(mediaSourceID)), mediaSourceID)
+		directPath := proxiedVideoPath(r, cfg, strutil.FirstNonEmpty(itemID, stripMediaSourcePrefix(mediaSourceID)), mediaSourceID)
 		mediaSource["SupportsDirectPlay"] = true
 		mediaSource["SupportsDirectStream"] = true
 		mediaSource["SupportsTranscoding"] = false
@@ -849,7 +848,7 @@ func (s *Service) inferLitePanMediaInfo(ctx context.Context, litepanURL, ua stri
 	if s.playback == nil {
 		return nil
 	}
-	accountID, fileID, ok := parseLitePanSTRMURL(litepanURL)
+	accountID, fileID, ok := proxybase.ParseLitePanSTRMURL(litepanURL)
 	if !ok {
 		return nil
 	}
@@ -876,23 +875,6 @@ func (s *Service) inferLitePanMediaInfo(ctx context.Context, litepanURL, ua stri
 		out["Size"] = size
 	}
 	return out
-}
-
-func parseLitePanSTRMURL(value string) (int64, string, bool) {
-	path := litepanPath(value)
-	m := strmPlayPathRE.FindStringSubmatch(path)
-	if len(m) < 3 {
-		return 0, "", false
-	}
-	accountID, err := strconv.ParseInt(m[1], 10, 64)
-	if err != nil || accountID <= 0 {
-		return 0, "", false
-	}
-	fileID, err := strm.DecodeFileKey(m[2])
-	if err != nil || fileID == "" {
-		return 0, "", false
-	}
-	return accountID, fileID, true
 }
 
 func targetURL(cfg Config, fullPath, rawQuery string) (string, error) {
@@ -929,46 +911,6 @@ func normalizeEmbyURL(raw string, required bool) (string, error) {
 	return v, nil
 }
 
-func normalizeOptionalPort(raw string) (string, error) {
-	v := strings.TrimSpace(raw)
-	if v == "" {
-		return "", nil
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil || n < 1 || n > 65535 {
-		return "", domain.Errorf(domain.CodeValidation, "反代端口必须是 1-65535")
-	}
-	return strconv.Itoa(n), nil
-}
-
-func publicBase(r *http.Request, port string) string {
-	if r == nil {
-		if port == "" {
-			return ""
-		}
-		return "http://127.0.0.1:" + port
-	}
-	scheme := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
-	if scheme == "" {
-		scheme = "http"
-		if r.TLS != nil {
-			scheme = "https"
-		}
-	}
-	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
-	if host == "" {
-		host = r.Host
-	}
-	if port != "" {
-		if h, _, err := net.SplitHostPort(host); err == nil {
-			host = net.JoinHostPort(h, port)
-		} else {
-			host = net.JoinHostPort(strings.Split(host, ":")[0], port)
-		}
-	}
-	return scheme + "://" + host
-}
-
 func proxiedVideoPath(r *http.Request, cfg Config, itemID, mediaSourceID string) string {
 	q := r.URL.Query()
 	q.Set("MediaSourceId", mediaSourceID)
@@ -998,7 +940,7 @@ func anyString(v any) string {
 }
 
 func normalizeMediaURL(candidate string, r *http.Request, cfg Config) string {
-	value := cleanWrappedURL(candidate)
+	value := proxybase.CleanWrappedURL(candidate)
 	if value == "" {
 		return ""
 	}
@@ -1006,46 +948,19 @@ func normalizeMediaURL(candidate string, r *http.Request, cfg Config) string {
 		return value
 	}
 	if strings.HasPrefix(value, "/") {
-		return strings.TrimRight(publicBase(r, cfg.Port), "/") + value
+		return strings.TrimRight(proxybase.PublicBase(r, cfg.Port), "/") + value
 	}
 	return value
 }
 
 func isLitePanSTRMURL(value string) bool {
-	return strings.HasPrefix(strings.ToLower(litepanPath(value)), "/api/strm/play/")
-}
-
-func litepanPath(value string) string {
-	text := cleanWrappedURL(value)
-	if text == "" {
-		return ""
-	}
-	if strings.HasPrefix(text, "http://") || strings.HasPrefix(text, "https://") {
-		u, err := url.Parse(text)
-		if err != nil {
-			return ""
-		}
-		return u.EscapedPath()
-	}
-	pathOnly, _, _ := strings.Cut(text, "?")
-	return pathOnly
-}
-
-func cleanWrappedURL(value string) string {
-	text := strings.TrimSpace(value)
-	for {
-		trimmed := strings.Trim(text, "`\"' ")
-		if trimmed == text {
-			return trimmed
-		}
-		text = strings.TrimSpace(trimmed)
-	}
+	return strings.HasPrefix(strings.ToLower(proxybase.LitePanPath(value)), "/api/strm/play/")
 }
 
 func responseHeaders(src http.Header) http.Header {
 	dst := make(http.Header, len(src))
 	for k, values := range src {
-		if _, skip := hopByHopHeaderNames[strings.ToLower(k)]; skip {
+		if _, skip := proxybase.HopByHopHeaderNames[strings.ToLower(k)]; skip {
 			continue
 		}
 		for _, v := range values {
@@ -1057,7 +972,7 @@ func responseHeaders(src http.Header) http.Header {
 
 func copyRequestHeaders(dst, src http.Header, identity bool) {
 	for k, values := range src {
-		if _, skip := hopByHopHeaderNames[strings.ToLower(k)]; skip {
+		if _, skip := proxybase.HopByHopHeaderNames[strings.ToLower(k)]; skip {
 			continue
 		}
 		for _, v := range values {
@@ -1086,7 +1001,7 @@ func writeUpstreamBody(w http.ResponseWriter, resp *http.Response, body []byte) 
 func rewriteLocation(location string, cfg Config, r *http.Request) string {
 	embyURL := strings.TrimRight(cfg.EmbyURL, "/")
 	if strings.HasPrefix(location, embyURL) {
-		return strings.TrimRight(publicBase(r, cfg.Port), "/") + strings.TrimPrefix(location, embyURL)
+		return strings.TrimRight(proxybase.PublicBase(r, cfg.Port), "/") + strings.TrimPrefix(location, embyURL)
 	}
 	return location
 }
@@ -1143,15 +1058,6 @@ func findMediaSourceByID(item map[string]any, mediaSourceID string) map[string]a
 		}
 	}
 	return nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }
 
 func maskSecret(value string) string {

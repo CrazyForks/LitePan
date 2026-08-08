@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"litepan/internal/playback"
+	"litepan/internal/proxybase"
 	"litepan/internal/settings"
 	"litepan/internal/store"
 	"litepan/internal/strm"
@@ -183,14 +184,14 @@ func TestParseLitePanSTRMURLFilenameRegressionCases(t *testing.T) {
 				strm.EncodeFileKey(fileID),
 				url.PathEscape(tc.fileName),
 			)
-			accountID, gotFileID, ok := parseLitePanSTRMURL(playURL)
+			accountID, gotFileID, ok := proxybase.ParseLitePanSTRMURL(playURL)
 			if !ok {
-				t.Fatalf("parseLitePanSTRMURL 返回 false，url=%q", playURL)
+				t.Fatalf("proxybase.ParseLitePanSTRMURL 返回 false，url=%q", playURL)
 			}
 			if accountID != 12 || gotFileID != fileID {
 				t.Fatalf("解析结果错误：account=%d file=%q", accountID, gotFileID)
 			}
-			if gotPath := litepanPath(playURL); strings.Contains(gotPath, " ") {
+			if gotPath := proxybase.LitePanPath(playURL); strings.Contains(gotPath, " ") {
 				t.Fatalf("编码路径不应出现空格：%q", gotPath)
 			}
 		})

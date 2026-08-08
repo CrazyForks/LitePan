@@ -9,6 +9,7 @@ import type {
 
 export interface AddOfflineURLsPayload {
   account_id: number;
+  provider_kind?: "native" | "builtin";
   urls: string[];
   file_name?: string;
   target_parent_id: string;

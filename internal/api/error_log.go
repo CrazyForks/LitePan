@@ -97,8 +97,7 @@ func shouldSuppressAPIErrorLog(r *http.Request, ae *domain.AppError) bool {
 func isTaskPanelProbePath(path string) bool {
 	switch path {
 	case "/api/files/upload/tasks",
-		"/api/files/upload/tasks/stream",
-		"/api/cross-transfer/relay/tasks/stream":
+		"/api/files/upload/tasks/stream":
 		return true
 	default:
 		return false

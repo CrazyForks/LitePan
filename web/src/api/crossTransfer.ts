@@ -51,35 +51,6 @@ export interface CrossTransferScanRequest {
   source_display_path?: string;
 }
 
-export interface CrossTransferRelayTask {
-  task_id: string;
-  source_account_id: number;
-  source_account_name: string;
-  source_driver_type: string;
-  target_account_id: number;
-  target_account_name: string;
-  target_driver_type: string;
-  source_file_id: string;
-  file_name: string;
-  rel_path: string;
-  rel_dir: string;
-  target_parent_id: string;
-  target_display_path: string;
-  total_bytes: number;
-  status: string;
-  phase: string;
-  progress: number;
-  downloaded_bytes: number;
-  uploaded_bytes: number;
-  speed_bytes_per_second: number;
-  message: string;
-  error: string;
-  result?: Record<string, unknown>;
-  queue_order?: number;
-  created_at: number;
-  updated_at: number;
-}
-
 export function listCrossTransferRoutes() {
   return http.get<CrossTransferRoute[]>("/cross-transfer/routes");
 }
@@ -149,14 +120,4 @@ export function executeCrossTransferStream(
   signal?: AbortSignal,
 ) {
   return streamCrossTransferNDJSON<Record<string, unknown>>("/cross-transfer/execute", body, signal);
-}
-
-export function listCrossTransferRelayTasks() {
-  return http.get<CrossTransferRelayTask[]>("/cross-transfer/relay/tasks");
-}
-
-export function deleteCrossTransferRelayTasks(taskIds: string[]) {
-  return http.post<{ removed: number }>("/cross-transfer/relay/tasks/batch-delete", {
-    task_ids: taskIds,
-  });
 }

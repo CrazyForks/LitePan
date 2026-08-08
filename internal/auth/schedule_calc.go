@@ -24,7 +24,7 @@ func (s *Service) ensureSchedule(ctx context.Context, accountID int64) {
 		return
 	}
 	patched := *st
-	SeedInitialSchedule(&patched, acc.DriverType, s.nowTime())
+	SeedInitialSchedule(&patched, acc.DriverType, s.now())
 	if patched.TokenExpires.Equal(st.TokenExpires) && patched.LastRefreshAt.Equal(st.LastRefreshAt) {
 		return
 	}

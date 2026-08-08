@@ -32,8 +32,6 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
   const hiddenUploadTaskKeys = reactive(new Set<string>());
   let folderUploadRefreshPending = false;
 
-  const { activeRelayTasks, failedRelayTasks, activeRelayCount } = deps.relay;
-
   function uploadAffectsCurrentDirectory(task: UploadTask, currentPath: string) {
     if (String(task.account_id) !== String(deps.selectedAccountId.value)) return false;
     if (task.status !== "success" && task.status !== "skipped") return false;
@@ -61,8 +59,28 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
     });
   });
 
+  const relayTasks = computed(() =>
+    displayUploadTasks.value.filter(
+      (task) => task.source_type === "cross_transfer" && task.phase === "downloading",
+    ),
+  );
+
+  const activeRelayTasks = computed(() =>
+    relayTasks.value.filter((task) => ["pending", "running", "paused"].includes(task.status)),
+  );
+
+  const failedRelayTasks = computed(() =>
+    relayTasks.value.filter((task) => ["failed", "canceled"].includes(task.status)),
+  );
+
+  const activeRelayCount = computed(() => activeRelayTasks.value.length);
+
   const activeUploadTasks = computed(() =>
-    displayUploadTasks.value.filter((t) => t.status === "pending" || t.status === "running"),
+    displayUploadTasks.value.filter(
+      (task) =>
+        !(task.source_type === "cross_transfer" && task.phase === "downloading") &&
+        (task.status === "pending" || task.status === "running"),
+    ),
   );
   const uploadTaskBadgeText = computed(() => {
     const running = activeUploadTasks.value.length;
@@ -215,6 +233,7 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
     localDispatchingTaskIds,
     pendingRemoteResumeTaskIds,
     hiddenUploadTaskKeys,
+    relayTasks,
     activeRelayTasks,
     failedRelayTasks,
     activeRelayCount,

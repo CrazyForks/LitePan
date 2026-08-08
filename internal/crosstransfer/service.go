@@ -788,12 +788,18 @@ func (s *Service) executeTransferFile(ctx context.Context, in executeFileInput) 
 	folderID, err := EnsureTargetDir(ctx, s.files, in.targetAccountID, in.targetParentID, f.RelDir, in.dirCache, in.dirCreated)
 	if err != nil {
 		s.log.Warn("跨盘秒传创建目录失败", "name", f.Name, "err", err)
+		if in.fallback {
+			return s.fallbackTransferResult(ctx, in, base, err.Error())
+		}
 		return transferItemResult(base, false, "error", "", err.Error())
 	}
 	if in.conflict == "skip" {
 		exists, err := s.targetFileExists(ctx, in.targetAccountID, folderID, f.Name)
 		if err != nil {
 			s.log.Warn("跨盘秒传检查目标同名失败", "name", f.Name, "err", err)
+			if in.fallback {
+				return s.fallbackTransferResult(ctx, in, base, err.Error())
+			}
 			return transferItemResult(base, false, "error", "", err.Error())
 		}
 		if exists {
@@ -807,17 +813,16 @@ func (s *Service) executeTransferFile(ctx context.Context, in executeFileInput) 
 	}
 	if fileHash == "" {
 		if in.fallback {
-			if relayErr := s.enqueueRelayTask(ctx, in); relayErr == nil {
-				return transferItemResult(base, false, "relay", "", "")
-			} else {
-				return transferItemResult(base, false, "error", "", relayErr.Error())
-			}
+			return s.fallbackTransferResult(ctx, in, base, "")
 		}
 		return transferItemResult(base, false, "skip", "", "缺少指纹")
 	}
 
 	reuse, fileID, rapidErr := s.tryRapidUpload(ctx, in.targetAccountID, folderID, f.Name, in.methodID, fileHash, f.Size, in.duplicate)
 	if rapidErr != "" {
+		if in.fallback {
+			return s.fallbackTransferResult(ctx, in, base, rapidErr)
+		}
 		return transferItemResult(base, false, "error", "", rapidErr)
 	}
 	if reuse {
@@ -828,13 +833,23 @@ func (s *Service) executeTransferFile(ctx context.Context, in executeFileInput) 
 	}
 
 	if in.fallback {
-		if err := s.enqueueRelayTask(ctx, in); err != nil {
-			return transferItemResult(base, false, "error", "", err.Error())
-		}
-		return transferItemResult(base, false, "relay", "", "")
+		return s.fallbackTransferResult(ctx, in, base, "")
 	}
 
 	return transferItemResult(base, false, "rapid", "", "未命中秒传")
+}
+
+func (s *Service) fallbackTransferResult(ctx context.Context, in executeFileInput, base map[string]any, cause string) map[string]any {
+	if err := s.enqueueRelayTask(ctx, in); err != nil {
+		if cause != "" {
+			return transferItemResult(base, false, "error", "", fmt.Sprintf("%s；兜底排队失败: %s", cause, err))
+		}
+		return transferItemResult(base, false, "error", "", err.Error())
+	}
+	if cause != "" {
+		s.log.Warn("跨盘秒传未完成，已转入兜底传输", "name", in.file.Name, "err", cause)
+	}
+	return transferItemResult(base, false, "relay", "", "")
 }
 
 func (s *Service) enqueueRelayTask(ctx context.Context, in executeFileInput) error {

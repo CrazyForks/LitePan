@@ -63,7 +63,10 @@ func (h *Handler) adminUpdateCredentials(w http.ResponseWriter, r *http.Request)
 		writeErr(w, err)
 		return
 	}
-	h.applyUploadConcurrencyHotReload(r.Context(), req.UploadTaskConcurrency)
+	if err := h.applyUploadConcurrencyHotReload(r.Context(), req.UploadTaskConcurrency); err != nil {
+		writeErr(w, err)
+		return
+	}
 	writeOK(w, map[string]any{})
 }
 

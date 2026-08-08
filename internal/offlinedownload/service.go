@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"net/url"
 	"path"
@@ -16,6 +17,10 @@ import (
 	"litepan/internal/domain"
 	"litepan/internal/driver"
 	"litepan/internal/eventbus"
+	"litepan/internal/settings"
+	"litepan/internal/upload"
+	"litepan/pkg/strutil"
+	"litepan/pkg/timeutil"
 )
 
 const (
@@ -27,8 +32,17 @@ type Options struct {
 	Exec     *driverexec.Executor
 	Accounts domain.AccountRepository
 	Repo     domain.OfflineDownloadTaskRepository
+	Folders  FolderCreator
+	Settings *settings.Service
+	DataDir  string
 	Bus      *eventbus.Bus
 	Log      *slog.Logger
+}
+
+// FolderCreator 是离线交棒时在目标网盘创建目录所需的最小能力，
+// 由 internal/file.Service 实现（自带缓存失效与 FileMutated 事件）。
+type FolderCreator interface {
+	CreateFolder(ctx context.Context, accountID int64, parentID, name string) (*domain.FileItem, error)
 }
 
 type preparedTorrent struct {
@@ -41,30 +55,61 @@ type Service struct {
 	exec     *driverexec.Executor
 	accounts domain.AccountRepository
 	repo     domain.OfflineDownloadTaskRepository
+	folders  FolderCreator
+	settings *settings.Service
+	dataDir  string
 	bus      *eventbus.Bus
 	log      *slog.Logger
 
-	mu          sync.Mutex
-	tasks       map[string]*Task
-	prepared    map[string]preparedTorrent
-	lastRefresh map[int64]time.Time
+	mu                   sync.Mutex
+	tasks                map[string]*Task
+	prepared             map[string]preparedTorrent
+	lastRefresh          map[int64]time.Time
+	uploads              *upload.Manager
+	builtinRun           map[string]builtinRunState
+	builtinLimit         int
+	builtinRunning       int
+	builtinMagnetRunning int
+	builtinWake          chan struct{}
+	builtinRoot          string
+	builtinRoots         map[string]struct{}
+	magnetRestartPending bool
+	magnetRestarting     bool
+	downloadLimiter      *builtinDownloadLimiter
+	started              bool
+	runCtx               context.Context
+	runCancel            context.CancelFunc
+	runWG                sync.WaitGroup
+	magnet               *builtinMagnetRuntime
 }
 
 func New(opts Options) *Service {
+	builtinRoot := builtinTempDir(opts.Settings, opts.DataDir)
 	s := &Service{
-		exec:        opts.Exec,
-		accounts:    opts.Accounts,
-		repo:        opts.Repo,
-		bus:         opts.Bus,
-		log:         opts.Log,
-		tasks:       make(map[string]*Task),
-		prepared:    make(map[string]preparedTorrent),
-		lastRefresh: make(map[int64]time.Time),
+		exec:            opts.Exec,
+		accounts:        opts.Accounts,
+		repo:            opts.Repo,
+		folders:         opts.Folders,
+		settings:        opts.Settings,
+		dataDir:         opts.DataDir,
+		bus:             opts.Bus,
+		log:             opts.Log,
+		tasks:           make(map[string]*Task),
+		prepared:        make(map[string]preparedTorrent),
+		lastRefresh:     make(map[int64]time.Time),
+		builtinRun:      make(map[string]builtinRunState),
+		builtinLimit:    builtinConcurrency(opts.Settings),
+		builtinWake:     make(chan struct{}),
+		builtinRoot:     builtinRoot,
+		builtinRoots:    map[string]struct{}{builtinRoot: {}},
+		downloadLimiter: newBuiltinDownloadLimiter(builtinSpeedLimitBytes(opts.Settings)),
+		magnet:          &builtinMagnetRuntime{},
 	}
 	if s.log == nil {
 		s.log = slog.Default()
 	}
 	s.restore()
+	s.rememberRestoredBuiltinRoots()
 	return s
 }
 
@@ -87,13 +132,17 @@ func (s *Service) Capabilities(ctx context.Context, accountID int64) (Capabiliti
 		return Capabilities{}, err
 	}
 	return Capabilities{
-		Supported:         cap.SupportsURLs || cap.SupportsTorrent,
-		SupportsURLs:      cap.SupportsURLs,
-		SupportsBatchURLs: cap.SupportsBatchURLs,
-		SupportsTorrent:   cap.SupportsTorrent,
-		URLSchemes:        append([]string(nil), cap.URLSchemes...),
-		RootTargetAllowed: cap.RootTargetAllowed,
-		RemoteDelete:      cap.RemoteDelete,
+		Supported:              true,
+		SupportsURLs:           cap.SupportsURLs,
+		SupportsBatchURLs:      cap.SupportsBatchURLs,
+		SupportsTorrent:        cap.SupportsTorrent,
+		URLSchemes:             append([]string(nil), cap.URLSchemes...),
+		RootTargetAllowed:      cap.RootTargetAllowed,
+		RemoteDelete:           cap.RemoteDelete,
+		BuiltinEnabled:         true,
+		BuiltinSupportsURLs:    true,
+		BuiltinURLSchemes:      builtinURLSchemes(),
+		BuiltinSupportsTorrent: false,
 	}, nil
 }
 
@@ -101,9 +150,21 @@ func (s *Service) AddURLs(ctx context.Context, p AddURLParams) ([]Task, error) {
 	if p.AccountID <= 0 {
 		return nil, domain.Errorf(domain.CodeValidation, "非法 account_id")
 	}
+	providerKind := strings.TrimSpace(p.ProviderKind)
+	if providerKind == "" {
+		providerKind = ProviderNative
+	}
+	switch providerKind {
+	case ProviderNative, ProviderBuiltin:
+	default:
+		return nil, domain.Errorf(domain.CodeValidation, "未知离线下载器：%s", providerKind)
+	}
 	urls := normalizeURLs(p.URLs)
 	if len(urls) == 0 {
 		return nil, domain.Errorf(domain.CodeValidation, "请至少填写一个离线下载链接")
+	}
+	if providerKind == ProviderBuiltin {
+		return s.addBuiltinURLs(ctx, p, urls)
 	}
 	accountName, driverType, err := s.lookupAccount(ctx, p.AccountID)
 	if err != nil {
@@ -175,9 +236,10 @@ func (s *Service) AddURLs(ctx context.Context, p AddURLParams) ([]Task, error) {
 			AccountID:         p.AccountID,
 			AccountName:       accountName,
 			DriverType:        driverType,
+			ProviderKind:      providerKind,
 			SourceKind:        SourceURL,
 			Source:            source,
-			Name:              firstNonEmpty(result.Name, displayNameForURL(source)),
+			Name:              strutil.FirstNonEmpty(result.Name, displayNameForURL(source)),
 			ProviderTaskID:    result.ProviderTaskID,
 			InfoHash:          result.InfoHash,
 			TargetParentID:    p.TargetParentID,
@@ -186,8 +248,8 @@ func (s *Service) AddURLs(ctx context.Context, p AddURLParams) ([]Task, error) {
 			Message:           message,
 			Error:             errText,
 			RemoteDelete:      cap.RemoteDelete,
-			CreatedAt:         unixFloat(now),
-			UpdatedAt:         unixFloat(now),
+			CreatedAt:         timeutil.UnixFloat(now),
+			UpdatedAt:         timeutil.UnixFloat(now),
 		}
 		s.putTask(&task)
 		created = append(created, task)
@@ -229,7 +291,7 @@ func (s *Service) PrepareTorrent(ctx context.Context, accountID int64, localPath
 		TorrentName:   prep.TorrentName,
 		TotalSize:     prep.TotalSize,
 		Files:         append([]driver.OfflineTorrentFile(nil), prep.Files...),
-		ExpiresAt:     unixFloat(expires),
+		ExpiresAt:     timeutil.UnixFloat(expires),
 	}, nil
 }
 
@@ -294,18 +356,19 @@ func (s *Service) AddTorrent(ctx context.Context, p AddTorrentParams) (*Task, er
 		AccountID:         p.AccountID,
 		AccountName:       accountName,
 		DriverType:        driverType,
+		ProviderKind:      ProviderNative,
 		SourceKind:        SourceTorrent,
 		Source:            prepared.value.TorrentName,
-		Name:              firstNonEmpty(result.Name, prepared.value.TorrentName),
+		Name:              strutil.FirstNonEmpty(result.Name, prepared.value.TorrentName),
 		ProviderTaskID:    result.ProviderTaskID,
-		InfoHash:          firstNonEmpty(result.InfoHash, prepared.value.InfoHash),
+		InfoHash:          strutil.FirstNonEmpty(result.InfoHash, prepared.value.InfoHash),
 		TargetParentID:    p.TargetParentID,
 		TargetDisplayPath: normalizeDisplayPath(p.TargetDisplayPath),
 		Status:            driver.OfflineStatusPending,
-		Message:           firstNonEmpty(result.Message, "BT 任务已提交到网盘"),
+		Message:           strutil.FirstNonEmpty(result.Message, "BT 任务已提交到网盘"),
 		RemoteDelete:      cap.RemoteDelete,
-		CreatedAt:         unixFloat(now),
-		UpdatedAt:         unixFloat(now),
+		CreatedAt:         timeutil.UnixFloat(now),
+		UpdatedAt:         timeutil.UnixFloat(now),
 	}
 	s.putTask(task)
 	copy := *task
@@ -340,6 +403,9 @@ func (s *Service) Refresh(ctx context.Context, accountID int64, force bool) erro
 			continue
 		}
 		if isTerminal(task.Status) {
+			continue
+		}
+		if task.ProviderKind == ProviderBuiltin {
 			continue
 		}
 		groups[task.AccountID] = append(groups[task.AccountID], driver.OfflineTaskRef{
@@ -393,6 +459,33 @@ func (s *Service) Delete(ctx context.Context, taskID string) error {
 	if !ok {
 		return domain.Errorf(domain.CodeNotFound, "离线下载任务不存在")
 	}
+	if task.ProviderKind == ProviderBuiltin {
+		if err := s.stopBuiltinTask(ctx, taskID); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		current, exists := s.tasks[taskID]
+		if exists {
+			copy := *current
+			task = &copy
+		}
+		s.mu.Unlock()
+		if !exists {
+			return nil
+		}
+		if s.repo != nil {
+			if err := s.repo.Delete(ctx, taskID); err != nil {
+				return err
+			}
+		}
+		s.mu.Lock()
+		delete(s.tasks, taskID)
+		s.mu.Unlock()
+		if task.Status != driver.OfflineStatusSuccess {
+			s.removeBuiltinTaskTemp(taskID, task.LocalTempPath)
+		}
+		return nil
+	}
 	hasRemoteRef := strings.TrimSpace(task.ProviderTaskID) != "" || strings.TrimSpace(task.InfoHash) != ""
 	canDeleteRemote := task.RemoteDelete && hasRemoteRef
 	if !canDeleteRemote && !isTerminal(task.Status) {
@@ -410,12 +503,14 @@ func (s *Service) Delete(ctx context.Context, taskID string) error {
 			return err
 		}
 	}
+	if s.repo != nil {
+		if err := s.repo.Delete(ctx, taskID); err != nil {
+			return err
+		}
+	}
 	s.mu.Lock()
 	delete(s.tasks, taskID)
 	s.mu.Unlock()
-	if s.repo != nil {
-		return s.repo.Delete(ctx, taskID)
-	}
 	return nil
 }
 
@@ -447,12 +542,44 @@ func (s *Service) BatchDelete(ctx context.Context, taskIDs []string) BatchDelete
 
 func (s *Service) RemoveTasksByAccount(ctx context.Context, accountID int64) (int64, error) {
 	s.mu.Lock()
-	var count int64
+	builtinIDs := make([]string, 0)
 	for id, task := range s.tasks {
-		if task.AccountID == accountID {
-			delete(s.tasks, id)
-			count++
+		if task.AccountID == accountID && task.ProviderKind == ProviderBuiltin {
+			builtinIDs = append(builtinIDs, id)
 		}
+	}
+	s.mu.Unlock()
+	for _, id := range builtinIDs {
+		if err := s.stopBuiltinTask(ctx, id); err != nil {
+			return 0, err
+		}
+	}
+
+	var repoCount int64
+	if s.repo != nil {
+		var err error
+		repoCount, err = s.repo.DeleteByAccount(ctx, accountID)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	var count int64
+	type builtinTemp struct {
+		taskID    string
+		localPath string
+	}
+	tempPaths := make([]builtinTemp, 0, len(builtinIDs))
+	s.mu.Lock()
+	for id, task := range s.tasks {
+		if task.AccountID != accountID {
+			continue
+		}
+		if task.ProviderKind == ProviderBuiltin && task.Status != driver.OfflineStatusSuccess {
+			tempPaths = append(tempPaths, builtinTemp{taskID: id, localPath: task.LocalTempPath})
+		}
+		delete(s.tasks, id)
+		count++
 	}
 	delete(s.lastRefresh, accountID)
 	for id, prep := range s.prepared {
@@ -461,10 +588,13 @@ func (s *Service) RemoveTasksByAccount(ctx context.Context, accountID int64) (in
 		}
 	}
 	s.mu.Unlock()
-	if s.repo == nil {
-		return count, nil
+	for _, temp := range tempPaths {
+		s.removeBuiltinTaskTemp(temp.taskID, temp.localPath)
 	}
-	return s.repo.DeleteByAccount(ctx, accountID)
+	if repoCount > count {
+		count = repoCount
+	}
+	return count, nil
 }
 
 func (s *Service) applyUpdates(accountID int64, updates []driver.OfflineTaskUpdate) {
@@ -505,7 +635,7 @@ func (s *Service) applyUpdates(accountID int64, updates []driver.OfflineTaskUpda
 			task.Message = update.Message
 		}
 		task.Error = update.Error
-		task.UpdatedAt = unixFloat(time.Now())
+		task.UpdatedAt = timeutil.UnixFloat(time.Now())
 		copy := *task
 		changed = append(changed, &copy)
 		if task.Status == driver.OfflineStatusSuccess {
@@ -741,43 +871,71 @@ func normalizeDisplayPath(value string) string {
 	return value
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
 func newID() string {
 	var data [8]byte
 	_, _ = rand.Read(data[:])
 	return hex.EncodeToString(data[:])
 }
 
-func unixFloat(t time.Time) float64 { return float64(t.UnixNano()) / 1e9 }
-
 func recordFromTask(task *Task) *domain.OfflineDownloadTaskRecord {
+	providerKind := strings.TrimSpace(task.ProviderKind)
+	if providerKind == "" {
+		providerKind = ProviderNative
+	}
+	diagnosticsJSON := serializeJSON(task.MagnetDiagnostics)
 	return &domain.OfflineDownloadTaskRecord{
 		TaskID: task.TaskID, AccountID: task.AccountID, AccountName: task.AccountName,
-		DriverType: task.DriverType, SourceKind: task.SourceKind, Source: task.Source,
+		DriverType: task.DriverType, ProviderKind: providerKind, ExecutorType: task.ExecutorType,
+		SourceKind: task.SourceKind, Source: task.Source,
 		Name: task.Name, ProviderTaskID: task.ProviderTaskID, InfoHash: task.InfoHash,
 		TargetParentID: task.TargetParentID, TargetDisplayPath: task.TargetDisplayPath,
-		Status: task.Status, Progress: task.Progress, Size: task.Size, FileID: task.FileID,
+		Status: task.Status, Phase: task.Phase, Progress: task.Progress, Size: task.Size,
+		DownloadedBytes: task.DownloadedBytes, SpeedBytes: task.SpeedBytes, LocalTempPath: task.LocalTempPath, MagnetDiagnosticsJSON: diagnosticsJSON,
+		FileID:  task.FileID,
 		Message: task.Message, Error: task.Error, RemoteDelete: task.RemoteDelete,
 		CreatedAt: task.CreatedAt, UpdatedAt: task.UpdatedAt,
 	}
 }
 
 func taskFromRecord(rec *domain.OfflineDownloadTaskRecord) *Task {
+	providerKind := strings.TrimSpace(rec.ProviderKind)
+	if providerKind == "" {
+		providerKind = ProviderNative
+	}
+	diagnostics := deserializeJSON[*MagnetDiagnostics](rec.MagnetDiagnosticsJSON)
 	return &Task{
 		TaskID: rec.TaskID, AccountID: rec.AccountID, AccountName: rec.AccountName,
-		DriverType: rec.DriverType, SourceKind: rec.SourceKind, Source: rec.Source,
+		DriverType: rec.DriverType, ProviderKind: providerKind, ExecutorType: rec.ExecutorType,
+		SourceKind: rec.SourceKind, Source: rec.Source,
 		Name: rec.Name, ProviderTaskID: rec.ProviderTaskID, InfoHash: rec.InfoHash,
 		TargetParentID: rec.TargetParentID, TargetDisplayPath: rec.TargetDisplayPath,
-		Status: rec.Status, Progress: rec.Progress, Size: rec.Size, FileID: rec.FileID,
+		Status: rec.Status, Phase: rec.Phase, Progress: rec.Progress, Size: rec.Size,
+		DownloadedBytes: rec.DownloadedBytes, SpeedBytes: rec.SpeedBytes, LocalTempPath: rec.LocalTempPath, MagnetDiagnostics: diagnostics,
+		FileID:  rec.FileID,
 		Message: rec.Message, Error: rec.Error, RemoteDelete: rec.RemoteDelete,
 		CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
 	}
+}
+
+func serializeJSON(v any) string {
+	if v == nil {
+		return ""
+	}
+	payload, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(payload)
+}
+
+func deserializeJSON[T any](raw string) T {
+	var value T
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return value
+	}
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return value
+	}
+	return value
 }

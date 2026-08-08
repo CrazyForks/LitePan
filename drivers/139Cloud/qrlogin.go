@@ -21,6 +21,7 @@ import (
 	"litepan/internal/domain"
 	"litepan/internal/driver"
 	"litepan/internal/httpx"
+	"litepan/pkg/strutil"
 )
 
 const (
@@ -144,13 +145,13 @@ func (d *Driver) PollQRLogin(ctx context.Context, token string) (*driver.QRPollR
 	case driver.QRExpired:
 		return &driver.QRPollResult{Status: driver.QRExpired, Message: "二维码已过期，请重新获取"}, nil
 	case driver.QRFailed:
-		msg := firstNonEmpty(data.ResultDesc, env.Message, "扫码登录失败")
+		msg := strutil.FirstNonEmpty(data.ResultDesc, env.Message, "扫码登录失败")
 		if qrCodeCancel[qrPollCode(env, data)] {
 			msg = "已取消，请重新扫码"
 		}
 		return &driver.QRPollResult{Status: driver.QRFailed, Message: msg}, nil
 	default:
-		msg := firstNonEmpty(env.Message, "请用中国移动云盘 App「扫一扫」扫码，并在手机上确认登录")
+		msg := strutil.FirstNonEmpty(env.Message, "请用中国移动云盘 App「扫一扫」扫码，并在手机上确认登录")
 		if qrCodeWaiting[qrPollCode(env, data)] {
 			if strings.Contains(msg, "未找到") || msg == "参数为空" {
 				msg = "请用中国移动云盘 App「扫一扫」扫码，并在手机上确认登录"
@@ -208,7 +209,7 @@ func qrHasCredentials(data qrLoginData) bool {
 	if account == "" && strings.TrimSpace(data.EncryptAccount) != "" {
 		account = "x"
 	}
-	token := strings.TrimSpace(firstNonEmpty(data.Token, data.AuthToken))
+	token := strings.TrimSpace(strutil.FirstNonEmpty(data.Token, data.AuthToken))
 	return account != "" && token != ""
 }
 
@@ -345,22 +346,22 @@ func fillQRLoginData(raw []byte) (qrLoginData, error) {
 	if err := json.Unmarshal(raw, &top); err != nil {
 		return out, domain.Wrap(domain.CodeDriverError, err)
 	}
-	out.Account = firstNonEmpty(
+	out.Account = strutil.FirstNonEmpty(
 		anyToString(top["account"]),
 		anyToString(top["msisdn"]),
 		anyToString(top["phoneNumber"]),
 		findStringByKeys(top, "account", "msisdn", "phoneNumber"),
 	)
-	out.Token = firstNonEmpty(
+	out.Token = strutil.FirstNonEmpty(
 		anyToString(top["token"]),
 		anyToString(top["authToken"]),
 		anyToString(top["accessToken"]),
 		findStringByKeys(top, "authToken", "token", "accessToken"),
 	)
-	out.AuthToken = firstNonEmpty(anyToString(top["authToken"]), anyToString(top["token"]), out.Token)
-	out.EncryptAccount = firstNonEmpty(anyToString(top["encryptAccount"]), findStringByKeys(top, "encryptAccount"))
+	out.AuthToken = strutil.FirstNonEmpty(anyToString(top["authToken"]), anyToString(top["token"]), out.Token)
+	out.EncryptAccount = strutil.FirstNonEmpty(anyToString(top["encryptAccount"]), findStringByKeys(top, "encryptAccount"))
 	out.SimplifyAccount = anyToString(top["simplifyAccount"])
-	if exp := firstNonEmpty(anyToString(top["expireTime"]), findStringByKeys(top, "expireTime")); exp != "" {
+	if exp := strutil.FirstNonEmpty(anyToString(top["expireTime"]), findStringByKeys(top, "expireTime")); exp != "" {
 		out.ExpireTime = json.Number(exp)
 	}
 	if result, ok := top["result"].(map[string]any); ok {

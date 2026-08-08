@@ -27,6 +27,11 @@ const open = ref(false);
           <code>image.tmdb.org</code>
           解析到你能访问的 IP（IP 请自行查找可用值，会随网络环境变化）。
         </p>
+        <p class="tmdb-hosts-panel__foot">
+          如果你通过环境变量把 <code>TMDB_API_BASE_URL</code> 改成了
+          <code>https://api.tmdb.org/3</code>，那下面的 API hosts 也要改成
+          <code>api.tmdb.org</code>，否则不会生效。
+        </p>
         <div class="tmdb-hosts-panel__subtitle">docker run</div>
         <pre class="tmdb-hosts-panel__code">--add-host=api.themoviedb.org:可用IP
 --add-host=image.tmdb.org:可用IP</pre>

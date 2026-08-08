@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +16,8 @@ import (
 )
 
 const (
-	baseURL          = "https://api.themoviedb.org/3"
+	defaultBaseURL   = "https://api.themoviedb.org/3"
+	apiBaseURLEnv    = "TMDB_API_BASE_URL"
 	defaultTimeout   = 10 * time.Second
 	maxSearchResults = 10
 	mediaTypeMovie   = "movie"
@@ -33,6 +35,7 @@ type ProxyConfig struct {
 type Client struct {
 	apiKey         string
 	language       string
+	baseURL        string
 	http           *http.Client
 	maxRetries     int
 	retryBaseDelay time.Duration
@@ -73,6 +76,7 @@ func NewClient(opts Options) *Client {
 	return &Client{
 		apiKey:         strings.TrimSpace(opts.APIKey),
 		language:       strings.TrimSpace(opts.Language),
+		baseURL:        resolveAPIBaseURL(),
 		maxRetries:     maxRetries,
 		retryBaseDelay: retryBaseDelay,
 		http: httpx.NewClient(httpx.ClientOptions{
@@ -198,7 +202,7 @@ func (c *Client) FetchTVSeason(ctx context.Context, tmdbID string, seasonNumber 
 	if c.language != "" {
 		q.Set("language", c.language)
 	}
-	return c.get(ctx, fmt.Sprintf("%s/tv/%d/season/%d", baseURL, id, seasonNumber), q)
+	return c.get(ctx, fmt.Sprintf("%s/tv/%d/season/%d", c.apiBaseURL(), id, seasonNumber), q)
 }
 
 func (c *Client) searchMovie(ctx context.Context, query string, year *int) ([]json.RawMessage, error) {
@@ -211,7 +215,7 @@ func (c *Client) searchMovie(ctx context.Context, query string, year *int) ([]js
 	if year != nil && *year > 0 {
 		q.Set("year", strconv.Itoa(*year))
 	}
-	return c.search(ctx, baseURL+"/search/movie", q)
+	return c.search(ctx, c.apiBaseURL()+"/search/movie", q)
 }
 
 func (c *Client) searchTV(ctx context.Context, query string, year *int) ([]json.RawMessage, error) {
@@ -224,7 +228,7 @@ func (c *Client) searchTV(ctx context.Context, query string, year *int) ([]json.
 	if year != nil && *year > 0 {
 		q.Set("first_air_date_year", strconv.Itoa(*year))
 	}
-	return c.search(ctx, baseURL+"/search/tv", q)
+	return c.search(ctx, c.apiBaseURL()+"/search/tv", q)
 }
 
 func (c *Client) lookupMovie(ctx context.Context, id int) (json.RawMessage, error) {
@@ -233,7 +237,7 @@ func (c *Client) lookupMovie(ctx context.Context, id int) (json.RawMessage, erro
 	if c.language != "" {
 		q.Set("language", c.language)
 	}
-	return c.get(ctx, fmt.Sprintf("%s/movie/%d", baseURL, id), q)
+	return c.get(ctx, fmt.Sprintf("%s/movie/%d", c.apiBaseURL(), id), q)
 }
 
 func (c *Client) lookupTV(ctx context.Context, id int) (json.RawMessage, error) {
@@ -242,7 +246,7 @@ func (c *Client) lookupTV(ctx context.Context, id int) (json.RawMessage, error) 
 	if c.language != "" {
 		q.Set("language", c.language)
 	}
-	return c.get(ctx, fmt.Sprintf("%s/tv/%d", baseURL, id), q)
+	return c.get(ctx, fmt.Sprintf("%s/tv/%d", c.apiBaseURL(), id), q)
 }
 
 func (c *Client) search(ctx context.Context, endpoint string, query url.Values) ([]json.RawMessage, error) {
@@ -289,6 +293,25 @@ func (c *Client) get(ctx context.Context, endpoint string, query url.Values) (js
 		}
 	}
 	return nil, lastErr
+}
+
+func (c *Client) apiBaseURL() string {
+	if c == nil || strings.TrimSpace(c.baseURL) == "" {
+		return defaultBaseURL
+	}
+	return c.baseURL
+}
+
+func resolveAPIBaseURL() string {
+	raw := strings.TrimRight(strings.TrimSpace(os.Getenv(apiBaseURLEnv)), "/")
+	if raw == "" {
+		return defaultBaseURL
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return defaultBaseURL
+	}
+	return raw
 }
 
 const imageBaseURL = "https://image.tmdb.org/t/p"

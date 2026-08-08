@@ -23,7 +23,7 @@ func (g *Gate) Check(ctx context.Context, accountID int64) error {
 	if err != nil {
 		return err
 	}
-	now := g.svc.nowTime()
+	now := g.svc.now()
 	switch st.Status {
 	case domain.AuthFailed:
 		return authBlocked(st, now)
@@ -57,7 +57,7 @@ func (g *Gate) HandlePassiveError(ctx context.Context, accountID int64) error {
 	if err != nil {
 		return err
 	}
-	now := g.svc.nowTime()
+	now := g.svc.now()
 	if st.Status == domain.AuthActive && !st.LastRefreshAt.IsZero() {
 		if now.Sub(st.LastRefreshAt) < passiveReuseWindow {
 			return nil
