@@ -85,18 +85,18 @@ func (h *Handler) createMediaOrganizeTask(w http.ResponseWriter, r *http.Request
 		actionType = "move"
 	}
 	cfg := mediaorganize.NormalizeTaskConfig(map[string]any{
-		"task_name":            strings.TrimSpace(in.TaskName),
-		"account_id":           strconv.FormatInt(in.AccountID, 10),
-		"target_directory":     in.TargetDirectory,
-		"target_directory_id":  in.TargetDirectoryID,
-		"action_type":          actionType,
-		"target_root":          in.TargetRoot,
-		"target_root_id":       in.TargetRootID,
-		"media_type":           defaultString(in.MediaType, "auto"),
-		"rename_marker": in.RenameMarker,
-		"use_tmdb":      in.UseTmdb,
-		"overwrite_existing":   in.OverwriteExisting,
-		"recursive":            in.Recursive,
+		"task_name":           strings.TrimSpace(in.TaskName),
+		"account_id":          strconv.FormatInt(in.AccountID, 10),
+		"target_directory":    in.TargetDirectory,
+		"target_directory_id": in.TargetDirectoryID,
+		"action_type":         actionType,
+		"target_root":         in.TargetRoot,
+		"target_root_id":      in.TargetRootID,
+		"media_type":          defaultString(in.MediaType, "auto"),
+		"rename_marker":       in.RenameMarker,
+		"use_tmdb":            in.UseTmdb,
+		"overwrite_existing":  in.OverwriteExisting,
+		"recursive":           in.Recursive,
 	})
 	cfgBytes, _ := json.Marshal(cfg)
 	task, err := h.mediaOrganize.CreateTask(r.Context(), &domain.MediaOrganizeTask{
@@ -425,6 +425,44 @@ func (h *Handler) searchMediaOrganizeTMDB(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeOK(w, results)
+}
+
+type mediaOrganizeBindingDTO struct {
+	GroupUID string `json:"group_uid"`
+	TMDBID   string `json:"tmdb_id"`
+}
+
+// setMediaOrganizeBinding 保存一条"组 -> tmdb_id"手动匹配绑定到任务配置。
+func (h *Handler) setMediaOrganizeBinding(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.mediaOrganize != nil) {
+		return
+	}
+	taskID := strings.TrimSpace(chi.URLParam(r, "id"))
+	if taskID == "" {
+		writeErr(w, domain.Errorf(domain.CodeValidation, "非法 id"))
+		return
+	}
+	var in mediaOrganizeBindingDTO
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	uid := strings.TrimSpace(in.GroupUID)
+	tmdbID := strings.TrimSpace(in.TMDBID)
+	if uid == "" || tmdbID == "" {
+		writeErr(w, domain.Errorf(domain.CodeValidation, "group_uid 与 tmdb_id 不能为空"))
+		return
+	}
+	plan, err := h.mediaOrganize.ApplyBindingToPlan(r.Context(), taskID, uid, tmdbID)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeOK(w, map[string]any{
+		"group_uid": uid,
+		"tmdb_id":   tmdbID,
+		"plan":      plan,
+	})
 }
 
 func toMediaOrganizeTaskDTO(task *domain.MediaOrganizeTask, running bool) mediaOrganizeTaskDTO {

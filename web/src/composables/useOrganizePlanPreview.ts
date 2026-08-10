@@ -43,6 +43,18 @@ export interface PlanGroup {
   rows: PlanGroupRow[];
 }
 
+export interface PlanNeedsMatch {
+  group_uid: string;
+  media_kind?: string;
+  dir_id?: string;
+  dir_name?: string;
+  title?: string;
+  year?: number;
+  reason?: string;
+  count?: number;
+  candidates?: Array<{ title: string; year: string }>;
+}
+
 const SKIP_PREVIEW_LIMIT = 20;
 
 function episodeNumberFromName(name: string | undefined) {
@@ -124,8 +136,9 @@ export function planActionMeta(action: MediaOrganizePlanAction | undefined): Pla
 export function useOrganizePlanPreview() {
   const relocates = ref<MediaOrganizePlanAction[]>([]);
   const skipped = ref<Array<Record<string, unknown>>>([]);
+  const needsMatch = ref<PlanNeedsMatch[]>([]);
   const tmdbStatus = ref("");
-  const activeTab = ref<"plan" | "skip">("plan");
+  const activeTab = ref<"plan" | "skip" | "match">("plan");
   const groupExpanded = ref<Record<string, boolean>>({});
   const rangeExpanded = ref<Record<string, boolean>>({});
   const skipExpandedReasons = ref<Record<string, boolean>>({});
@@ -135,6 +148,10 @@ export function useOrganizePlanPreview() {
     const actions = plan?.actions ?? [];
     relocates.value = actions.filter((a) => a.kind === "relocate");
     skipped.value = plan?.skipped ?? [];
+    const rawNeeds = plan?.diagnostics?.needs_match;
+    needsMatch.value = Array.isArray(rawNeeds)
+      ? (rawNeeds as PlanNeedsMatch[]).filter((n) => n && n.group_uid)
+      : [];
     tmdbStatus.value = String(plan?.diagnostics?.tmdb_status ?? "");
     groupExpanded.value = {};
     rangeExpanded.value = {};
@@ -309,6 +326,7 @@ export function useOrganizePlanPreview() {
   return {
     relocates,
     skipped,
+    needsMatch,
     tmdbStatus,
     activeTab,
     noTmdbCount,

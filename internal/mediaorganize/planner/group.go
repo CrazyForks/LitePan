@@ -68,6 +68,7 @@ func (p *Planner) planBatch(entries []batchEntry, label string) error {
 			"dir_name":   key.dirName,
 			"title":      key.title,
 			"count":      len(items),
+			"group_uid":  groupUIDOf(key),
 		})
 		p.diagnostics["groups"] = groupsDiag
 	}
@@ -182,11 +183,15 @@ func (p *Planner) groupEntries(entries []batchEntry) (map[groupKey][]batchEntry,
 			continue
 		}
 
-		nestedMovieID, _ := rules.FindNearestStandaloneMovieDir(ancestors)
-		forceMovie := nestedMovieID != "" || shouldPreferStructuredMovieDir(rawFileParsed, dirParsed, ancestors, entry.item.Name)
-
 		tvRule := rules.LooksLikeTVFileWithName(fileParsed, ancestors, entry.item.Name)
-		isTV := !forceMovie && (p.taskMediaType == "tv" || (p.taskMediaType == "auto" && tvRule.Matched))
+		// 文件自带剧集身份（SxxExx 或解析出集号）时优先归入剧集 Season 00，
+		// 不被"带年份的番外/特别篇目录"劫持成独立电影；目录中的纯电影文件仍按独立电影处理。
+		// 文件名包含祖先剧集名的番外（如「一人之下 番外篇 天师下山」）同样视为剧集内容。
+		showIdentity := rules.FileNameCarriesShowIdentity(entry.item.Name, ancestors)
+		hasEpisodeIdentity := fileParsed.Episode != nil || rules.HasExplicitSeasonToken(entry.item.Name) || showIdentity
+		nestedMovieID, _ := rules.FindNearestStandaloneMovieDir(ancestors)
+		forceMovie := !hasEpisodeIdentity && (nestedMovieID != "" || shouldPreferStructuredMovieDir(rawFileParsed, dirParsed, ancestors, entry.item.Name))
+		isTV := !forceMovie && (p.taskMediaType == "tv" || (p.taskMediaType == "auto" && (tvRule.Matched || showIdentity)))
 
 		if isTV {
 			if showDirID == "" {

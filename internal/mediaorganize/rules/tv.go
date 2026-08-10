@@ -207,6 +207,50 @@ func looksLikeStandaloneMovieDir(name string) bool {
 	return ScoreTitleForTMDB(title) >= 0.45
 }
 
+// FileNameCarriesShowIdentity 判断番外/特别篇目录里的文件名是否包含祖先剧集名。
+// 用于"文件名没写集号但明显属于某剧集的番外"场景：归入剧集 Season 00 而非独立电影。
+// 剧场版/映画等明确电影暗示、或带 TMDB ID 的目录，仍按独立电影处理。
+func FileNameCarriesShowIdentity(name string, ancestors []Ancestor) bool {
+	if name == "" || len(ancestors) == 0 {
+		return false
+	}
+	if standaloneMovieDirHintRe.MatchString(name) {
+		return false
+	}
+	hasSpecial := false
+	for _, anc := range ancestors {
+		if !isSpecialContentDirName(anc.Name) {
+			continue
+		}
+		if standaloneMovieDirHintRe.MatchString(anc.Name) || FindTMDBIDInName(anc.Name) != "" {
+			return false
+		}
+		hasSpecial = true
+	}
+	if !hasSpecial {
+		return false
+	}
+	fileKey := strongTMDBTitleKey(name)
+	if fileKey == "" {
+		return false
+	}
+	for i := len(ancestors) - 1; i >= 0; i-- {
+		dir := ancestors[i]
+		if IsGenericMediaDir(dir.Name) || IsSeasonDirName(dir.Name) || IsEpisodeRangeDirName(dir.Name) ||
+			isCollectionContainerDir(dir.Name, nil) || isSpecialContentDirName(dir.Name) {
+			continue
+		}
+		showKey := strongTMDBTitleKey(dir.Name)
+		if len(showKey) < 2 {
+			continue
+		}
+		if strings.Contains(fileKey, showKey) {
+			return true
+		}
+	}
+	return false
+}
+
 func IsStandaloneMovieDirName(name string) bool {
 	return looksLikeStandaloneMovieDir(name)
 }

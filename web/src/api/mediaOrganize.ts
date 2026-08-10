@@ -211,6 +211,13 @@ export function searchMediaOrganizeTmdb(params: {
   });
 }
 
+export function setMediaOrganizeBinding(taskId: string, groupUid: string, tmdbId: string) {
+  return http.post<{ group_uid: string; tmdb_id: string; plan?: MediaOrganizePlan }>(
+    `/admin/media-organize/tasks/${taskId}/bindings`,
+    { group_uid: groupUid, tmdb_id: tmdbId },
+  );
+}
+
 export function fetchMediaOrganizeSettings() {
   return http.get<MediaOrganizeSettings>("/admin/media-organize/settings");
 }

@@ -29,6 +29,7 @@ type Planner struct {
 	actionSeq         int
 	actions           []moplan.PlanAction
 	skippedItems      []map[string]any
+	needsMatch        []map[string]any
 	diagnostics       map[string]any
 	scannedDirs       int
 	scannedDirNames   map[string]string
@@ -247,6 +248,11 @@ func (p *Planner) tmdbAPIKey() string {
 }
 
 func (p *Planner) finalize() *moplan.Plan {
+	if len(p.needsMatch) > 0 {
+		p.diagnostics["needs_match"] = append([]map[string]any(nil), p.needsMatch...)
+	} else if p.diagnostics != nil {
+		p.diagnostics["needs_match"] = []map[string]any{}
+	}
 	return &moplan.Plan{
 		TaskID:         p.taskID,
 		CreatedAt:      time.Now().Format("2006-01-02 15:04:05"),
@@ -532,4 +538,9 @@ func (p *Planner) isLowConfidenceGroup(key groupKey, items []batchEntry) bool {
 		return true
 	}
 	return false
+}
+
+// groupUIDOf 生成组的稳定标识，供手动匹配绑定使用。
+func groupUIDOf(key groupKey) string {
+	return fmt.Sprintf("%s|%s|%s|%s", key.mediaKind, key.dirID, key.dirName, key.title)
 }

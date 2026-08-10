@@ -35,8 +35,8 @@ type TaskConfig struct {
 	ActionType           string
 	MediaType            string
 	RenameMarker         string
-	UseTMDB           bool
-	OverwriteExisting bool
+	UseTMDB              bool
+	OverwriteExisting    bool
 	Recursive            bool
 	SeasonFolderTemplate string
 	FileExtensions       string

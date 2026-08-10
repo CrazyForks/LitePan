@@ -10,7 +10,7 @@ import (
 
 func (p *Planner) planGroup(key groupKey, items []batchEntry, alignDefaults map[bucketKey]map[string]any) error {
 	isTV := key.mediaKind == "tv"
-	groupUID := fmt.Sprintf("%s|%s|%s|%s", key.mediaKind, key.dirID, key.dirName, key.title)
+	groupUID := groupUIDOf(key)
 	title := strings.TrimSpace(key.title)
 	year := key.yearPtr()
 	season := key.seasonPtr()
@@ -24,12 +24,14 @@ func (p *Planner) planGroup(key groupKey, items []batchEntry, alignDefaults map[
 	}
 
 	if title == "" {
+		p.recordNeedsMatch(key, items, "无法识别标题，请手动匹配", nil)
 		for _, entry := range items {
 			p.skip(entry.item, "无法识别")
 		}
 		return nil
 	}
 	if p.isLowConfidenceGroup(key, items) {
+		p.recordNeedsMatch(key, items, "识别置信度过低，请手动匹配", nil)
 		for _, entry := range items {
 			p.skip(entry.item, "识别置信度过低")
 		}
@@ -54,6 +56,11 @@ func (p *Planner) planGroup(key groupKey, items []batchEntry, alignDefaults map[
 			}
 		}
 		reason := fmt.Sprintf("TMDB 存在多个版本（%s），请给源文件夹补上年份后重试", strings.Join(versions, " / "))
+		cands := make([]map[string]any, 0, len(tmdbInfo.candidates))
+		for _, c := range tmdbInfo.candidates {
+			cands = append(cands, map[string]any{"title": c.title, "year": c.year})
+		}
+		p.recordNeedsMatch(key, items, "TMDB 存在多个版本，请手动选择", map[string]any{"candidates": cands})
 		for _, entry := range items {
 			p.skip(entry.item, reason)
 		}
@@ -64,6 +71,9 @@ func (p *Planner) planGroup(key groupKey, items []batchEntry, alignDefaults map[
 			tmdbInfo = tmdbMatchResult{tmdbID: preserved, confidence: 0.5}
 			p.log(fmt.Sprintf("[计划] 保留原有 TMDB 标识（TMDB 未匹配/不可达）: tmdb-%s", preserved))
 		}
+	}
+	if tmdbInfo.tmdbID == "" {
+		p.recordNeedsMatch(key, items, "TMDB 未匹配到影片，可手动选择", nil)
 	}
 
 	tmdbID := tmdbInfo.tmdbID
@@ -354,6 +364,26 @@ func (p *Planner) planGroup(key groupKey, items []batchEntry, alignDefaults map[
 		p.planMetaFollowers(entry, newMetaBase, ext, action.ID)
 	}
 	return nil
+}
+
+// recordNeedsMatch 记录需要用户手动匹配的组（供计划预览展示）。
+func (p *Planner) recordNeedsMatch(key groupKey, items []batchEntry, reason string, extra map[string]any) {
+	entry := map[string]any{
+		"group_uid":  groupUIDOf(key),
+		"media_kind": key.mediaKind,
+		"dir_id":     key.dirID,
+		"dir_name":   key.dirName,
+		"title":      key.title,
+		"reason":     reason,
+		"count":      len(items),
+	}
+	if key.hasYear {
+		entry["year"] = key.year
+	}
+	for k, v := range extra {
+		entry[k] = v
+	}
+	p.needsMatch = append(p.needsMatch, entry)
 }
 
 func (p *Planner) shouldKeepStructuredFileForTMDBDir(entry batchEntry, items []batchEntry, tmdbID string) bool {

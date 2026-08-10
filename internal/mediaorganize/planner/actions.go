@@ -317,4 +317,3 @@ func (p *Planner) checkStop() error {
 	}
 	return nil
 }
-

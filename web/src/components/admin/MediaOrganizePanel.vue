@@ -23,6 +23,8 @@ import {
   fetchMediaOrganizeProgress,
   fetchMediaOrganizeTasks,
   planMediaOrganizeTask,
+  searchMediaOrganizeTmdb,
+  setMediaOrganizeBinding,
   stopMediaOrganizeTask,
   testMediaOrganizeTmdb,
   updateMediaOrganizePlanAction,
@@ -33,6 +35,7 @@ import {
   type MediaOrganizeProgress,
   type MediaOrganizeTask,
   type MediaOrganizeTaskInput,
+  type MediaOrganizeTmdbSearchHit,
 } from "@/api/mediaOrganize";
 import AccountFolderField from "@/components/admin/AccountFolderField.vue";
 import AdminEmptyState from "@/components/admin/AdminEmptyState.vue";
@@ -54,7 +57,21 @@ import FolderPickerModal from "@/components/file/FolderPickerModal.vue";
 import { useAccountPathLabel } from "@/composables/useAccountPathLabel";
 import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { useConditionalPolling } from "@/composables/useConditionalPolling";
-import { useOrganizePlanPreview, planActionMeta, type PlanGroup } from "@/composables/useOrganizePlanPreview";
+import {
+  useOrganizePlanPreview,
+  planActionMeta,
+  type PlanGroup,
+  type PlanNeedsMatch,
+} from "@/composables/useOrganizePlanPreview";
+import {
+  hitId,
+  hitKey,
+  hitMediaType,
+  hitPosterURL,
+  hitTitle,
+  hitTypeLabel,
+  hitYear,
+} from "@/utils/tmdbHit";
 import { confirm } from "@/composables/useConfirm";
 import { toast } from "@/composables/useToast";
 import { useAccountsStore } from "@/stores/accounts";
@@ -146,6 +163,103 @@ const tmdbTesting = ref(false);
 let planProgressTimer: number | null = null;
 
 const preview = useOrganizePlanPreview();
+
+const matchOpen = ref(false);
+const matchTarget = ref<PlanNeedsMatch | null>(null);
+const matchQuery = ref("");
+const matchSearchType = ref<"movie" | "tv">("movie");
+const matchSearching = ref(false);
+const matchApplying = ref(false);
+const candidates = ref<MediaOrganizeTmdbSearchHit[]>([]);
+const selectedCandidateKey = ref("");
+
+const matchTypeOptions = [
+  { value: "movie", label: "电影" },
+  { value: "tv", label: "剧集" },
+];
+
+function openMatch(entry: PlanNeedsMatch) {
+  matchTarget.value = entry;
+  matchQuery.value = entry.title || entry.dir_name || "";
+  matchSearchType.value = entry.media_kind === "tv" ? "tv" : "movie";
+  candidates.value = [];
+  selectedCandidateKey.value = "";
+  matchOpen.value = true;
+}
+
+// openMatchGroup 对已分组（含已自动匹配）的作品打开手动匹配，用于纠正错误识别。
+function openMatchGroup(group: PlanGroup) {
+  const actions = [group.dirAction, ...group.actions].filter(Boolean) as MediaOrganizePlanAction[];
+  let uid = "";
+  let mediaKind = "";
+  for (const a of actions) {
+    const md = (a.metadata ?? {}) as Record<string, unknown>;
+    if (!uid) uid = String(md.group_uid ?? "");
+    if (!mediaKind) mediaKind = String(md.media_kind ?? "");
+    if (uid && mediaKind) break;
+  }
+  if (!uid) {
+    toast.error("无法定位该组标识，请重新生成计划后再试");
+    return;
+  }
+  const sourceTitle = group.titleOld || group.title;
+  openMatch({
+    group_uid: uid,
+    media_kind: mediaKind === "tv" ? "tv" : "movie",
+    dir_name: sourceTitle,
+    title: sourceTitle,
+    reason: "手动重新匹配",
+    count: group.actionCount,
+  });
+}
+
+function closeMatch() {
+  matchOpen.value = false;
+  matchTarget.value = null;
+  candidates.value = [];
+  selectedCandidateKey.value = "";
+}
+
+async function searchMatchCandidates() {
+  const q = matchQuery.value.trim();
+  if (!q) {
+    toast.error("请输入片名或 TMDB ID");
+    return;
+  }
+  matchSearching.value = true;
+  try {
+    const results = await searchMediaOrganizeTmdb({ query: q, media_type: matchSearchType.value });
+    candidates.value = Array.isArray(results) ? results.slice(0, 20) : [];
+    selectedCandidateKey.value = candidates.value[0] ? hitKey(candidates.value[0]) : "";
+    if (!candidates.value.length) toast.error("没有找到候选，可尝试切换类型或直接输入 TMDB ID");
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "搜索失败"));
+  } finally {
+    matchSearching.value = false;
+  }
+}
+
+async function applyMatchBinding() {
+  if (!matchTarget.value || !planTaskId.value || !selectedCandidateKey.value) return;
+  const hit = candidates.value.find((c) => hitKey(c) === selectedCandidateKey.value);
+  if (!hit) return;
+  matchApplying.value = true;
+  try {
+    const result = await setMediaOrganizeBinding(planTaskId.value, matchTarget.value.group_uid, hitId(hit));
+    closeMatch();
+    if (result.plan) {
+      preview.loadPlan(result.plan);
+      toast.success(`已绑定为 ${hitTitle(hit)}，当前计划已就地更新`);
+    } else {
+      toast.success(`已绑定为 ${hitTitle(hit)}，正在重新生成计划`);
+      await refreshPlan();
+    }
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "绑定失败"));
+  } finally {
+    matchApplying.value = false;
+  }
+}
 
 const activeAccounts = computed(() => accounts.value.filter((a) => a.is_active));
 
@@ -978,6 +1092,15 @@ defineExpose({
           >
             已跳过 <span class="organize-plan-tab-count">{{ preview.skipped.value.length }}</span>
           </button>
+          <button
+            v-if="preview.needsMatch.value.length"
+            type="button"
+            class="organize-plan-tab organize-plan-tab--match"
+            :class="{ 'organize-plan-tab--active': preview.activeTab.value === 'match' }"
+            @click="preview.activeTab.value = 'match'"
+          >
+            需手动匹配 <span class="organize-plan-tab-count">{{ preview.needsMatch.value.length }}</span>
+          </button>
           <span v-if="preview.noTmdbCount.value > 0" class="organize-plan-tabs-warning">
             ⚠ {{ preview.noTmdbCount.value }} 项未匹配 TMDB（无 ID）
           </span>
@@ -1037,6 +1160,12 @@ defineExpose({
                       title="在 TMDB 核对作品"
                       @click.stop
                     ><i class="fas fa-arrow-up-right-from-square" aria-hidden="true" /></a>
+                    <button
+                      type="button"
+                      class="plan-row-btn"
+                      title="手动匹配 TMDB（纠正识别）"
+                      @click.stop="openMatchGroup(group)"
+                    ><i class="fas fa-magnifying-glass" aria-hidden="true" /></button>
                     <button v-if="group.dirAction" type="button" class="plan-row-btn" title="编辑作品目录名" @click.stop="startPlanActionEdit(group.dirAction)"><i class="fas fa-pen" aria-hidden="true" /></button>
                     <button type="button" class="plan-row-btn plan-row-btn--danger" title="从计划中移除整组" @click.stop="removePlanGroup(group)"><i class="fas fa-trash" aria-hidden="true" /></button>
                   </span>
@@ -1150,6 +1279,27 @@ defineExpose({
             </div>
           </div>
         </div>
+
+        <div v-if="preview.activeTab.value === 'match'" class="organize-plan-match">
+          <p class="organize-plan-match-tip">
+            以下作品未能可靠识别，可点「匹配」手动搜索 TMDB 并绑定；绑定后重新生成计划即按所选影片整理。
+          </p>
+          <div v-for="entry in preview.needsMatch.value" :key="entry.group_uid" class="organize-plan-match-row">
+            <div class="organize-plan-match-body">
+              <div class="organize-plan-match-title">{{ entry.title || entry.dir_name || "未命名" }}</div>
+              <div class="organize-plan-match-meta">
+                <span class="organize-plan-kind" :class="{ 'organize-plan-kind--tv': entry.media_kind === 'tv' }">
+                  {{ entry.media_kind === "tv" ? "剧集" : "电影" }}
+                </span>
+                <span v-if="entry.year" class="organize-plan-match-meta-item">{{ entry.year }}</span>
+                <span v-if="entry.dir_name" class="organize-plan-match-meta-item">目录：{{ entry.dir_name }}</span>
+                <span v-if="entry.count" class="organize-plan-match-meta-item">{{ entry.count }} 项</span>
+              </div>
+              <div class="organize-plan-match-reason">{{ entry.reason || "未能自动识别" }}</div>
+            </div>
+            <AppButton type="button" variant="secondary" size="sm" @click="openMatch(entry)">匹配</AppButton>
+          </div>
+        </div>
       </template>
       </div>
 
@@ -1164,6 +1314,66 @@ defineExpose({
             {{ planApplying ? "执行中…" : "确认执行" }}
           </AppButton>
       </template>
+    </AppModal>
+
+    <AppModal :open="matchOpen" title="手动匹配 TMDB" size="account" @close="closeMatch">
+      <div v-if="matchTarget" class="organize-match">
+        <div class="organize-match__target">
+          为「{{ matchTarget.title || matchTarget.dir_name || "该作品" }}」选择 TMDB 影片
+        </div>
+        <div class="organize-match__row">
+          <div class="organize-match__type">
+            <AppSelect v-model="matchSearchType" :options="matchTypeOptions" />
+          </div>
+          <div class="organize-match__query">
+            <AppInput
+              v-model="matchQuery"
+              placeholder="片名或 TMDB ID"
+              @keydown.enter.prevent="searchMatchCandidates"
+            />
+          </div>
+          <AppButton type="button" variant="secondary" :disabled="matchSearching" @click="searchMatchCandidates">
+            {{ matchSearching ? "搜索中…" : "搜索" }}
+          </AppButton>
+        </div>
+        <div class="organize-match__grid">
+          <button
+            v-for="hit in candidates"
+            :key="hitKey(hit)"
+            type="button"
+            class="organize-match__card"
+            :class="{ 'organize-match__card--active': selectedCandidateKey === hitKey(hit) }"
+            @click="selectedCandidateKey = hitKey(hit)"
+          >
+            <div class="organize-match__card-poster">
+              <img v-if="hitPosterURL(hit)" :src="hitPosterURL(hit)" :alt="hitTitle(hit)" loading="lazy" />
+              <span v-else class="organize-match__card-ph">无图</span>
+            </div>
+            <div class="organize-match__card-body">
+              <div class="organize-match__card-title" :title="hitTitle(hit)">{{ hitTitle(hit) }}</div>
+              <div class="organize-match__card-sub">
+                <span class="organize-match__hit-type" :data-type="hitMediaType(hit)">{{ hitTypeLabel(hit) }}</span>
+                <span v-if="hitYear(hit)">{{ hitYear(hit) }}</span>
+                <span class="organize-match__card-id">TMDB {{ hitId(hit) }}</span>
+              </div>
+            </div>
+          </button>
+          <p v-if="!candidates.length && !matchSearching" class="organize-match__empty">
+            填写片名或 TMDB ID 后点击「搜索」，可凭海报和类型选择
+          </p>
+        </div>
+        <div class="organize-match__foot">
+          <AppButton type="button" variant="secondary" @click="closeMatch">取消</AppButton>
+          <AppButton
+            type="button"
+            variant="primary"
+            :disabled="!selectedCandidateKey || matchApplying"
+            @click="applyMatchBinding"
+          >
+            {{ matchApplying ? "绑定中…" : "绑定并更新计划" }}
+          </AppButton>
+        </div>
+      </div>
     </AppModal>
 
     <FolderPickerModal
@@ -1568,10 +1778,206 @@ defineExpose({
   color: var(--warning);
 }
 
+.organize-plan-tab--match .organize-plan-tab-count {
+  background: color-mix(in srgb, var(--brand) 15%, var(--surface));
+  color: var(--brand);
+}
+
 .organize-plan-tabs-warning {
   margin-left: auto;
   font-size: 12px;
   color: var(--warning);
+}
+
+.organize-plan-match {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.organize-plan-match-tip {
+  margin: 0 0 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.organize-plan-match-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface-sunken);
+}
+
+.organize-plan-match-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.organize-plan-match-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.organize-plan-match-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.organize-plan-match-meta-item {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.organize-plan-match-reason {
+  font-size: 12px;
+  color: var(--warning);
+}
+
+.organize-match__target {
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.organize-match__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 12px;
+}
+
+.organize-match__type {
+  width: 96px;
+  flex: 0 0 96px;
+}
+
+.organize-match__query {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.organize-match__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.organize-match__card {
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface-sunken);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s;
+}
+
+.organize-match__card--active {
+  border-color: var(--brand);
+}
+
+.organize-match__card-poster {
+  width: 52px;
+  height: 74px;
+  flex: none;
+  border-radius: 6px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.organize-match__card-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.organize-match__card-ph {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.organize-match__card-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.organize-match__card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.organize-match__card-sub {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.organize-match__hit-type {
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.organize-match__hit-type[data-type="tv"] {
+  background: color-mix(in srgb, #8b5cf6 15%, var(--surface));
+  color: #8b5cf6;
+}
+
+.organize-match__hit-type[data-type="movie"] {
+  background: color-mix(in srgb, var(--brand) 15%, var(--surface));
+  color: var(--brand);
+}
+
+.organize-match__card-id {
+  color: var(--text-muted);
+}
+
+.organize-match__empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 24px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.organize-match__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
 }
 
 .organize-plan-list {
