@@ -1,14 +1,20 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { accountsApi } from "@/api/accounts";
 import { publicApi } from "@/api/public";
 import { driversApi } from "@/api/drivers";
 import { useAuthStore } from "@/stores/auth";
+import { useDeveloperUnlock } from "@/composables/useDeveloperUnlock";
 import type { Account, AccountPayload, DriverInfo } from "@/api/types";
 
 export const useAccountsStore = defineStore("accounts", () => {
   const accounts = ref<Account[]>([]);
   const drivers = ref<DriverInfo[]>([]);
+  const { unlocked: devUnlocked, init: devUnlockInit } = useDeveloperUnlock();
+  // 可选驱动列表：内部实验性驱动需解锁开发模式后才展示。
+  const visibleDrivers = computed(() =>
+    devUnlocked.value ? drivers.value : drivers.value.filter((d) => !d.internal_experimental),
+  );
   const loading = ref(false);
   // 进行中去重：多个面板同时挂载时共享同一次 /accounts 请求，避免并发重复拉取。
   let inflightLoad: Promise<void> | null = null;
@@ -31,6 +37,7 @@ export const useAccountsStore = defineStore("accounts", () => {
   }
 
   async function loadDrivers() {
+    void devUnlockInit();
     if (drivers.value.length) return;
     drivers.value = await driversApi.list();
   }
@@ -68,6 +75,7 @@ export const useAccountsStore = defineStore("accounts", () => {
   return {
     accounts,
     drivers,
+    visibleDrivers,
     loading,
     loadAccounts,
     loadDrivers,

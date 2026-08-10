@@ -176,6 +176,13 @@ function driverAuthLabel(driver: DriverInfo) {
                 <div class="carousel__info">
                   <div class="carousel__title-row">
                     <h3>{{ slide.driver.display_name }}</h3>
+                    <span
+                      v-if="slide.driver.internal_experimental"
+                      class="carousel__exp"
+                      title="内部实验性驱动，仅供内部测试，可能随时失效"
+                    >
+                      内部实验性
+                    </span>
                     <span class="carousel__auth">{{ driverAuthLabel(slide.driver) }}</span>
                   </div>
                   <p>{{ driverDescription(slide.driver) }}</p>
@@ -220,6 +227,7 @@ function driverAuthLabel(driver: DriverInfo) {
             :size="30"
           />
           <span class="mini-card__name">{{ driver.display_name }}</span>
+          <span v-if="driver.internal_experimental" class="mini-card__exp">实验</span>
         </button>
         <div v-if="!filtered.length" class="grid__empty">未找到匹配的驱动</div>
       </div>
@@ -373,6 +381,17 @@ function driverAuthLabel(driver: DriverInfo) {
   font-weight: 700;
   line-height: 1.2;
 }
+
+.carousel__exp {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, #eab308 16%, rgba(255, 255, 255, 0.8));
+  color: #a16207;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.2;
+}
 .carousel__info p {
   margin: 0;
   color: var(--text-muted);
@@ -511,6 +530,16 @@ function driverAuthLabel(driver: DriverInfo) {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+
+.mini-card__exp {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, #eab308 16%, rgba(255, 255, 255, 0.8));
+  color: #a16207;
+  font-size: 10px;
+  font-weight: 700;
 }
 .grid__empty {
   grid-column: 1 / -1;

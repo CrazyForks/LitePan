@@ -47,6 +47,9 @@ type DriverInfo struct {
 	SupportsOAuth          bool          `json:"supports_oauth"`
 	SupportsQRLogin        bool          `json:"supports_qr_login"`
 	OAuthName              string        `json:"oauth_name,omitempty"`
+	QRDevices              []FieldOption `json:"qr_devices,omitempty"`
+	QRDeviceField          string        `json:"qr_device_field,omitempty"`
+	InternalExperimental   bool          `json:"internal_experimental,omitempty"`
 	Fields                 []FieldSchema `json:"fields"`
 }
 
@@ -82,6 +85,9 @@ func Register(c Constructor) {
 		SupportsOAuth:          supportsOAuth,
 		SupportsQRLogin:        supportsQRLogin,
 		OAuthName:              cfg.OAuthName,
+		QRDevices:              append([]FieldOption(nil), cfg.QRDevices...),
+		QRDeviceField:          cfg.QRDeviceField,
+		InternalExperimental:   cfg.InternalExperimental,
 		Fields:                 buildSchema(d.GetAddition()),
 	}
 	regMu.Lock()

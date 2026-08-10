@@ -2,6 +2,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { APP_NAME, APP_VERSION } from "@/version";
+import { useDeveloperUnlock } from "@/composables/useDeveloperUnlock";
+import { toast } from "@/composables/useToast";
+import AppModal from "@/components/base/AppModal.vue";
+import AppInput from "@/components/base/AppInput.vue";
+import AppButton from "@/components/base/AppButton.vue";
 
 const props = defineProps<{
   compact?: boolean;
@@ -10,9 +15,14 @@ const props = defineProps<{
 const emit = defineEmits<{ logout: [] }>();
 
 const auth = useAuthStore();
+const { unlocked: devUnlocked, init: devUnlockInit, unlock } = useDeveloperUnlock();
 const open = ref(false);
 const wrapRef = ref<HTMLElement | null>(null);
 const menuPos = ref({ left: 0, bottom: 0 });
+const unlockOpen = ref(false);
+const unlockCode = ref("");
+const aboutClicks = ref(0);
+let aboutClickTimer: ReturnType<typeof setTimeout> | null = null;
 
 const displayName = computed(() => auth.username || "admin");
 const avatarLetter = computed(() => displayName.value.charAt(0).toUpperCase() || "A");
@@ -52,6 +62,36 @@ function handleLogout() {
   emit("logout");
 }
 
+function handleAboutClick() {
+  aboutClicks.value += 1;
+  if (aboutClickTimer) clearTimeout(aboutClickTimer);
+  aboutClickTimer = setTimeout(() => {
+    aboutClicks.value = 0;
+  }, 1800);
+  if (aboutClicks.value < 5) return;
+  aboutClicks.value = 0;
+  if (devUnlocked.value) {
+    toast.info("开发模式已解锁，实验性驱动可见");
+    return;
+  }
+  unlockCode.value = "";
+  unlockOpen.value = true;
+}
+
+async function confirmUnlock() {
+  try {
+    const ok = await unlock(unlockCode.value);
+    if (!ok) {
+      toast.error("解锁码错误");
+      return;
+    }
+    toast.success("开发模式已解锁，实验性驱动可见");
+    unlockOpen.value = false;
+  } catch {
+    toast.error("解锁失败，请稍后重试");
+  }
+}
+
 function handleDocumentClick(e: MouseEvent) {
   const el = e.target as HTMLElement | null;
   if (!open.value || !el) return;
@@ -74,6 +114,7 @@ onMounted(() => {
   document.addEventListener("click", handleDocumentClick);
   window.addEventListener("resize", handleViewportChange);
   window.addEventListener("scroll", handleViewportChange, true);
+  void devUnlockInit();
 });
 
 onUnmounted(() => {
@@ -123,7 +164,13 @@ onBeforeUnmount(() => {
           </span>
         </div>
 
-        <div class="acct-menu__section acct-menu__item acct-menu__about">
+        <div
+          class="acct-menu__section acct-menu__item acct-menu__about"
+          role="button"
+          tabindex="0"
+          @click="handleAboutClick"
+          @keydown.enter="handleAboutClick"
+        >
           <span class="acct-menu__icon" aria-hidden="true">
             <svg viewBox="0 0 24 24">
               <circle cx="12" cy="12" r="9" />
@@ -150,6 +197,23 @@ onBeforeUnmount(() => {
       </div>
     </Teleport>
   </div>
+
+  <AppModal :open="unlockOpen" title="解锁开发模式" size="sm" @close="unlockOpen = false">
+    <div class="unlock-body">
+      <p class="unlock-tip">解锁后可查看实验性驱动。该功能仅供开发人员内部测试使用。</p>
+      <AppInput
+        v-model="unlockCode"
+        type="password"
+        placeholder="请输入解锁码"
+        autocomplete="off"
+        @keydown.enter="confirmUnlock"
+      />
+      <div class="unlock-actions">
+        <AppButton variant="secondary" @click="unlockOpen = false">取消</AppButton>
+        <AppButton variant="primary" @click="confirmUnlock">解锁</AppButton>
+      </div>
+    </div>
+  </AppModal>
 </template>
 
 <style scoped>
@@ -363,5 +427,33 @@ onBeforeUnmount(() => {
 .acct-menu__action:hover .acct-menu__icon,
 .acct-menu__action:hover .acct-menu__label {
   color: var(--brand);
+}
+
+.acct-menu__about {
+  cursor: pointer;
+}
+
+.acct-menu__about:hover {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.unlock-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 0;
+}
+
+.unlock-tip {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.unlock-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 </style>

@@ -28,8 +28,11 @@ async function qrFetch<T>(path: string, body: unknown): Promise<ApiResp<T>> {
   return (await resp.json()) as ApiResp<T>;
 }
 
-export async function qrStart(driverType: string) {
-  return qrFetch<QrStartResult>("/qr/start", { driver_type: driverType });
+export async function qrStart(driverType: string, config?: string) {
+  return qrFetch<QrStartResult>("/qr/start", {
+    driver_type: driverType,
+    config: config || "",
+  });
 }
 
 export async function qrPoll(driverType: string, token: string) {

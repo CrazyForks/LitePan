@@ -27,6 +27,12 @@ type stagingFile struct {
 	size     int64
 	modTime  time.Time
 	mu       sync.RWMutex
+	// parentID/displayPath 记录上传目标目录，rename 跨目录时同步更新，Flush 以最新值为准。
+	parentID    string
+	displayPath string
+	// uploads 与 taskID 在 Flush 投递上传任务后写入，供改名/删除时联动任务。
+	uploads UploadManager
+	taskID  string
 }
 
 var (
@@ -58,10 +64,12 @@ func (d *cloudDir) Create(ctx context.Context, name string, flags uint32, _ uint
 		return nil, nil, 0, errnoFor(err)
 	}
 	node := &stagingFile{
-		b:        d.b,
-		name:     name,
-		tempPath: tmpPath,
-		modTime:  time.Now(),
+		b:           d.b,
+		name:        name,
+		tempPath:    tmpPath,
+		modTime:     time.Now(),
+		parentID:    d.item.ID,
+		displayPath: d.targetDisplayPath(),
 	}
 	child := d.NewPersistentInode(ctx, node, fs.StableAttr{
 		Ino:  fileIno(d.b.accountID(), "pending:"+tmpPath),
@@ -199,17 +207,44 @@ func (h *stagingUploadHandle) Flush(_ context.Context) syscall.Errno {
 	if h.node != nil {
 		h.node.updateFromStat(st)
 	}
-	if _, err := h.uploads.Create(context.Background(), upload.CreateParams{
+	// 若在 close 前已发生 rename，以节点当前名为准，避免上传任务使用旧名。
+	fileName := h.fileName
+	parentID := h.parentID
+	displayPath := h.targetDisplayPath
+	if h.node != nil {
+		h.node.mu.RLock()
+		fileName = h.node.name
+		parentID = h.node.parentID
+		displayPath = h.node.displayPath
+		h.node.mu.RUnlock()
+	}
+	if fileName == "" {
+		fileName = h.fileName
+	}
+	if parentID == "" {
+		parentID = h.parentID
+	}
+	if displayPath == "" {
+		displayPath = h.targetDisplayPath
+	}
+	task, terr := h.uploads.Create(context.Background(), upload.CreateParams{
 		AccountID:         h.accountID,
-		FileName:          h.fileName,
-		DisplayName:       h.fileName,
-		TargetPath:        h.parentID,
-		TargetDisplayPath: h.targetDisplayPath,
+		FileName:          fileName,
+		DisplayName:       fileName,
+		TargetPath:        parentID,
+		TargetDisplayPath: displayPath,
 		LocalPath:         h.tempPath,
 		TotalBytes:        st.Size(),
 		ConflictPolicy:    "overwrite",
-	}); err != nil {
-		return errnoFor(err)
+	})
+	if terr != nil {
+		return errnoFor(terr)
+	}
+	if h.node != nil && task != nil {
+		h.node.mu.Lock()
+		h.node.uploads = h.uploads
+		h.node.taskID = task.TaskID
+		h.node.mu.Unlock()
 	}
 	h.queued = true
 	if h.untrack != nil {

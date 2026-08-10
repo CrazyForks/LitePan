@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"syscall"
 	"time"
@@ -48,21 +49,55 @@ func (d *cloudDir) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		return nil, errnoFor(err)
 	}
 	entries := make([]fuse.DirEntry, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
 	for _, it := range items {
 		mode := fuse.S_IFREG
 		if it.IsDir {
 			mode = fuse.S_IFDIR
 		}
+		seen[it.Name] = struct{}{}
 		entries = append(entries, fuse.DirEntry{
 			Name: it.Name,
 			Mode: uint32(mode),
 			Ino:  fileIno(d.b.accountID(), it.ID),
 		})
 	}
+	// 合并本会话内已创建、但网盘列表尚未可见的 staging 文件，保证刚写入的文件立即可见。
+	for name, ch := range d.Children() {
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		if _, ok := ch.Operations().(*stagingFile); ok {
+			entries = append(entries, fuse.DirEntry{
+				Name: name,
+				Mode: fuse.S_IFREG,
+				Ino:  ch.StableAttr().Ino,
+			})
+			seen[name] = struct{}{}
+		}
+	}
 	return fs.NewListDirStream(entries), 0
 }
 
 func (d *cloudDir) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
+	// 先查本会话内存节点：刚创建、尚未在网盘列表可见的 staging 文件与新建目录优先命中。
+	if ch := d.GetChild(name); ch != nil {
+		switch n := ch.Operations().(type) {
+		case *stagingFile:
+			var a fuse.AttrOut
+			if errno := n.Getattr(ctx, nil, &a); errno != 0 {
+				return nil, errno
+			}
+			out.Attr = a.Attr
+			return ch, 0
+		case *cloudDir:
+			fillEntryAttr(out, d.b, n.item)
+			return ch, 0
+		case *cloudFile:
+			fillEntryAttr(out, d.b, n.item)
+			return ch, 0
+		}
+	}
 	item, errno := d.lookupChildItem(ctx, name)
 	if errno != 0 {
 		return nil, errno
@@ -114,6 +149,11 @@ func (d *cloudDir) Unlink(ctx context.Context, name string) syscall.Errno {
 	if errno != 0 {
 		return errno
 	}
+	if ch := d.GetChild(name); ch != nil {
+		if st, ok := ch.Operations().(*stagingFile); ok {
+			return d.unlinkStaging(st)
+		}
+	}
 	item, errno := d.lookupChildItem(ctx, name)
 	if errno != 0 {
 		return errno
@@ -131,6 +171,14 @@ func (d *cloudDir) Rmdir(ctx context.Context, name string) syscall.Errno {
 	name, errno := normalizeChildName(name)
 	if errno != 0 {
 		return errno
+	}
+	if ch := d.GetChild(name); ch != nil {
+		if dir, ok := ch.Operations().(*cloudDir); ok {
+			if err := d.b.deps.Files.DeleteFiles(ctx, d.b.accountID(), []string{dir.item.ID}, d.item.ID); err != nil {
+				return errnoFor(err)
+			}
+			return 0
+		}
 	}
 	item, errno := d.lookupChildItem(ctx, name)
 	if errno != 0 {
@@ -164,20 +212,77 @@ func (d *cloudDir) Rename(ctx context.Context, name string, newParent fs.InodeEm
 	if targetDir.b.mount == nil || d.b.mount == nil || targetDir.b.mount.ID != d.b.mount.ID {
 		return syscall.EXDEV
 	}
-	item, errno := d.lookupChildItem(ctx, name)
-	if errno != 0 {
-		return errno
-	}
-	if targetDir.item.ID == d.item.ID && item.Name == newName {
-		return 0
-	}
-	if item.IsDir && targetDir.item.ID == item.ID {
-		return syscall.EINVAL
+	// 目标名冲突检查（内存节点优先）。
+	if targetDir.GetChild(newName) != nil {
+		return syscall.EEXIST
 	}
 	if _, found, errno := targetDir.lookupChildItemIfExists(ctx, newName); errno != 0 {
 		return errno
 	} else if found {
 		return syscall.EEXIST
+	}
+	// 源优先取本会话内存节点：刚创建、尚未在网盘列表可见的 staging 文件与新建目录。
+	if src := d.GetChild(name); src != nil {
+		switch n := src.Operations().(type) {
+		case *stagingFile:
+			return d.renameStaging(ctx, n, targetDir, newName)
+		case *cloudDir:
+			return d.renameRemote(ctx, n.item, targetDir, newName)
+		case *cloudFile:
+			return d.renameRemote(ctx, n.item, targetDir, newName)
+		}
+	}
+	item, errno := d.lookupChildItem(ctx, name)
+	if errno != 0 {
+		return errno
+	}
+	return d.renameRemote(ctx, item, targetDir, newName)
+}
+
+// renameStaging 处理本会话内刚创建、尚未在网盘列表可见的 staging 文件改名：
+// 更新节点名，并联动修改未开始的上传任务目标名与目标目录。
+func (d *cloudDir) renameStaging(ctx context.Context, st *stagingFile, targetDir *cloudDir, newName string) syscall.Errno {
+	st.mu.Lock()
+	oldName := st.name
+	taskID := st.taskID
+	st.mu.Unlock()
+	if targetDir.item.ID == d.item.ID && oldName == newName {
+		return 0
+	}
+	st.mu.Lock()
+	st.name = newName
+	if targetDir.item.ID != d.item.ID {
+		st.parentID = targetDir.item.ID
+		st.displayPath = targetDir.targetDisplayPath()
+	}
+	st.mu.Unlock()
+
+	if taskID != "" && st.uploads != nil {
+		newTarget := ""
+		newDisplay := ""
+		if targetDir.item.ID != d.item.ID {
+			newTarget = targetDir.item.ID
+			newDisplay = targetDir.targetDisplayPath()
+		}
+		if _, err := st.uploads.RenameTask(ctx, taskID, newName, newTarget, newDisplay); err != nil && d.b.deps.Log != nil {
+			d.b.deps.Log.Warn("FUSE staging rename 更新上传任务失败",
+				"task_id", taskID,
+				"old_name", oldName,
+				"new_name", newName,
+				"err", err,
+			)
+		}
+	}
+	return 0
+}
+
+// renameRemote 对网盘上已存在的文件/目录执行移动与改名（原 Rename 逻辑）。
+func (d *cloudDir) renameRemote(ctx context.Context, item domain.FileItem, targetDir *cloudDir, newName string) syscall.Errno {
+	if targetDir.item.ID == d.item.ID && item.Name == newName {
+		return 0
+	}
+	if item.IsDir && targetDir.item.ID == item.ID {
+		return syscall.EINVAL
 	}
 	if targetDir.item.ID != d.item.ID {
 		if err := d.b.deps.Files.MoveFiles(ctx, d.b.accountID(), []string{item.ID}, targetDir.item.ID, d.item.ID); err != nil {
@@ -203,6 +308,27 @@ func (d *cloudDir) Rename(ctx context.Context, name string, newParent fs.InodeEm
 	}
 	if err := d.b.deps.Files.RenameFile(ctx, d.b.accountID(), item.ID, newName, d.item.ID); err != nil {
 		return errnoFor(err)
+	}
+	return 0
+}
+
+// unlinkStaging 删除本会话内刚创建、尚未在网盘列表可见的 staging 文件：
+// 取消对应的上传任务并清理本地临时文件。
+func (d *cloudDir) unlinkStaging(st *stagingFile) syscall.Errno {
+	st.mu.Lock()
+	taskID := st.taskID
+	tempPath := st.tempPath
+	st.mu.Unlock()
+	if taskID != "" && st.uploads != nil {
+		if _, err := st.uploads.Delete(context.Background(), taskID, false); err != nil && d.b.deps.Log != nil {
+			d.b.deps.Log.Warn("FUSE staging unlink 取消上传任务失败",
+				"task_id", taskID,
+				"err", err,
+			)
+		}
+	}
+	if tempPath != "" {
+		_ = os.Remove(tempPath)
 	}
 	return 0
 }

@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
 import { qrPoll, qrStart, type QrStatus } from "@/api/qr";
+import type { FieldOption } from "@/api/types";
 import { toast } from "@/composables/useToast";
 import AppModal from "@/components/base/AppModal.vue";
 import BusySpinner from "@/components/base/BusySpinner.vue";
 
-const props = defineProps<{ open: boolean; driverType: string }>();
+const props = withDefaults(
+  defineProps<{
+    open: boolean;
+    driverType: string;
+    config?: string;
+    deviceOptions?: FieldOption[];
+    deviceField?: string;
+  }>(),
+  { config: "", deviceOptions: () => [], deviceField: "" },
+);
 const emit = defineEmits<{ close: []; success: [credentials: Record<string, string>] }>();
 
 type Phase = "loading" | "waiting" | "success" | "failed" | "expired" | "error";
@@ -17,10 +27,13 @@ const token = ref("");
 const expiresIn = ref(0);
 const panelTitle = ref("扫码登录");
 const hintText = ref("请使用对应网盘 App扫码，成功后授权信息将填入表单");
+const device = ref("");
 
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 let errorStreak = 0;
+
+const showDevicePicker = computed(() => props.deviceOptions.length > 0);
 
 const expireText = computed(() => {
   if (phase.value === "expired") return "二维码已过期";
@@ -62,6 +75,36 @@ function scheduleNextPoll(delay = 2000) {
   pollTimer = setTimeout(() => void poll(), delay);
 }
 
+function defaultDevice() {
+  return (
+    props.deviceOptions.find((o) => o.value === "web")?.value ??
+    props.deviceOptions[0]?.value ??
+    ""
+  );
+}
+
+function buildStartConfig(): string {
+  let cfg: Record<string, unknown> = {};
+  if (props.config) {
+    try {
+      cfg = JSON.parse(props.config) as Record<string, unknown>;
+    } catch {
+      cfg = {};
+    }
+  }
+  if (props.deviceField && device.value) {
+    cfg[props.deviceField] = device.value;
+  }
+  return JSON.stringify(cfg);
+}
+
+function onDeviceChange(e: Event) {
+  const next = (e.target as HTMLSelectElement).value;
+  if (!next || next === device.value) return;
+  device.value = next;
+  if (props.open) void start();
+}
+
 async function start() {
   clearPoll();
   phase.value = "loading";
@@ -73,7 +116,7 @@ async function start() {
   hintText.value = "请使用对应网盘 App扫码，成功后授权信息将填入表单";
   errorStreak = 0;
   try {
-    const res = await qrStart(props.driverType);
+    const res = await qrStart(props.driverType, buildStartConfig());
     if (!res.success || !res.data?.token || !res.data.qr_image_base64) {
       throw new Error(res.message || "获取二维码失败");
     }
@@ -156,6 +199,7 @@ watch(
   () => props.open,
   (open) => {
     if (open && props.driverType) {
+      device.value = defaultDevice();
       void start();
     } else {
       clearPoll();
@@ -179,6 +223,13 @@ onUnmounted(() => {
           <span>{{ panelTitle }}</span>
         </div>
         <button class="qr-panel-close" type="button" aria-label="关闭" @click="handleClose">×</button>
+      </div>
+
+      <div v-if="showDevicePicker" class="qr-device-bar">
+        <span class="qr-device-label">设备来源</span>
+        <select class="qr-device-select" :value="device" @change="onDeviceChange">
+          <option v-for="o in deviceOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
       </div>
 
       <div class="qr-panel-body">
@@ -241,6 +292,32 @@ onUnmounted(() => {
 .qr-panel-title i {
   color: var(--brand);
   font-size: 15px;
+}
+
+.qr-device-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+}
+
+.qr-device-label {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.qr-device-select {
+  height: 30px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
 }
 
 .qr-panel-close {

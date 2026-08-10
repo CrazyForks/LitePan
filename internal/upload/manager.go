@@ -107,6 +107,30 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (*Task, error) {
 	return tasks[0], nil
 }
 
+// RenameTask 在上传任务尚未开始传输时更新目标文件名与目标目录。
+// 返回 renamed=false 表示任务已开始或已完成，本次改名未生效（调用方不应因此报错）。
+func (m *Manager) RenameTask(_ context.Context, taskID, newName, newTargetPath, newDisplayPath string) (bool, error) {
+	name := strings.TrimSpace(newName)
+	if name == "" {
+		return false, nil
+	}
+	renamed := false
+	m.patch(taskID, func(st *taskState) {
+		if st.Status != StatusPending && st.Status != StatusPaused {
+			return
+		}
+		st.FileName = name
+		if newTargetPath != "" {
+			st.TargetPath = newTargetPath
+		}
+		if newDisplayPath != "" {
+			st.TargetDisplayPath = newDisplayPath
+		}
+		renamed = true
+	})
+	return renamed, nil
+}
+
 func (m *Manager) createBatch(ctx context.Context, params []CreateParams) ([]*Task, error) {
 	if len(params) == 0 {
 		return nil, domain.Errorf(domain.CodeValidation, "上传任务不能为空")

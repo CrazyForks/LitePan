@@ -26,6 +26,10 @@ type ReadCache interface {
 
 type UploadManager interface {
 	Create(ctx context.Context, p upload.CreateParams) (*upload.Task, error)
+	// RenameTask 在上传任务尚未开始传输时更新目标文件名与目标目录；返回是否已生效。
+	RenameTask(ctx context.Context, taskID, newName, newTargetPath, newDisplayPath string) (bool, error)
+	// Delete 删除上传任务，并可选删除已上传到网盘的文件。
+	Delete(ctx context.Context, taskID string, deleteUploadedFile bool) (bool, error)
 	TempDir() string
 	TempRegistry() *upload.TempRegistry
 }

@@ -18,7 +18,7 @@ const props = defineProps<{ open: boolean; editing: Account | null }>();
 const emit = defineEmits<{ close: []; saved: [] }>();
 
 const store = useAccountsStore();
-const { drivers, accounts } = storeToRefs(store);
+const { visibleDrivers, accounts } = storeToRefs(store);
 const { loading: oauthLoading, run: runOAuth, cancel: cancelOAuth } = useOAuthAuth();
 
 const step = ref<1 | 2>(1);
@@ -233,7 +233,7 @@ function handleClose() {
     <DriverPickerStep
       v-if="step === 1 && !isEdit"
       v-model="driverType"
-      :drivers="drivers"
+      :drivers="visibleDrivers"
       @next="goStep2"
     />
 
@@ -277,6 +277,9 @@ function handleClose() {
   <QrLoginModal
     :open="qrOpen"
     :driver-type="driverType"
+    :config="buildConfig()"
+    :device-options="selectedDriver?.qr_devices ?? []"
+    :device-field="selectedDriver?.qr_device_field ?? ''"
     @success="onQRSuccess"
     @close="qrOpen = false"
   />

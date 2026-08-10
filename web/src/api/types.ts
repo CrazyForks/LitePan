@@ -40,6 +40,9 @@ export interface DriverInfo {
   auth_type: string;
   supports_oauth?: boolean;
   supports_qr_login?: boolean;
+  qr_devices?: FieldOption[];
+  qr_device_field?: string;
+  internal_experimental?: boolean;
   fields: FieldSchema[];
 }
 

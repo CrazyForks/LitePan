@@ -37,6 +37,12 @@ type Config struct {
 	ProvideHashes          []string      // 跨盘秒传：源盘可提供的指纹类型（sha1/md5）
 	RapidUploadHashes      []string      // 跨盘秒传：目标盘支持的指纹秒传类型
 	UploadConflictPolicies []string      // 跨盘秒传/上传：前端可选冲突策略
+	// QRDevices 是扫码登录时可选设备来源；空表示扫码界面不提供切换。
+	QRDevices []FieldOption
+	// QRDeviceField 是 Addition 中保存设备来源的 JSON 字段名，与 QRDevices 配套。
+	QRDeviceField string
+	// InternalExperimental 为内部实验性驱动：默认不展示在前端驱动列表，需解锁开发模式后可见。
+	InternalExperimental bool
 }
 
 // Meta 是所有驱动必须实现的元信息与生命周期接口。

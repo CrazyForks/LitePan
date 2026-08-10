@@ -2,6 +2,7 @@
 package drivers
 
 import (
+	_ "litepan/drivers/115"
 	_ "litepan/drivers/115_Open"
 	_ "litepan/drivers/123_Open"
 	_ "litepan/drivers/139Cloud"

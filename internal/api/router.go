@@ -11,6 +11,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -104,6 +105,9 @@ type Handler struct {
 	adminAuth         *adminauth.Service
 	notifications     *notification.Service
 	onSettingsUpdated func(map[string]string)
+
+	devMu       sync.Mutex
+	devUnlocked bool
 }
 
 // NewRouter 装配并返回 HTTP 路由（含内嵌管理页面）。
@@ -195,6 +199,8 @@ func NewRouter(d Deps) http.Handler {
 				r.Post("/fnos/test", h.testFnosConfig)
 				r.Get("/local-fs/browse", h.browseLocalFS)
 				r.Get("/drivers", h.listDrivers)
+				r.Get("/dev/state", h.getDevState)
+				r.Post("/dev/unlock", h.unlockDevMode)
 				r.Get("/accounts", h.listAccounts)
 				r.Post("/accounts", h.createAccount)
 				r.Get("/accounts/{id}", h.getAccount)

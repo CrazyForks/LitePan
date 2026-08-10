@@ -12,6 +12,7 @@ import (
 
 type qrStartReq struct {
 	DriverType string `json:"driver_type"`
+	Config     string `json:"config"`
 }
 
 type qrStartResp struct {
@@ -47,12 +48,12 @@ func (h *Handler) qrEphemeralConfig() driver.EphemeralConfig {
 	}
 }
 
-func qrProvider(ctx context.Context, driverType string, cfg driver.EphemeralConfig) (driver.QRLoginProvider, func(context.Context), error) {
+func qrProvider(ctx context.Context, driverType, config string, cfg driver.EphemeralConfig) (driver.QRLoginProvider, func(context.Context), error) {
 	dt := strings.TrimSpace(driverType)
 	if dt == "" {
 		return nil, nil, domain.Errorf(domain.CodeValidation, "缺少 driver_type")
 	}
-	drv, release, err := driver.OpenEphemeral(ctx, dt, "", cfg)
+	drv, release, err := driver.OpenEphemeral(ctx, dt, config, cfg)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -70,7 +71,7 @@ func (h *Handler) startQRLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	p, release, err := qrProvider(r.Context(), in.DriverType, h.qrEphemeralConfig())
+	p, release, err := qrProvider(r.Context(), in.DriverType, in.Config, h.qrEphemeralConfig())
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -102,7 +103,7 @@ func (h *Handler) pollQRLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, domain.Errorf(domain.CodeValidation, "缺少扫码会话 token"))
 		return
 	}
-	p, release, err := qrProvider(r.Context(), in.DriverType, h.qrEphemeralConfig())
+	p, release, err := qrProvider(r.Context(), in.DriverType, "", h.qrEphemeralConfig())
 	if err != nil {
 		writeErr(w, err)
 		return
