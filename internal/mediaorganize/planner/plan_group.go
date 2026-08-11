@@ -440,7 +440,8 @@ func (p *Planner) tvFileNeedsSeasonFolderPlacement(key groupKey, entry batchEntr
 		return false
 	}
 	if entry.sourceDirName != "" &&
-		(rules.IsSeasonDirName(entry.sourceDirName) || rules.IsSpecialContentDirName(entry.sourceDirName)) {
+		(rules.IsSeasonDirName(entry.sourceDirName) || rules.IsSpecialContentDirName(entry.sourceDirName)) &&
+		!rules.IsSingleSeasonShowDir(entry.sourceDirName) {
 		return false
 	}
 	if entry.sourceDirID == p.parentID {

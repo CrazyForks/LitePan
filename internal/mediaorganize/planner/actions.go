@@ -241,6 +241,9 @@ func (p *Planner) ensureSeasonDirRenameAction(
 	if season == nil || sourceDirID == "" || sourceDirName == "" {
 		return nil
 	}
+	if sourceDirID == showDirID {
+		return nil
+	}
 	if !rules.IsSeasonDirName(sourceDirName) && !rules.IsSpecialContentDirName(sourceDirName) {
 		return nil
 	}
