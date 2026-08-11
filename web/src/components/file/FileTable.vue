@@ -1032,7 +1032,6 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  flex: 1 1 auto;
 }
 
 .file-mobile-meta {
