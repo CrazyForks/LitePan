@@ -11,6 +11,7 @@ import (
 	_ "litepan/drivers/Guangya"
 	_ "litepan/drivers/LocalFs"
 	_ "litepan/drivers/OneDrive"
+	_ "litepan/drivers/OpenList"
 	_ "litepan/drivers/Quark"
 	_ "litepan/drivers/WebDAV"
 )

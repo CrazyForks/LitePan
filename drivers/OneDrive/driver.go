@@ -37,7 +37,7 @@ var config = driver.Config{
 	DisplayName:            "OneDrive",
 	Description:            "OneDrive 个人版 Microsoft Graph 官方 API 接入",
 	CardTags:               []string{"官方授权", "OAuth", "支持302"},
-	SortOrder:              9,
+	SortOrder:              10,
 	AuthLabel:              "OAuth",
 	CardColor:              "#2563EB",
 	CardLogo:               "/logos/onedrive.png",

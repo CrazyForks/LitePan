@@ -34,7 +34,7 @@ var config = driver.Config{
 	DisplayName:    "115网盘Open",
 	Description:    "115网盘官方API接入，支持文件管理、上传下载等功能",
 	CardTags:       []string{"官方授权", "OAuth", "支持302", "SHA1"},
-	SortOrder:      1,
+	SortOrder:      2,
 	AuthLabel:      "OAuth",
 	CardColor:      "#22A7F0",
 	CardLogo:       "/logos/115.png",

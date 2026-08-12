@@ -32,7 +32,7 @@ var config = driver.Config{
 	DisplayName:            "移动云盘",
 	Description:            "移动云盘新版个人云接口，使用网页 Authorization 令牌",
 	CardTags:               []string{"扫码登录", "Authorization", "支持302"},
-	SortOrder:              8,
+	SortOrder:              9,
 	AuthLabel:              "Authorization",
 	CardColor:              "#3B82F6",
 	CardLogo:               "/logos/yidong.png",

@@ -23,7 +23,7 @@ var config = driver.Config{
 	DisplayName:            "WebDAV",
 	Description:            "挂载远端 WebDAV 服务器，作为账号读取与写入",
 	CardTags:               []string{"远端挂载", "目录读写", "本机代理"},
-	SortOrder:              7,
+	SortOrder:              99,
 	AuthLabel:              "用户名/密码",
 	CardColor:              "#0ea5e9",
 	CardLogo:               "/logos/webdav.png",

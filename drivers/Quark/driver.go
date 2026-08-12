@@ -32,7 +32,7 @@ var config = driver.Config{
 	DisplayName:         "夸克网盘",
 	Description:         "夸克网盘接入，支持Cookie认证和文件管理功能",
 	CardTags:            []string{"扫码登录", "Cookie", "本机代理"},
-	SortOrder:           5,
+	SortOrder:           6,
 	AuthLabel:           "Cookie",
 	CardColor:           "#2f7bff",
 	CardLogo:            "/logos/quark.png",

@@ -7,34 +7,6 @@ import (
 	"litepan/internal/domain"
 )
 
-// TestSingleSeasonDirNoShowParent 复现：单季文件夹（含剧集名）整理后缺失片名目录。
-func TestSingleSeasonDirNoShowParent(t *testing.T) {
-	fs := &mockFS{dirs: map[string][]domain.FileItem{
-		"root": {{ID: "d1", Name: "脱口秀和Ta的朋友们.第二季[全26集][国语配音/中文字幕].2024.2160p.WEB-DL.H265.AAC-ColorTV", IsDir: true}},
-		"d1": {
-			{ID: "f1", Name: "脱口秀和Ta的朋友们.S02E01.2160p.WEB-DL.mkv"},
-			{ID: "f2", Name: "脱口秀和Ta的朋友们.S02E02.2160p.WEB-DL.mkv"},
-		},
-	}}
-	tmdb := &mockTMDB{
-		searchFn: func(query string, _ *int) []map[string]any {
-			if query == "脱口秀和Ta的朋友们" {
-				return []map[string]any{{"id": 999, "name": "脱口秀和Ta的朋友们", "first_air_date": "2024-06-01"}}
-			}
-			return nil
-		},
-	}
-	plan, err := newTestPlanner(fs, tmdb, "root").Build()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("actions=%d", len(plan.Actions))
-	for _, a := range plan.Actions {
-		t.Logf("  [%s] src=%q tgt=%q kind=%v gid=%v tmdb=%v",
-			a.Kind, a.SourceName, a.TargetName, a.Metadata["kind_label"], a.Metadata["group_uid"], a.Metadata["tmdb_id"])
-	}
-}
-
 // TestSingleSeasonDirUnderShowParent 上层已有片名目录时，内层单季文件夹应作为季目录处理
 // （改名 Season 02），而不是再建一层片名目录。
 func TestSingleSeasonDirUnderShowParent(t *testing.T) {
@@ -58,11 +30,9 @@ func TestSingleSeasonDirUnderShowParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("actions=%d", len(plan.Actions))
 	dirRenamed := ""
 	seasonDir := ""
 	for _, a := range plan.Actions {
-		t.Logf("  [%s] src=%q tgt=%q kind=%v", a.Kind, a.SourceName, a.TargetName, a.Metadata["kind_label"])
 		if a.SourceID == "d1" && fmt.Sprint(a.Metadata["kind_label"]) == "season_dir_rename" {
 			seasonDir = a.TargetName
 		}
@@ -101,12 +71,10 @@ func TestSingleSeasonDirWithSeasonChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("actions=%d", len(plan.Actions))
 	dirRenamed := ""
 	seasonRenamed := ""
 	seasonEnsured := 0
 	for _, a := range plan.Actions {
-		t.Logf("  [%s] src=%q tgt=%q kind=%v", a.Kind, a.SourceName, a.TargetName, a.Metadata["kind_label"])
 		if a.SourceID == "d1" && fmt.Sprint(a.Metadata["kind_label"]) == "dir_rename" {
 			dirRenamed = a.TargetName
 		}

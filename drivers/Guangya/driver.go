@@ -35,7 +35,7 @@ var config = driver.Config{
 	DisplayName:            "光鸭云盘",
 	Description:            "光鸭云盘接入",
 	CardTags:               []string{"短信登录", "支持302", "支持秒传"},
-	SortOrder:              6,
+	SortOrder:              7,
 	AuthLabel:              "短信登录",
 	CardColor:              "#FF7A1A",
 	CardLogo:               "/logos/guangya.png",

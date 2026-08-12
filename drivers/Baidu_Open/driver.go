@@ -35,7 +35,7 @@ var config = driver.Config{
 	DisplayName:    "百度网盘Open",
 	Description:    "百度网盘官方开放API接入，当前支持OAuth认证与文件浏览",
 	CardTags:       []string{"官方授权", "OAuth", "MD5分享"},
-	SortOrder:      4,
+	SortOrder:      5,
 	AuthLabel:      "OAuth",
 	CardColor:      "#2932E1",
 	CardLogo:       "/logos/baidu.png",

@@ -38,7 +38,7 @@ var config = driver.Config{
 	DisplayName:            "天翼云盘",
 	Description:            "天翼云盘 PC 接口接入，支持个人云、家庭云和文件管理",
 	CardTags:               []string{"个人云", "家庭云", "扫码登录", "支持302", "支持秒传"},
-	SortOrder:              7,
+	SortOrder:              8,
 	AuthLabel:              "扫码登录",
 	CardColor:              "#FEC52C",
 	CardLogo:               "/logos/tianyi.png",

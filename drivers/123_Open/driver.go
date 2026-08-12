@@ -49,7 +49,7 @@ var config = driver.Config{
 	DisplayName:            "123云盘 Open",
 	Description:            "123云盘官方开放 API 接入",
 	CardTags:               []string{"官方授权", "OAuth", "支持302", "支持秒传"},
-	SortOrder:              2,
+	SortOrder:              4,
 	AuthLabel:              "OAuth",
 	CardColor:              "#2563eb",
 	CardLogo:               "/logos/123.png",
