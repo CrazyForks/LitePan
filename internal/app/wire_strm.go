@@ -12,6 +12,7 @@ func wireSTRM(st *storeBundle, files *file.Service, playback *playback.Service, 
 	svc := strm.NewService(strm.ServiceOptions{
 		Repo:       st.store.StrmTasks,
 		Branches:   st.store.StrmBranches,
+		DirCache:   st.store.StrmDirCache,
 		Files:      files,
 		Playback:   playback,
 		Settings:   st.settings,

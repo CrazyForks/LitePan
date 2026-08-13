@@ -262,6 +262,11 @@ func NewRouter(d Deps) http.Handler {
 					r.Post("/generate-current-directory", h.generateCurrentDirectoryStrm)
 					r.Post("/directory-status", h.checkStrmDirectoryStatus)
 				})
+				r.Route("/tools/115-strm", func(r chi.Router) {
+					r.Get("/status", h.get115StrmToolStatus)
+					r.Post("/enabled", h.set115StrmToolEnabled)
+					r.Post("/cache/clear", h.clear115StrmDirCache)
+				})
 				r.Route("/media-organize", func(r chi.Router) {
 					r.Get("/tasks", h.listMediaOrganizeTasks)
 					r.Post("/tasks", h.createMediaOrganizeTask)

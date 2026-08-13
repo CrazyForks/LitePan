@@ -106,6 +106,49 @@ func (s *Service) listFromDriver(ctx context.Context, accountID int64, parentID 
 	return items, err
 }
 
+// ListAllFiles 走 STRM 清单模式：驱动支持 FullListLister 时一次拉取
+// parentID 下全部文件（含子孙目录）；未实现返回 CodeNotImplement。
+func (s *Service) ListAllFiles(ctx context.Context, accountID int64, parentID string) ([]driver.FullListEntry, error) {
+	if err := s.exec.Check(ctx, accountID); err != nil {
+		return nil, err
+	}
+	var out []driver.FullListEntry
+	err := s.exec.Run(ctx, accountID, func(drv driver.Driver) error {
+		cap, ok := drv.(driver.FullListLister)
+		if !ok {
+			return domain.Errorf(domain.CodeNotImplement, "驱动不支持清单模式")
+		}
+		got, err := cap.ListAllFiles(ctx, parentID)
+		if err != nil {
+			return err
+		}
+		out = got
+		return nil
+	})
+	return out, err
+}
+
+// ResolveDirPath 反查目录完整远端路径（清单模式 pid→路径 补漏用）。
+func (s *Service) ResolveDirPath(ctx context.Context, accountID int64, dirID string) (string, error) {
+	if err := s.exec.Check(ctx, accountID); err != nil {
+		return "", err
+	}
+	var out string
+	err := s.exec.Run(ctx, accountID, func(drv driver.Driver) error {
+		cap, ok := drv.(driver.FullListLister)
+		if !ok {
+			return domain.Errorf(domain.CodeNotImplement, "驱动不支持清单模式")
+		}
+		got, err := cap.ResolveDirPath(ctx, dirID)
+		if err != nil {
+			return err
+		}
+		out = got
+		return nil
+	})
+	return out, err
+}
+
 // WarmAccount 挂载/联调前预热账号：强制刷新根目录列表，初始化驱动实例并触发 OAuth 被动续期。
 func (s *Service) WarmAccount(ctx context.Context, accountID int64) error {
 	_, err := s.List(ctx, accountID, "", true)

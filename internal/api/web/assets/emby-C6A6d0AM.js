@@ -1,0 +1,1 @@
+import{x as e}from"./index-BS6P-Wuz.js";function t(){return e.get(`/admin/emby/config`)}function n(t){return e.put(`/admin/emby/config`,t)}function r(t){return e.post(`/admin/emby/test`,t)}function i(){return e.get(`/admin/emby/libraries`)}function a(t={}){return e.post(`/admin/emby/refresh`,t)}export{r as a,n as i,i as n,a as r,t};

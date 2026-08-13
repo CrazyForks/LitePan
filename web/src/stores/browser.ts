@@ -314,8 +314,13 @@ export const useBrowserStore = defineStore("browser", () => {
     error.value = "";
     const started = performance.now();
     try {
+      const crumbsPath = breadcrumb.value
+        .slice(1)
+        .map((c) => c.name)
+        .join("/");
       const res = await filesApi.list(accountId, parentId, {
         forceRefresh: opts?.forceRefresh,
+        path: crumbsPath || undefined,
       });
       if (isStaleFileListRequest(requestSeq, accountId, parentId)) return;
       files.value = res.items;

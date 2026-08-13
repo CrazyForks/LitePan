@@ -30,6 +30,7 @@ type RunningAccountLister interface {
 type Service struct {
 	repo       domain.StrmTaskRepository
 	branches   domain.StrmBranchRepository
+	dirCache   domain.StrmDirCacheRepository
 	files      *file.Service
 	playback   *playback.Service
 	settings   *settings.Service
@@ -59,6 +60,7 @@ type Service struct {
 type ServiceOptions struct {
 	Repo       domain.StrmTaskRepository
 	Branches   domain.StrmBranchRepository
+	DirCache   domain.StrmDirCacheRepository
 	Files      *file.Service
 	Playback   *playback.Service
 	Settings   *settings.Service
@@ -82,6 +84,7 @@ func NewService(opts ServiceOptions) *Service {
 	return &Service{
 		repo:            opts.Repo,
 		branches:        opts.Branches,
+		dirCache:        opts.DirCache,
 		files:           opts.Files,
 		playback:        opts.Playback,
 		settings:        opts.Settings,
@@ -611,6 +614,7 @@ func (s *Service) scanSettings() ScanSettings {
 		MetadataMaxSizeMB:     s.settings.Int(settings.KeyStrmMetadataMaxSizeMB),
 		MetadataParentEnabled: s.settings.Bool(settings.KeyStrmMetadataParentEnabled),
 		MetadataSyncMode:      normalizeMetadataSyncMode(s.settings.String(settings.KeyStrmMetadataSyncMode)),
+		Tool115TreeEnabled:    s.settings.Bool(settings.KeyStrmTool115TreeEnabled),
 	}
 }
 

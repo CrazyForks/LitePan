@@ -34,11 +34,13 @@ type ScanSettings struct {
 	MetadataParentEnabled bool
 	MetadataSyncMode      string
 	ISOFilenameEnabled    bool
+	Tool115TreeEnabled    bool
 }
 
 type ScanDeps struct {
 	Files       *file.Service
 	Branches    domain.StrmBranchRepository
+	DirCache    domain.StrmDirCacheRepository
 	Playback    *playback.Service
 	StrmDir     string
 	BaseURL     string
@@ -108,6 +110,10 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 	root := strings.TrimSpace(deps.StrmDir)
 	if root == "" {
 		root = "strm"
+	}
+	if useEnhancedScan(task, deps, runMode) {
+		return scanEnhancedTask(ctx, task, deps, root, exts, metaExts, excludeDirs, excludeFiles,
+			minMediaBytes, metaMaxBytes, failures)
 	}
 	useBranch := useBranchScan(runMode, task)
 	var allBranches []*domain.StrmBranch
@@ -180,6 +186,47 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 			return result, err
 		}
 	}
+
+	return finalizeScan(ctx, task, deps, scanHarvest{
+		candidates:      candidates,
+		metadataItems:   metadataItems,
+		state:           state,
+		dirHasMedia:     dirHasMedia,
+		subtreeHasMedia: subtreeHasMedia,
+	}, useBranch, exts, metaExts, minMediaBytes, metaMaxBytes, root, failures)
+}
+
+type scanHarvest struct {
+	candidates      []mediaCandidate
+	metadataItems   []metadataItem
+	state           *branchScanState
+	dirHasMedia     map[string]bool
+	subtreeHasMedia map[string]bool
+}
+
+// finalizeScan 处理已收集到的候选：冲突选择 → 生成 STRM → 元数据同步 → 清理。
+// 普通递归扫描与增强清单模式共用，保证两种模式行为一致。
+func finalizeScan(
+	ctx context.Context,
+	task *domain.StrmTask,
+	deps ScanDeps,
+	harvest scanHarvest,
+	useBranch bool,
+	exts, metaExts map[string]struct{},
+	minMediaBytes, metaMaxBytes int64,
+	root string,
+	failures *FailureCollector,
+) (ScanResult, error) {
+	var result ScanResult
+	log := deps.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	state := harvest.state
+	candidates := harvest.candidates
+	metadataItems := harvest.metadataItems
+	dirHasMedia := harvest.dirHasMedia
+	subtreeHasMedia := harvest.subtreeHasMedia
 
 	selected, _ := selectConflictWinners(candidates, deps.Settings.ConflictPolicy)
 	metadataItems = alignMetadataItems(task.OutputFolder, selected, metadataItems, deps.Settings.ISOFilenameEnabled)

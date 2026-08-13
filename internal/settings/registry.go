@@ -47,6 +47,7 @@ const (
 	KeyStrmMetadataMaxSizeMB       = "strm_metadata_max_size_mb"
 	KeyStrmMetadataParentEnabled   = "strm_metadata_parent_enabled"
 	KeyStrmMetadataSyncMode        = "strm_metadata_sync_mode"
+	KeyStrmTool115TreeEnabled      = "strm_tool_115_tree_enabled"
 	KeyStrmScrapeWriteMode         = "strm_scrape_write_mode"
 
 	KeyMOProxyEnabled          = "mo_proxy_enabled"
@@ -171,6 +172,7 @@ func defaultSpecs() []Spec {
 		stringSpec(KeyStrmMetadataExtensions, "strm", "元数据扩展名", "任务开启同步元数据时使用的扩展名，英文分号分隔。", "srt;ass;ssa;sub;sup;idx;vtt;nfo;jpg;jpeg;png;webp;bmp;gif"),
 		intSpec(KeyStrmMetadataMaxSizeMB, "strm", "元数据大小上限", "同步元数据时忽略超过该大小的文件。", "10", "MB", 1, 1024),
 		boolSpec(KeyStrmMetadataParentEnabled, "strm", "父目录元数据同步", "子目录有影片时，也同步父目录下的海报、nfo 等元数据。", "true"),
+		boolSpec(KeyStrmTool115TreeEnabled, "strm", "115 网盘 STRM 增强（目录树清单模式）", "开启后 115Open 账号的 STRM 任务改用全量清单 + 增量对账方式执行，减少逐目录递归请求；配了分支的任务维持原逻辑。", "false"),
 		selectSpec(KeyStrmMetadataSyncMode, "strm", "元数据同步策略", "local_primary=保留本地并从云端补缺；cloud_primary=本地目录与云端保持一致；bidirectional=本地与云端互相补缺。", "local_primary", []Option{
 			{Value: "cloud_primary", Label: "网盘元数据为主"},
 			{Value: "local_primary", Label: "本地元数据补缺"},

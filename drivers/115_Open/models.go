@@ -14,34 +14,40 @@ type listPageResp struct {
 	Data  []fileEntry `json:"data"`
 }
 
+type dirPathEntry struct {
+	FileID   flexString `json:"file_id"`
+	FileName string     `json:"file_name"`
+}
+
 type fileEntry struct {
-	Fid          string     `json:"fid"`
-	FileID       string     `json:"file_id"`
-	Fn           string     `json:"fn"`
-	FileName     string     `json:"file_name"`
-	Fc           flexString `json:"fc"`
-	FileCategory flexString `json:"file_category"`
-	Aid          flexString `json:"aid"`
-	Pid          string     `json:"pid"`
-	Cid          string     `json:"cid"`
-	ParentID     string     `json:"parent_id"`
-	Pc           string     `json:"pc"`
-	PickCode     string     `json:"pick_code"`
-	Pickcode     string     `json:"pickcode"`
-	Code         string     `json:"code"`
-	Sha1         string     `json:"sha1"`
-	SizeByte     flexNumber `json:"size_byte"`
-	S            flexNumber `json:"s"`
-	FS           flexNumber `json:"fs"`
-	Size         flexNumber `json:"size"`
-	Thumb        string     `json:"thumb"`
-	Thumbnail    string     `json:"thumbnail"`
-	T            flexNumber `json:"t"`
-	Upt          flexNumber `json:"upt"`
-	Uetime       flexNumber `json:"uet"`
-	Uppt         flexNumber `json:"uppt"`
-	Utime        string     `json:"utime"`
-	Ptime        string     `json:"ptime"`
+	Fid          string         `json:"fid"`
+	FileID       string         `json:"file_id"`
+	Fn           string         `json:"fn"`
+	FileName     string         `json:"file_name"`
+	Fc           flexString     `json:"fc"`
+	FileCategory flexString     `json:"file_category"`
+	Aid          flexString     `json:"aid"`
+	Pid          string         `json:"pid"`
+	Cid          string         `json:"cid"`
+	ParentID     string         `json:"parent_id"`
+	Pc           string         `json:"pc"`
+	PickCode     string         `json:"pick_code"`
+	Pickcode     string         `json:"pickcode"`
+	Code         string         `json:"code"`
+	Sha1         string         `json:"sha1"`
+	SizeByte     flexNumber     `json:"size_byte"`
+	S            flexNumber     `json:"s"`
+	FS           flexNumber     `json:"fs"`
+	Size         flexNumber     `json:"size"`
+	Thumb        string         `json:"thumb"`
+	Thumbnail    string         `json:"thumbnail"`
+	T            flexNumber     `json:"t"`
+	Upt          flexNumber     `json:"upt"`
+	Uetime       flexNumber     `json:"uet"`
+	Uppt         flexNumber     `json:"uppt"`
+	Utime        string         `json:"utime"`
+	Ptime        string         `json:"ptime"`
+	Paths        []dirPathEntry `json:"paths"`
 }
 
 type mkdirResp struct {
@@ -102,6 +108,25 @@ func (e fileEntry) pickCode() string {
 		}
 	}
 	return ""
+}
+
+func (e fileEntry) parentID() string {
+	for _, s := range []string{e.Pid, e.ParentID, e.Cid} {
+		if v := strings.TrimSpace(s); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func (e fileEntry) entryMTime() int64 {
+	if v := e.Uppt.int64(); v > 0 {
+		return v
+	}
+	if v := e.Upt.int64(); v > 0 {
+		return v
+	}
+	return 0
 }
 
 func (e *fileEntry) UnmarshalJSON(data []byte) error {

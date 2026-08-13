@@ -12,6 +12,7 @@ type Store struct {
 	ApiKeys             domain.ApiKeyRepository
 	StrmTasks           domain.StrmTaskRepository
 	StrmBranches        domain.StrmBranchRepository
+	StrmDirCache        domain.StrmDirCacheRepository
 	UploadTasks         domain.UploadTaskRepository
 	OfflineDownloads    domain.OfflineDownloadTaskRepository
 	MediaOrganizeTasks  domain.MediaOrganizeTaskRepository
@@ -32,6 +33,7 @@ func New(db *DB) *Store {
 		ApiKeys:             &apiKeyRepo{db: db},
 		StrmTasks:           &strmTaskRepo{db: db},
 		StrmBranches:        &strmBranchRepo{db: db},
+		StrmDirCache:        &strmDirCacheRepo{db: db},
 		UploadTasks:         &uploadTaskRepo{db: db},
 		OfflineDownloads:    &offlineDownloadTaskRepo{db: db},
 		MediaOrganizeTasks:  &mediaOrganizeTaskRepo{db: db},

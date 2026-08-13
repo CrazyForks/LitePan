@@ -1,0 +1,1 @@
+import{x as e}from"./index-BS6P-Wuz.js";function t(){return e.get(`/admin/settings`)}function n(t){return e.put(`/admin/settings`,t)}export{n,t};

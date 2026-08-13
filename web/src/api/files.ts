@@ -156,10 +156,11 @@ async function readBinaryPreviewBytes(response: Response, maxBytes: number) {
 }
 
 export const filesApi = {
-  list: (accountId: number, parentId: string, opts?: { forceRefresh?: boolean }) =>
+  list: (accountId: number, parentId: string, opts?: { forceRefresh?: boolean; path?: string }) =>
     http.get<FileListResult>("/files/list", {
       account_id: accountId,
       parent_id: parentId,
+      ...(opts?.path ? { path: opts.path } : {}),
       ...(opts?.forceRefresh ? { force_refresh: "true" } : {}),
     }),
 
