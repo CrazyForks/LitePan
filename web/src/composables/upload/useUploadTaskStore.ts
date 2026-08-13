@@ -20,6 +20,30 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
   const uploadTaskOrderMap = ref<Record<string, number>>({});
   const uploadTaskServerConcurrency = ref(3);
   const batchPauseInProgress = ref(false);
+  const pendingDirRefreshBatches = ref<Record<string, { count: number; creationRefreshed: boolean }>>({});
+
+  function registerDirRefreshBatch(key: string, count: number) {
+    pendingDirRefreshBatches.value = {
+      ...pendingDirRefreshBatches.value,
+      [key]: { count, creationRefreshed: false },
+    };
+  }
+
+  function markDirRefreshBatchCreated(key: string) {
+    const cur = pendingDirRefreshBatches.value[key];
+    if (!cur || cur.creationRefreshed) return;
+    pendingDirRefreshBatches.value = {
+      ...pendingDirRefreshBatches.value,
+      [key]: { ...cur, creationRefreshed: true },
+    };
+  }
+
+  function resolveDirRefreshBatch(key: string) {
+    if (!(key in pendingDirRefreshBatches.value)) return;
+    const next = { ...pendingDirRefreshBatches.value };
+    delete next[key];
+    pendingDirRefreshBatches.value = next;
+  }
 
   let uploadTaskOrderCounter = 0;
 
@@ -234,6 +258,10 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
     pendingRemoteResumeTaskIds,
     hiddenUploadTaskKeys,
     relayTasks,
+    pendingDirRefreshBatches,
+    registerDirRefreshBatch,
+    markDirRefreshBatchCreated,
+    resolveDirRefreshBatch,
     activeRelayTasks,
     failedRelayTasks,
     activeRelayCount,

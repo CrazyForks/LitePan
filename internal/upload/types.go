@@ -72,6 +72,8 @@ const (
 	CleanupLocalFileOnSuccess = "file_on_success"
 	CleanupLocalPathOnSuccess = "path_on_success"
 	CleanupLocalTreeOnSuccess = "tree_on_success"
+	// CleanupLocalModeKeep 表示上传成功后保留本地源文件（本机上传/备份场景）。
+	CleanupLocalModeKeep = "keep"
 )
 
 type taskState struct {

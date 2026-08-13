@@ -16,11 +16,11 @@ const CloudToolsPanel = defineAsyncComponent(() => import("@/components/admin/Cl
 
 const SCRAPE_TAB = "scrape";
 const PROXY_TAB = "proxy";
-const CLOUD_TAB = "cloud";
+const ENHANCED_TAB = "enhanced";
 const tabs = [
   { key: SCRAPE_TAB, label: "STRM 刮削" },
   { key: PROXY_TAB, label: "反代工具" },
-  { key: CLOUD_TAB, label: "网盘工具" },
+  { key: ENHANCED_TAB, label: "增强工具" },
 ];
 
 const settingsDrawerOpen = ref(false);
@@ -43,7 +43,7 @@ const { confirmDiscardChanges } = useSettingsPageDirty(settingsPageDirty, revert
 
 const { activeTab, setActiveTab } = useSectionTabRoute(
   SCRAPE_TAB,
-  [SCRAPE_TAB, PROXY_TAB, CLOUD_TAB],
+  [SCRAPE_TAB, PROXY_TAB, ENHANCED_TAB],
   {
     beforeTabChange: async () => {
       if (!settingsDrawerOpen.value) return true;
@@ -58,7 +58,7 @@ const { activeTab, setActiveTab } = useSectionTabRoute(
 const drawerSaving = computed(() => readPanelSaving(scrapeSettingsRef.value?.saving));
 const isScrapeTab = computed(() => activeTab.value === SCRAPE_TAB);
 const isProxyTab = computed(() => activeTab.value === PROXY_TAB);
-const isCloudTab = computed(() => activeTab.value === CLOUD_TAB);
+const isEnhancedTab = computed(() => activeTab.value === ENHANCED_TAB);
 
 async function openScrapeSettings() {
   scrapeSettingsVisited.value = true;
@@ -105,7 +105,7 @@ async function handleDrawerSave() {
 
     <StrmScrapePanel v-if="isScrapeTab" ref="scrapePanelRef" @open-settings="openScrapeSettings" />
     <ProxyToolsPanel v-else-if="isProxyTab" />
-    <CloudToolsPanel v-else-if="isCloudTab" />
+    <CloudToolsPanel v-else-if="isEnhancedTab" />
 
     <AdminSettingsDrawer
       :open="settingsDrawerOpen"

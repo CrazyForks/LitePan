@@ -48,6 +48,8 @@ const (
 	KeyStrmMetadataParentEnabled   = "strm_metadata_parent_enabled"
 	KeyStrmMetadataSyncMode        = "strm_metadata_sync_mode"
 	KeyStrmTool115TreeEnabled      = "strm_tool_115_tree_enabled"
+	KeyLocalUploadEnabled          = "local_upload_enabled"
+	KeyLocalUploadMappings         = "local_upload_mappings"
 	KeyStrmScrapeWriteMode         = "strm_scrape_write_mode"
 
 	KeyMOProxyEnabled          = "mo_proxy_enabled"
@@ -206,6 +208,18 @@ func defaultSpecs() []Spec {
 			Key:     KeyLogErrorAckAt,
 			Type:    TypeString,
 			Default: "",
+			Hidden:  true,
+		},
+		{
+			Key:     KeyLocalUploadEnabled,
+			Type:    TypeBool,
+			Default: "false",
+			Hidden:  true,
+		},
+		{
+			Key:     KeyLocalUploadMappings,
+			Type:    TypeString,
+			Default: "[]",
 			Hidden:  true,
 		},
 	}

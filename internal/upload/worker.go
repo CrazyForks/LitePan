@@ -588,6 +588,23 @@ func (m *Manager) deleteUploadedFile(ctx context.Context, st *taskState) error {
 	return nil
 }
 
+// deleteUploadedFiles 批量删除已上传的网盘文件（一次请求，驱动支持批量删除）。
+func (m *Manager) deleteUploadedFiles(ctx context.Context, accountID int64, fileIDs []string) error {
+	if len(fileIDs) == 0 {
+		return nil
+	}
+	if err := m.exec.Check(ctx, accountID); err != nil {
+		return err
+	}
+	return m.exec.Run(ctx, accountID, func(drv driver.Driver) error {
+		deleter, err := driverexec.Require[driver.Deleter](drv)
+		if err != nil {
+			return err
+		}
+		return deleter.DeleteFiles(ctx, fileIDs)
+	})
+}
+
 func (m *Manager) publishUploadedFileDeleted(st *taskState, fileID string) {
 	if m.bus == nil {
 		return

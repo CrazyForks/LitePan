@@ -10,6 +10,7 @@ export function useUploadTaskStream(deps: UploadTaskDeps, store: UploadTaskStore
   let uploadTaskEventSource: EventSource | null = null;
   let uploadTaskSseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   const refreshedSuccessfulTaskKeys = new Set<string>();
+  let keepPollingUntil = 0;
   let uploadAuthDenied = false;
 
   function isAdminAuthError(error: unknown) {
@@ -31,6 +32,25 @@ export function useUploadTaskStream(deps: UploadTaskDeps, store: UploadTaskStore
     }
     for (const key of refreshedSuccessfulTaskKeys) {
       if (!currentSuccessKeys.has(key)) refreshedSuccessfulTaskKeys.delete(key);
+    }
+    // 文件夹上传：等该批次所有任务结束（成功/跳过/失败）后再刷新一次当前目录，
+    // 避免在任务创建/上传中途过早消费刷新标记。
+    const batches = store.pendingDirRefreshBatches?.value || {};
+    for (const [key, info] of Object.entries(batches)) {
+      const members = tasks.filter((t) => String(t.client_task_id || "").startsWith(key + "-"));
+      if (members.length === 0) continue;
+      // 任务出现即说明远端目录已创建，先刷新一次让用户看到文件夹
+      if (!info.creationRefreshed) {
+        store.markDirRefreshBatchCreated?.(key);
+        hasNewSuccess = true;
+      }
+      const finished = members.filter((t) =>
+        ["success", "skipped", "failed", "canceled"].includes(String(t.status)),
+      ).length;
+      if (finished >= Math.min(info.count, members.length)) {
+        store.resolveDirRefreshBatch?.(key);
+        hasNewSuccess = true;
+      }
     }
     if (hasNewSuccess || store.consumeFolderUploadRefreshPending()) {
       void deps.refreshFiles(true);
@@ -55,7 +75,7 @@ export function useUploadTaskStream(deps: UploadTaskDeps, store: UploadTaskStore
       store.pruneLocalUploadTasksByStableKeys(store.uploadTasks.value.map((task) => getUploadTaskStableKey(task)));
       refreshCurrentDirectoryForNewSuccess(store.uploadTasks.value);
       if (!store.uploadTaskPanelOpen.value) {
-        if (store.activeUploadTasks.value.length > 0) startUploadTaskPolling();
+        if (store.activeUploadTasks.value.length > 0 || Date.now() < keepPollingUntil) startUploadTaskPolling();
         else stopUploadTaskPolling();
       }
       await hooks.startScheduler();
@@ -73,6 +93,12 @@ export function useUploadTaskStream(deps: UploadTaskDeps, store: UploadTaskStore
   function startUploadTaskPolling() {
     if (uploadTaskPollingTimer || uploadAuthDenied) return;
     uploadTaskPollingTimer = setInterval(() => void fetchUploadTasks(), 400);
+  }
+
+  // bumpKeepPolling 在上传受理后保持一段时间的轮询，避免任务尚未创建出来时轮询被停止。
+  function bumpKeepPolling(ms = 60000) {
+    keepPollingUntil = Date.now() + ms;
+    startUploadTaskPolling();
   }
 
   function stopUploadTaskPolling() {
@@ -137,6 +163,7 @@ export function useUploadTaskStream(deps: UploadTaskDeps, store: UploadTaskStore
     fetchUploadTasks,
     refreshUploadTaskServerConcurrency,
     startUploadTaskPolling,
+    bumpKeepPolling,
     stopUploadTaskPolling,
     connectUploadTaskStream,
     disconnectUploadTaskStream,

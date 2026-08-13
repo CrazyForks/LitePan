@@ -217,6 +217,9 @@ func (s *Service) DeleteFiles(ctx context.Context, accountID int64, fileIDs []st
 		s.log.Warn("删除文件失败", "account_id", accountID, "count", len(fileIDs), "err", err)
 		return err
 	}
+	if s.cache != nil && parentID != "" {
+		cache.InvalidateDirKeys(s.cache, accountID, parentID)
+	}
 	s.log.Debug("删除文件成功", "account_id", accountID, "count", len(fileIDs), "parent_id", parentID)
 	s.publishMutation(ctx, eventbus.FileMutated{AccountID: accountID, Op: "delete", ParentID: parentID, FileIDs: fileIDs})
 	return nil

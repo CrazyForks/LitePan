@@ -107,6 +107,11 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (*Task, error) {
 	return tasks[0], nil
 }
 
+// CreateBatch 批量创建上传任务（含按 ClientTaskID 去重）。
+func (m *Manager) CreateBatch(ctx context.Context, params []CreateParams) ([]*Task, error) {
+	return m.createBatch(ctx, params)
+}
+
 // RenameTask 在上传任务尚未开始传输时更新目标文件名与目标目录。
 // 返回 renamed=false 表示任务已开始或已完成，本次改名未生效（调用方不应因此报错）。
 func (m *Manager) RenameTask(_ context.Context, taskID, newName, newTargetPath, newDisplayPath string) (bool, error) {

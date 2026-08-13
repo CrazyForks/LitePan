@@ -267,6 +267,12 @@ func NewRouter(d Deps) http.Handler {
 					r.Post("/enabled", h.set115StrmToolEnabled)
 					r.Post("/cache/clear", h.clear115StrmDirCache)
 				})
+				r.Route("/tools/local-upload", func(r chi.Router) {
+					r.Get("/config", h.getLocalUploadConfig)
+					r.Put("/config", h.updateLocalUploadConfig)
+					r.Post("/browse", h.browseLocalUpload)
+					r.Post("/upload", h.createLocalUploadTasks)
+				})
 				r.Route("/media-organize", func(r chi.Router) {
 					r.Get("/tasks", h.listMediaOrganizeTasks)
 					r.Post("/tasks", h.createMediaOrganizeTask)

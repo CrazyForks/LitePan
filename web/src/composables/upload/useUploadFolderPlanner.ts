@@ -55,7 +55,8 @@ export function useUploadFolderPlanner(ctx: UploadActionsCtx) {
       for (const item of normalized) {
         const reason = getSystemUploadJunkReason(item.relativePath);
         if (reason) {
-          skipped.push(store.createSkippedUploadTask(item.file, reason, { file_name: item.relativePath }));
+          const t = store.createSkippedUploadTask(item.file, reason, { file_name: item.relativePath });
+          skipped.push(t);
           continue;
         }
         uploadable.push(item);

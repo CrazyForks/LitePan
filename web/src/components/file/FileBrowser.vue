@@ -9,6 +9,7 @@ import { fileKey, useFileSelection } from "@/composables/useFileSelection";
 import { useFileActions, type DeleteMode } from "@/composables/useFileActions";
 import { showConfirm } from "@/composables/useConfirm";
 import { useUploadTasks } from "@/composables/useUploadTasks";
+import CloudLocalUploadPanel from "@/components/file/CloudLocalUploadPanel.vue";
 import { useOfflineDownloads } from "@/composables/useOfflineDownloads";
 import { toast } from "@/composables/useToast";
 import { filesApi } from "@/api/files";
@@ -1105,6 +1106,21 @@ onUnmounted(() => {
       webkitdirectory
       hidden
       @change="uploadApi.handleUploadFolderChange"
+    />
+
+    <CloudLocalUploadPanel
+      :open="uploadApi.localUploadPanelOpen.value"
+      :account-id="currentAccountId"
+      :target-path="currentParentId"
+      :target-display-path="getCurrentDisplayPath()"
+      :upload-kind="uploadApi.localUploadKind.value"
+      :on-enqueue-files="uploadApi.enqueueTerminalFiles"
+      :on-tasks-created="uploadApi.afterLocalUploadCreated"
+      :on-folder-upload-accepted="uploadApi.registerDirRefreshBatch"
+      :on-mark-current-dir-refresh="uploadApi.markCurrentDirRefreshPending"
+      @close="uploadApi.closeLocalUploadPanel"
+      @pick-file="uploadFileInput?.click()"
+      @pick-folder="uploadFolderInput?.click()"
     />
 
     <OfflineDownloadModal

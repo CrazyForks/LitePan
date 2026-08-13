@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { getApiErrorMessage } from "@/api/client";
-import { cloudToolsApi, type CloudTool115Status } from "@/api/cloudTools";
+import {
+  cloudToolsApi,
+  localUploadApi,
+  type CloudTool115Status,
+  type LocalUploadMapping,
+} from "@/api/cloudTools";
 import { confirm } from "@/composables/useConfirm";
 import { toast } from "@/composables/useToast";
 import { useSettingsLoad } from "@/composables/useSettingsLoad";
@@ -14,9 +19,22 @@ const status = ref<CloudTool115Status>({ enabled: false, cache_count: 0, availab
 const saving = ref(false);
 const clearing = ref(false);
 
+const localEnabled = ref(false);
+const localMappings = ref<LocalUploadMapping[]>([]);
+const localSaving = ref(false);
+const mappingOpen = ref(false);
+const newMappingName = ref("");
+const newMappingPath = ref("");
+
 async function load() {
   await runLoad(async () => {
-    status.value = await cloudToolsApi.status115();
+    const [st, lu] = await Promise.all([
+      cloudToolsApi.status115(),
+      localUploadApi.getConfig().catch(() => ({ enabled: false, mappings: [] })),
+    ]);
+    status.value = st;
+    localEnabled.value = lu.enabled;
+    localMappings.value = lu.mappings;
   }, "加载网盘工具状态失败");
 }
 
@@ -37,6 +55,66 @@ async function toggleEnabled() {
     toast.error(getApiErrorMessage(e, "修改开关失败"));
   } finally {
     saving.value = false;
+  }
+}
+
+async function toggleLocalEnabled() {
+  localSaving.value = true;
+  const next = !localEnabled.value;
+  try {
+    const res = await localUploadApi.saveConfig({ enabled: next, mappings: localMappings.value });
+    localEnabled.value = res.enabled;
+    toast.success(
+      res.enabled
+        ? "已启用：前台「新建 → 上传」将提供从本机上传"
+        : "已停用：前台上传恢复原有方式",
+    );
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "修改开关失败"));
+  } finally {
+    localSaving.value = false;
+  }
+}
+
+function openMappings() {
+  mappingOpen.value = true;
+}
+
+function closeMappings() {
+  mappingOpen.value = false;
+}
+
+function addMapping() {
+  const name = newMappingName.value.trim();
+  const path = newMappingPath.value.trim();
+  if (!name || !path.startsWith("/")) {
+    toast.error("请填写标签名和以 / 开头的容器内路径");
+    return;
+  }
+  if (localMappings.value.some((m) => m.name === name)) {
+    toast.error(`标签「${name}」已存在`);
+    return;
+  }
+  localMappings.value.push({ name, path });
+  newMappingName.value = "";
+  newMappingPath.value = "";
+}
+
+function removeMapping(name: string) {
+  localMappings.value = localMappings.value.filter((m) => m.name !== name);
+}
+
+async function saveMappings() {
+  localSaving.value = true;
+  try {
+    const res = await localUploadApi.saveConfig({ enabled: localEnabled.value, mappings: localMappings.value });
+    localMappings.value = res.mappings;
+    mappingOpen.value = false;
+    toast.success("映射目录已保存");
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "保存映射目录失败"));
+  } finally {
+    localSaving.value = false;
   }
 }
 
@@ -105,14 +183,13 @@ async function clearCache() {
 
         <p class="tool-card__desc">
           开启后，<code>115Open</code> 账号的 STRM 任务扫描更快：一次性获取整个目录的文件清单，
-          不用一层层翻目录，请求更少、更不容易触发限制。
-          生成的 STRM、元数据同步、排除规则和原来完全一致；配了分支的任务不受影响，仍按分支的方式执行。
+          不用一层层翻目录，请求更少、更不容易触发限制。分支的任务仍按分支的方式执行。
         </p>
 
         <div class="tool-card__row">
           <div class="tool-card__stat">
             <span class="tool-card__num">{{ status.cache_count.toLocaleString("zh-CN") }}</span>
-            <span class="tool-card__label">路径缓存目录</span>
+            <span class="tool-card__label">条路径映射关系</span>
           </div>
           <div class="tool-card__actions">
             <AppButton variant="danger" :disabled="clearing" @click="clearCache">
@@ -123,6 +200,90 @@ async function clearCache() {
 
       </article>
 
+      <!-- 本机上传卡片 -->
+      <article class="tool-card" :class="localEnabled ? 'is-enabled' : 'is-disabled'">
+        <span class="tool-card__bar" :class="localEnabled ? 'is-enabled' : 'is-disabled'" />
+        <div class="tool-card__head">
+          <img class="tool-card__logo" src="/logos/local.png" alt="本机" />
+          <div class="tool-card__meta">
+            <h3 class="tool-card__name">
+              从服务器上传
+              <span class="tool-card__tag">通用</span>
+            </h3>
+            <p class="tool-card__driver">作用于全部网盘账号 · 上传面板双来源</p>
+          </div>
+          <button
+            class="check-toggle"
+            type="button"
+            :class="{ on: localEnabled }"
+            :aria-label="localEnabled ? '停用本机上传' : '启用本机上传'"
+            :disabled="localSaving"
+            title="启用 / 停用"
+            @click="toggleLocalEnabled"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                d="M3.5 8.5 6.5 11.5 12.5 4.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+        <p class="tool-card__desc">
+          开启后，前台「新建 → 上传」面板提供<strong>从服务器上传</strong>：
+          选择服务器映射目录中的文件或文件夹，上传到当前网盘目录并保留文件夹结构；从访问机上传保持不变。
+        </p>
+        <div class="tool-card__row">
+          <div class="tool-card__stat">
+            <span class="tool-card__num">{{ localMappings.length }}</span>
+            <span class="tool-card__label">映射目录</span>
+          </div>
+          <div class="tool-card__actions">
+            <AppButton variant="secondary" :disabled="localSaving" @click="openMappings">
+              目录映射设置
+            </AppButton>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <!-- 映射设置弹窗 -->
+    <div class="local-mapping-overlay" :class="{ 'is-open': mappingOpen }" @click.self="closeMappings">
+      <div class="local-mapping-modal">
+        <h3 class="local-mapping-modal__title">本机上传 · 目录映射设置</h3>
+        <div class="local-mapping-modal__body">
+          <p class="local-mapping-tip">
+            在 docker-compose 中先映射宿主机目录，再按容器内路径添加标签。
+            前台从本机上传时按标签浏览，不会暴露服务器其他路径。
+          </p>
+          <div class="local-mapping-list">
+            <div v-for="m in localMappings" :key="m.name" class="local-mapping-item">
+              <span class="local-mapping-item__name">{{ m.name }}</span>
+              <span class="local-mapping-item__path">{{ m.path }}</span>
+              <button class="local-mapping-item__del" type="button" title="删除" @click="removeMapping(m.name)">
+                ✕
+              </button>
+            </div>
+            <div v-if="localMappings.length === 0" class="local-mapping-empty">还没有映射目录</div>
+          </div>
+          <div class="local-mapping-add">
+            <input v-model="newMappingName" type="text" placeholder="标签名，如：媒体库" />
+            <input v-model="newMappingPath" type="text" placeholder="容器内路径，如：/app/data/updatefiles" />
+            <AppButton variant="primary" @click="addMapping">添加</AppButton>
+          </div>
+          <p class="local-mapping-hint">示例：<code>- /vol1/1000/updatefiles:/app/data/updatefiles</code></p>
+        </div>
+        <div class="local-mapping-modal__actions">
+          <AppButton variant="secondary" @click="closeMappings">取消</AppButton>
+          <AppButton variant="primary" :disabled="localSaving" @click="saveMappings">
+            {{ localSaving ? "保存中…" : "保存" }}
+          </AppButton>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -281,6 +442,122 @@ async function clearCache() {
 .check-toggle:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.local-mapping-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+}
+.local-mapping-overlay.is-open {
+  display: flex;
+}
+.local-mapping-modal {
+  width: 520px;
+  max-width: calc(100vw - 40px);
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  padding: 22px;
+}
+.local-mapping-modal__title {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+}
+.local-mapping-tip {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin: 0 0 12px;
+}
+.local-mapping-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.local-mapping-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  background: var(--surface-sunken);
+}
+.local-mapping-item__name {
+  font-weight: 600;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.local-mapping-item__path {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: ui-monospace, Menlo, monospace;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.local-mapping-item__del {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+}
+.local-mapping-item__del:hover {
+  background: var(--border-soft);
+  color: var(--danger);
+}
+.local-mapping-empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 18px 0;
+}
+.local-mapping-add {
+  display: flex;
+  gap: 8px;
+}
+.local-mapping-add input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--text);
+}
+.local-mapping-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.local-mapping-hint code {
+  font-family: ui-monospace, Menlo, monospace;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.local-mapping-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
 }
 
 </style>

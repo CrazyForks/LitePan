@@ -16,12 +16,56 @@ import { useUploadTaskActions } from "@/composables/upload/useUploadTaskActions"
 import { useUploadTaskStore } from "@/composables/upload/useUploadTaskStore";
 import { useUploadTaskStream } from "@/composables/upload/useUploadTaskStream";
 import type { UploadRuntimeHooks, UploadTaskDeps } from "@/composables/upload/uploadTaskTypes";
+import { ref } from "vue";
+import { localUploadApi } from "@/api/cloudTools";
+import { showConfirm } from "@/composables/useConfirm";
 
 export type { UploadTaskDeps as Deps } from "@/composables/upload/uploadTaskTypes";
 
 export function useUploadTasks(deps: UploadTaskDeps) {
   const store = useUploadTaskStore(deps);
   store.restoreLocalUploadTasks();
+
+  const localUploadPanelOpen = ref(false);
+  const localUploadKind = ref<"file" | "folder">("file");
+
+  async function localUploadEnabledNow(): Promise<boolean> {
+    try {
+      const cfg = await localUploadApi.getConfig();
+      return cfg.enabled;
+    } catch {
+      return false;
+    }
+  }
+
+  function closeLocalUploadPanel() {
+    localUploadPanelOpen.value = false;
+  }
+
+  function kickUploadTaskPolling() {
+    stream.bumpKeepPolling();
+    void stream.fetchUploadTasks();
+  }
+
+  function markCurrentDirRefreshPending() {
+    store.markFolderUploadRefreshPending();
+  }
+
+  function refreshCurrentFiles() {
+    void deps.refreshFiles(true);
+  }
+
+  function afterLocalUploadCreated() {
+    kickUploadTaskPolling();
+  }
+
+  function registerDirRefreshBatch(key: string, count: number) {
+    store.registerDirRefreshBatch(key, count);
+  }
+
+  function resolveDirRefreshBatch(key: string) {
+    store.resolveDirRefreshBatch(key);
+  }
 
   const hooks: UploadRuntimeHooks = {
     startScheduler: async () => {},
@@ -36,6 +80,51 @@ export function useUploadTasks(deps: UploadTaskDeps) {
   const stream = useUploadTaskStream(deps, store, hooks);
   const dispatcher = useLocalUploadDispatcher(deps, store, stream);
   const actions = useUploadTaskActions(deps, store, stream, dispatcher);
+
+  async function enqueueTerminalFiles(files: File[]) {
+    if (!files.length) return;
+    const result = await showConfirm({
+      title: "确认上传",
+      message: `将上传 ${files.length} 个项目到当前目录，是否继续？`,
+      confirmText: "上传",
+      cancelText: "取消",
+      danger: false,
+    }).catch(() => null);
+    if (!result || result.action !== "confirm") return;
+    for (const f of files) {
+      void dispatcher.createSingleUploadTask(f).catch(() => {});
+    }
+  }
+
+  async function handleUploadFileChange(event: Event) {
+    await actions.handleUploadFileChange(event);
+    localUploadPanelOpen.value = false;
+  }
+
+  async function handleUploadFolderChange(event: Event) {
+    await actions.handleUploadFolderChange(event);
+    localUploadPanelOpen.value = false;
+  }
+
+  async function handleUploadFile() {
+    if (await localUploadEnabledNow()) {
+      if (!(await actions.ensureUploadNoticeConfirmed())) return;
+      localUploadKind.value = "file";
+      localUploadPanelOpen.value = true;
+      return;
+    }
+    await actions.handleUploadFile();
+  }
+
+  async function handleUploadFolder() {
+    if (await localUploadEnabledNow()) {
+      if (!(await actions.ensureUploadNoticeConfirmed())) return;
+      localUploadKind.value = "folder";
+      localUploadPanelOpen.value = true;
+      return;
+    }
+    await actions.handleUploadFolder();
+  }
 
   hooks.startScheduler = dispatcher.startUploadTaskScheduler;
   hooks.fetchTasks = stream.fetchUploadTasks;
@@ -93,10 +182,20 @@ export function useUploadTasks(deps: UploadTaskDeps) {
     openUploadTaskPanel: actions.openUploadTaskPanel,
     closeUploadTaskPanel: actions.closeUploadTaskPanel,
     openUploadNoticeFromPanel: actions.openUploadNoticeFromPanel,
-    handleUploadFile: actions.handleUploadFile,
-    handleUploadFolder: actions.handleUploadFolder,
-    handleUploadFileChange: actions.handleUploadFileChange,
-    handleUploadFolderChange: actions.handleUploadFolderChange,
+    handleUploadFile,
+    handleUploadFolder,
+    localUploadPanelOpen,
+    localUploadKind,
+    closeLocalUploadPanel,
+    enqueueTerminalFiles,
+    kickUploadTaskPolling,
+    markCurrentDirRefreshPending,
+    refreshCurrentFiles,
+    afterLocalUploadCreated,
+    registerDirRefreshBatch,
+    resolveDirRefreshBatch,
+    handleUploadFileChange,
+    handleUploadFolderChange,
     fetchUploadTasks: stream.fetchUploadTasks,
     refreshUploadTaskServerConcurrency: stream.refreshUploadTaskServerConcurrency,
     getRelayTaskDriverBadge,
