@@ -9,5 +9,5 @@ type Addition struct {
 	PassUA       bool   `json:"pass_ua" label:"透传 UA 给上游" type:"select" options:"true:是,false:否" default:"true" form:"pair=base"`
 	RefreshList  bool   `json:"refresh_list" label:"列目录时刷新上游" type:"select" options:"false:否（用缓存）,true:是（强制刷新）" default:"false" form:"pair=opts1"`
 	DownloadMode string `json:"download_mode" label:"下载模式" type:"select" options:"redirect:302重定向,proxy:本机代理" default:"redirect" form:"pair=opts1"`
-	AccessToken  string `json:"access_token" label:"访问令牌（Token）" type:"password" form:"full"`
+	AccessToken  string `json:"access_token" form:"-"`
 }

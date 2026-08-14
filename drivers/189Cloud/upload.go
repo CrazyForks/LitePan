@@ -707,18 +707,50 @@ func (d *Driver) ResolveTransferHash(ctx context.Context, item *domain.FileItem,
 	if !allowStream || item == nil || strings.TrimSpace(item.ID) == "" {
 		return "", nil
 	}
-	if d.isFamily() {
-		info, err := d.GetFileInfo(ctx, item.ID)
-		if err != nil {
-			return "", err
-		}
-		return driver.HashFromItem(info, "md5"), nil
+	cacheKey := strings.TrimSpace(item.ID)
+	d.transferMD5Mu.Lock()
+	if cached := d.transferMD5Cache[cacheKey]; cached != "" {
+		d.transferMD5Mu.Unlock()
+		return cached, nil
 	}
-	info, err := d.fetchFileInfo(ctx, item.ID)
+	d.transferMD5Mu.Unlock()
+
+	if !d.isFamily() {
+		for attempt := 0; attempt < 2; attempt++ {
+			info, err := d.fetchFileInfo(ctx, item.ID)
+			if err != nil {
+				continue
+			}
+			if contentMD5 := info.contentMD5(); contentMD5 != "" {
+				d.cacheTransferMD5(cacheKey, contentMD5)
+				return contentMD5, nil
+			}
+		}
+	}
+
+	link, err := d.ResolveDownload(ctx, driver.DownloadRequest{FileID: item.ID})
 	if err != nil {
 		return "", err
 	}
-	return driver.NormalizeTransferHash("md5", info.MD5), nil
+	contentMD5, err := httpx.ProbeContentMD5(ctx, d.client, link.URL, link.Headers)
+	if err != nil {
+		return "", domain.Wrap(domain.CodeDriverError, err)
+	}
+	contentMD5 = driver.NormalizeTransferHash("md5", contentMD5)
+	d.cacheTransferMD5(cacheKey, contentMD5)
+	return contentMD5, nil
+}
+
+func (d *Driver) cacheTransferMD5(key, value string) {
+	if key == "" || value == "" {
+		return
+	}
+	d.transferMD5Mu.Lock()
+	defer d.transferMD5Mu.Unlock()
+	if d.transferMD5Cache == nil {
+		d.transferMD5Cache = make(map[string]string)
+	}
+	d.transferMD5Cache[key] = value
 }
 
 func (d *Driver) RapidUploadByHash(ctx context.Context, req driver.RapidUploadRequest) (*driver.RapidUploadResult, error) {

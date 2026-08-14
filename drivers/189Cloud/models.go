@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"litepan/internal/domain"
+	"litepan/internal/driver"
 )
 
 type oauthRefreshResp struct {
@@ -66,11 +67,33 @@ type fileInfoResp struct {
 	LastOpTimeStr   string          `json:"lastOpTimeStr"`
 	CreateDate      any             `json:"createDate"`
 	FileDownloadURL string          `json:"fileDownloadUrl"`
+	File            *fileInfoResp   `json:"file"`
+	FileData        *fileInfoResp   `json:"fileData"`
+	UserFile        *fileInfoResp   `json:"userFile"`
 }
 
 func (r fileInfoResp) size() int64 {
 	v, _ := r.Size.Int64()
 	return v
+}
+
+func (r *fileInfoResp) contentMD5() string {
+	if r == nil {
+		return ""
+	}
+	for _, value := range []string{r.MD5, nested189MD5(r.File), nested189MD5(r.FileData), nested189MD5(r.UserFile)} {
+		if md5 := driver.NormalizeTransferHash("md5", value); md5 != "" {
+			return md5
+		}
+	}
+	return ""
+}
+
+func nested189MD5(info *fileInfoResp) string {
+	if info == nil {
+		return ""
+	}
+	return info.MD5
 }
 
 type fileEntry struct {

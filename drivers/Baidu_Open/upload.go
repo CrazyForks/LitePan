@@ -750,87 +750,36 @@ func (d *Driver) resolveContentMD5FromDownload(ctx context.Context, item *domain
 		}
 	}
 	d.transferMD5Mu.Unlock()
+	if meta, err := d.getDownloadMeta(ctx, item.ID); err == nil {
+		if contentMD5 := normalizeMD5(meta.MD5); contentMD5 != "" {
+			d.cacheTransferMD5(cacheKey, contentMD5)
+			return contentMD5, nil
+		}
+	}
 
 	link, err := d.ResolveDownload(ctx, driver.DownloadRequest{FileID: item.ID})
 	if err != nil {
 		return "", err
 	}
-	md5, err := probeContentMD5FromURL(ctx, d.client, link.URL, link.Headers)
-	if err != nil {
-		return "", err
-	}
-	md5 = driver.NormalizeTransferHash("md5", md5)
-	if md5 != "" && cacheKey != "" {
-		d.transferMD5Mu.Lock()
-		if d.transferMD5Cache == nil {
-			d.transferMD5Cache = make(map[string]string)
-		}
-		d.transferMD5Cache[cacheKey] = md5
-		d.transferMD5Mu.Unlock()
-	}
-	return md5, nil
-}
-
-func probeContentMD5FromURL(ctx context.Context, client *http.Client, rawURL string, headers http.Header) (string, error) {
-	if client == nil {
-		client = httpx.NewClient(httpx.ClientOptions{Timeout: 0})
-	}
-	h := cloneHeader(headers)
-	if h.Get("User-Agent") == "" {
-		h.Set("User-Agent", defaultUA)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, rawURL, nil)
-	if err != nil {
-		return "", domain.Wrap(domain.CodeInternal, err)
-	}
-	req.Header = h
-	resp, err := client.Do(req)
-	if err == nil {
-		if resp.StatusCode < 400 {
-			if md5 := extractContentMD5(resp.Header); md5 != "" {
-				resp.Body.Close()
-				return md5, nil
-			}
-		}
-		resp.Body.Close()
-	}
-
-	rangeHeaders := cloneHeader(h)
-	rangeHeaders.Set("Range", "bytes=0-0")
-	req2, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-	if err != nil {
-		return "", domain.Wrap(domain.CodeInternal, err)
-	}
-	req2.Header = rangeHeaders
-	resp2, err := client.Do(req2)
+	contentMD5, err := httpx.ProbeContentMD5(ctx, d.client, link.URL, link.Headers)
 	if err != nil {
 		return "", domain.Wrap(domain.CodeDriverError, err)
 	}
-	defer resp2.Body.Close()
-	if resp2.StatusCode == http.StatusOK || resp2.StatusCode == http.StatusPartialContent {
-		return extractContentMD5(resp2.Header), nil
-	}
-	return "", nil
+	contentMD5 = driver.NormalizeTransferHash("md5", contentMD5)
+	d.cacheTransferMD5(cacheKey, contentMD5)
+	return contentMD5, nil
 }
 
-func extractContentMD5(h http.Header) string {
-	for _, key := range []string{"Content-Md5", "Content-MD5", "content-md5"} {
-		if v := strings.TrimSpace(h.Get(key)); v != "" {
-			return driver.NormalizeTransferHash("md5", v)
-		}
+func (d *Driver) cacheTransferMD5(key, value string) {
+	if key == "" || value == "" {
+		return
 	}
-	return ""
-}
-
-func cloneHeader(h http.Header) http.Header {
-	out := make(http.Header, len(h))
-	for k, vv := range h {
-		cp := make([]string, len(vv))
-		copy(cp, vv)
-		out[k] = cp
+	d.transferMD5Mu.Lock()
+	defer d.transferMD5Mu.Unlock()
+	if d.transferMD5Cache == nil {
+		d.transferMD5Cache = make(map[string]string)
 	}
-	return out
+	d.transferMD5Cache[key] = value
 }
 
 var _ driver.TransferHashResolver = (*Driver)(nil)

@@ -31,6 +31,9 @@ type Driver struct {
 	loginName     string
 	itemCache     map[string]domain.FileItem
 	itemOrder     []string
+
+	transferMD5Mu    sync.Mutex
+	transferMD5Cache map[string]string
 }
 
 var config = driver.Config{
@@ -339,7 +342,7 @@ func mergeFileInfo(item *domain.FileItem, raw *fileInfoResp) {
 	if item.ModTime.IsZero() {
 		item.ModTime = parse189Time(firstNonNil(raw.LastOpTime, raw.LastOpTimeStr, raw.CreateDate))
 	}
-	if md5 := strings.TrimSpace(raw.MD5); md5 != "" && !item.IsDir {
+	if md5 := raw.contentMD5(); md5 != "" && !item.IsDir {
 		if item.Hash == nil {
 			item.Hash = map[domain.HashType]string{}
 		}

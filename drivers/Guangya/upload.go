@@ -111,16 +111,33 @@ func (d *Driver) UploadLocalFile(ctx context.Context, req driver.LocalUploadRequ
 }
 
 func (d *Driver) requestUploadToken(ctx context.Context, parentID, name string, size int64) (*uploadTokenData, int, error) {
-	if err := d.waitOperationDelay(ctx); err != nil {
-		return nil, 0, err
-	}
 	body := map[string]any{
 		"capacity": 2,
 		"name":     name,
 		"parentId": parentID,
 		"res":      map[string]any{"fileSize": size},
 	}
-	code, data, err := d.rawAPIRequestEnvelope(ctx, pathUploadToken, d.currentToken(), body, 156)
+	return d.requestUploadTokenWithBody(ctx, pathUploadToken, body, true)
+}
+
+func (d *Driver) requestRapidUploadToken(ctx context.Context, parentID, name string, size int64, md5 string) (*uploadTokenData, int, error) {
+	body := map[string]any{
+		"capacity": 1,
+		"name":     name,
+		"parentId": parentID,
+		"res": map[string]any{
+			"fileSize": size,
+			"md5":      md5,
+		},
+	}
+	return d.requestUploadTokenWithBody(ctx, pathRapidUploadToken, body, false)
+}
+
+func (d *Driver) requestUploadTokenWithBody(ctx context.Context, path string, body map[string]any, requireTaskID bool) (*uploadTokenData, int, error) {
+	if err := d.waitOperationDelay(ctx); err != nil {
+		return nil, 0, err
+	}
+	code, data, err := d.rawAPIRequestEnvelope(ctx, path, d.currentToken(), body, 156)
 	if err != nil {
 		if ae, ok := domain.AsAppError(err); ok && ae.Code == domain.CodeAuthExpired {
 			token, rerr := d.doRefresh(ctx)
@@ -130,7 +147,7 @@ func (d *Driver) requestUploadToken(ctx context.Context, parentID, name string, 
 			if err := d.waitOperationDelay(ctx); err != nil {
 				return nil, 0, err
 			}
-			code, data, err = d.rawAPIRequestEnvelope(ctx, pathUploadToken, token, body, 156)
+			code, data, err = d.rawAPIRequestEnvelope(ctx, path, token, body, 156)
 		}
 		if err != nil {
 			return nil, 0, err
@@ -143,7 +160,7 @@ func (d *Driver) requestUploadToken(ctx context.Context, parentID, name string, 
 		}
 	}
 	out.normalize()
-	if strings.TrimSpace(out.TaskID) == "" {
+	if requireTaskID && strings.TrimSpace(out.TaskID) == "" {
 		return nil, 0, domain.Errorf(domain.CodeDriverError, "光鸭上传凭证缺少 taskId")
 	}
 	return &out, code, nil
@@ -855,43 +872,26 @@ func (d *Driver) RapidUploadByHash(ctx context.Context, req driver.RapidUploadRe
 		return nil, domain.Errorf(domain.CodeValidation, "文件名不能为空")
 	}
 
-	tokenData, code, err := d.requestUploadToken(ctx, parentID, fileName, req.Size)
+	tokenData, code, err := d.requestRapidUploadToken(ctx, parentID, fileName, req.Size, md5)
 	if err != nil {
 		return nil, err
 	}
 	taskID := strings.TrimSpace(tokenData.TaskID)
-	if taskID == "" {
-		return nil, domain.Errorf(domain.CodeDriverError, "未获取到上传任务ID")
-	}
-
 	if code == 156 {
+		if taskID == "" {
+			fileID, _ := d.findUploadedFile(ctx, parentID, fileName, req.Size)
+			return &driver.RapidUploadResult{Reuse: true, FileID: fileID, ParentID: parentID, Message: "秒传命中"}, nil
+		}
 		fileID, err := d.waitUploadTaskInfo(ctx, taskID, parentID, fileName, req.Size)
 		if err != nil {
 			return nil, err
 		}
 		return &driver.RapidUploadResult{Reuse: true, FileID: fileID, ParentID: parentID, Message: "秒传命中"}, nil
 	}
-
-	canFlash, err := d.checkCanFlashUpload(ctx, taskID, md5)
-	if err != nil {
-		return nil, err
+	if taskID != "" {
+		_ = d.apiRequest(ctx, pathDeleteUploadTask, map[string]any{"taskIds": []string{taskID}}, nil)
 	}
-	if !canFlash {
-		return &driver.RapidUploadResult{Reuse: false, ParentID: parentID, Message: "未命中秒传"}, nil
-	}
-	fileID, err := d.waitUploadTaskInfo(ctx, taskID, parentID, fileName, req.Size)
-	if err != nil {
-		return nil, err
-	}
-	return &driver.RapidUploadResult{Reuse: true, FileID: fileID, ParentID: parentID, Message: "秒传命中"}, nil
-}
-
-func (d *Driver) checkCanFlashUpload(ctx context.Context, taskID, md5 string) (bool, error) {
-	var out flashUploadData
-	if err := d.apiRequest(ctx, pathCheckFlashUpload, map[string]any{"taskId": taskID, "md5": md5}, &out); err != nil {
-		return false, err
-	}
-	return out.CanFlashUpload, nil
+	return &driver.RapidUploadResult{Reuse: false, ParentID: parentID, Message: "未命中秒传"}, nil
 }
 
 var (
