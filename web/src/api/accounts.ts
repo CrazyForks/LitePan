@@ -9,4 +9,5 @@ export const accountsApi = {
   remove: (id: number) => http.del<{ id: number }>(`/admin/accounts/${id}`),
   toggle: (id: number) => http.post<Account>(`/admin/accounts/${id}/toggle`),
   setDefault: (id: number) => http.post<Account>(`/admin/accounts/${id}/set-default`),
+  refreshProfile: (id: number) => http.post(`/admin/accounts/${id}/refresh-profile`),
 };

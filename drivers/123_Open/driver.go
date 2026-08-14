@@ -55,6 +55,7 @@ var config = driver.Config{
 	CardLogo:               "/logos/123.png",
 	DefaultRoot:            "0",
 	AuthType:               driver.AuthToken,
+	SupportsAccountProfile: true,
 	OAuthName:              "123云盘Open",
 	TokenLifetime:          30 * 24 * time.Hour,
 	RefreshAdvance:         10 * time.Hour,

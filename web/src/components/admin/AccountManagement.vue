@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { storeToRefs } from "pinia";
 import { useAccountsStore } from "@/stores/accounts";
 import { getApiErrorMessage } from "@/api/client";
+import { accountsApi } from "@/api/accounts";
 import type { Account } from "@/api/types";
 import { toast } from "@/composables/useToast";
 import { confirm } from "@/composables/useConfirm";
@@ -68,10 +69,23 @@ async function setDefault(account: Account) {
   }
 }
 
-onMounted(() => {
-  store.loadAccounts();
+async function refreshProfile(account: Account) {
+  try {
+    await accountsApi.refreshProfile(account.id);
+    await store.loadAccounts();
+    toast.success("账号信息已刷新");
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "刷新失败"));
+  }
+}
+
+let refreshTimer: number | undefined;
+onMounted(async () => {
+  await store.loadAccounts();
   store.loadDrivers();
+  refreshTimer = window.setTimeout(() => store.loadAccounts(), 1200);
 });
+onBeforeUnmount(() => window.clearTimeout(refreshTimer));
 </script>
 
 <template>
@@ -86,6 +100,7 @@ onMounted(() => {
         @remove="remove"
         @toggle="toggle"
         @set-default="setDefault"
+        @refresh-profile="refreshProfile"
       />
 
       <button class="add-card" @click="openCreate">

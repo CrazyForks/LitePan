@@ -61,6 +61,10 @@ export interface Account {
   sort_order: number;
   created_at?: string;
   updated_at?: string;
+  profile_nickname?: string;
+  profile_vip?: string;
+  profile_used_bytes?: number;
+  profile_total_bytes?: number;
 }
 
 // 新建/更新账号时的载荷（config 为 JSON 字符串）。

@@ -17,6 +17,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"litepan/internal/account"
+	"litepan/internal/accountprofile"
 	"litepan/internal/adminauth"
 	"litepan/internal/apikey"
 	"litepan/internal/auth"
@@ -49,6 +50,7 @@ var webFS embed.FS
 type Deps struct {
 	Logs              *logx.Manager
 	AccountSvc        *account.Service
+	AccountProfile    *accountprofile.Service
 	Accounts          domain.AccountRepository
 	Configs           domain.ConfigRepository
 	Settings          *settings.Service
@@ -82,6 +84,7 @@ type Handler struct {
 	logs              *logx.Manager
 	log               *slog.Logger
 	accountSvc        *account.Service
+	accountProfile    *accountprofile.Service
 	settings          *settings.Service
 	cache             *cache.Service
 	listHits          *cache.HitTracker
@@ -120,6 +123,7 @@ func NewRouter(d Deps) http.Handler {
 		logs:              d.Logs,
 		log:               apiLog,
 		accountSvc:        d.AccountSvc,
+		accountProfile:    d.AccountProfile,
 		settings:          d.Settings,
 		cache:             d.Cache,
 		listHits:          d.ListHitTracker,
@@ -209,6 +213,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Post("/accounts/{id}/toggle", h.toggleAccount)
 				r.Post("/accounts/{id}/set-default", h.setDefaultAccount)
 				r.Post("/accounts/{id}/refresh-auth", h.refreshAccountAuth)
+				r.Post("/accounts/{id}/refresh-profile", h.refreshAccountProfile)
 				r.Get("/settings", h.getSettings)
 				r.Put("/settings", h.updateSettings)
 				r.Route("/api-keys", func(r chi.Router) {

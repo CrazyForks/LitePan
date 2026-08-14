@@ -14,9 +14,11 @@ import (
 )
 
 const (
-	baseURL  = "https://drive.quark.cn/1/clouddrive"
-	referer  = "https://pan.quark.cn"
-	clientUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-b478491100 Safari/537.36 Channel/pckk_other_ch"
+	baseURL           = "https://drive.quark.cn/1/clouddrive"
+	profileMemberURL  = "https://drive-pc.quark.cn/1/clouddrive"
+	profileAccountURL = "https://pan.quark.cn"
+	referer           = "https://pan.quark.cn"
+	clientUA          = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-b478491100 Safari/537.36 Channel/pckk_other_ch"
 
 	pathList         = "/file/sort"
 	pathInfo         = "/file/info"
@@ -68,6 +70,10 @@ type quarkEnvelope struct {
 }
 
 func (d *Driver) apiRequest(ctx context.Context, method, path string, query url.Values, body, out any) (*quarkEnvelope, error) {
+	return d.apiRequestTo(ctx, d.apiBase(), method, path, query, body, out)
+}
+
+func (d *Driver) apiRequestTo(ctx context.Context, apiBase, method, path string, query url.Values, body, out any) (*quarkEnvelope, error) {
 	if err := d.waitInterval(ctx); err != nil {
 		return nil, err
 	}
@@ -77,7 +83,7 @@ func (d *Driver) apiRequest(ctx context.Context, method, path string, query url.
 	query.Set("pr", "ucpro")
 	query.Set("fr", "pc")
 
-	req, err := httpx.NewJSONRequest(ctx, method, d.apiBase()+path, query, body)
+	req, err := httpx.NewJSONRequest(ctx, method, apiBase+path, query, body)
 	if err != nil {
 		return nil, domain.Wrap(domain.CodeInternal, err)
 	}

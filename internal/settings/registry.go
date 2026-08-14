@@ -23,6 +23,8 @@ const (
 	KeyFuseReadCacheRetentionDays  = "fuse_read_cache_retention_days"
 	KeyFuseReadCacheEvictionPolicy = "fuse_read_cache_eviction_policy"
 	KeyAuthActiveRefresh           = "auth_active_refresh_enabled"
+	KeyAccountShowProfile          = "account_show_profile"
+	KeyAccountShowMembership       = "account_show_membership"
 	KeyLogLevel                    = "log_level"
 	KeyLogRetentionDays            = "log_retention_days"
 	KeyLogErrorAckAt               = "log_error_ack_at"
@@ -147,6 +149,8 @@ func defaultSpecs() []Spec {
 			{Value: "large_file", Label: "大文件优先"},
 		}),
 		boolSpec(KeyAuthActiveRefresh, "system", "智能主动认证刷新", "后台按 token 有效期预刷新、Cookie 健康检查；关闭后仅保留被动刷新。", "true"),
+		boolSpec(KeyAccountShowProfile, "account_display", "显示账号信息", "在网盘账号卡片第二行显示昵称、手机号或邮箱；关闭后显示创建时间。", "true"),
+		boolSpec(KeyAccountShowMembership, "account_display", "显示会员标签", "在网盘账号名称后显示该网盘返回的 VIP 或 SVIP 标签。", "true"),
 		selectSpec(KeyLogLevel, "system", "日志级别", "控制控制台与落盘日志的最低级别；认证调度、刷新结果等默认可在 Info 查看。", "info", []Option{
 			{Value: "debug", Label: "Debug（调试）"},
 			{Value: "info", Label: "Info（常规）"},
@@ -229,6 +233,7 @@ func defaultSpecs() []Spec {
 func categories() []Category {
 	return []Category{
 		{ID: "system", Label: "系统设置"},
+		{ID: "account_display", Label: "网盘账号显示"},
 		{ID: "performance", Label: "性能设置"},
 		{ID: "strm", Label: "STRM 设置"},
 		{ID: "media_organize", Label: "媒体整理设置"},

@@ -12,14 +12,17 @@ const emit = defineEmits<{
   remove: [Account];
   toggle: [Account];
   setDefault: [Account];
+  refreshProfile: [Account];
 }>();
 
 const driverLabel = computed(() => props.driver?.display_name || props.account.driver_type);
 const color = computed(() => props.driver?.card_color || "");
 const logo = computed(() => props.driver?.card_logo || "");
 const createdAt = computed(() =>
-  props.account.created_at ? formatTime(props.account.created_at) : "",
+  props.account.created_at ? formatTime(props.account.created_at).replace(/:\d{2}$/, "") : "",
 );
+const nickname = computed(() => props.account.profile_nickname || "");
+const vip = computed(() => props.account.profile_vip || "");
 const authStatus = computed(() => (props.account.auth_status || "").trim().toLowerCase());
 const hasAuthError = computed(() =>
   props.account.is_active && ["token_expired", "failed"].includes(authStatus.value),
@@ -45,6 +48,7 @@ const menuItems = computed<DropdownMenuItem[]>(() => {
   } else {
     items.push({ key: "defaultHint", label: "当前默认", type: "hint" });
   }
+  items.push({ key: "refreshProfile", label: "刷新信息", type: "action" });
   items.push({ key: "divider", label: "", type: "divider" });
   items.push({ key: "remove", label: "删除账号", type: "action", danger: true });
   return items;
@@ -60,6 +64,9 @@ function onMenuSelect(key: string) {
       break;
     case "setDefault":
       emit("setDefault", props.account);
+      break;
+    case "refreshProfile":
+      emit("refreshProfile", props.account);
       break;
     case "remove":
       emit("remove", props.account);
@@ -99,10 +106,13 @@ function onMenuSelect(key: string) {
       <div class="acc-card__meta">
         <h4 class="acc-card__name">
           {{ account.name }}
+          <span v-if="vip" class="acc-card__vip-tag">{{ vip }}</span>
           <span v-if="account.is_default" class="acc-card__default-tag">默认</span>
           <span v-if="hasAuthError" class="acc-card__status-pill">失效</span>
         </h4>
-        <p v-if="createdAt" class="acc-card__time">创建于 {{ createdAt }}</p>
+        <p class="acc-card__time">
+          {{ nickname || (createdAt ? `创建于 ${createdAt}` : "") }}
+        </p>
       </div>
     </div>
   </div>
@@ -134,6 +144,7 @@ function onMenuSelect(key: string) {
 
 .acc-card__bar {
   position: absolute;
+  z-index: 2;
   top: 0;
   right: 0;
   bottom: 0;
@@ -173,6 +184,8 @@ function onMenuSelect(key: string) {
 }
 
 .acc-card__head {
+	position: relative;
+	z-index: 1;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -184,10 +197,11 @@ function onMenuSelect(key: string) {
   font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 0;
   flex-wrap: wrap;
 }
 .acc-card__default-tag {
+	margin-left: 6px;
   font-size: 11px;
   font-weight: 500;
   padding: 1px 7px;
@@ -196,6 +210,7 @@ function onMenuSelect(key: string) {
   color: var(--info);
 }
 .acc-card__status-pill {
+	margin-left: 6px;
   font-size: 11px;
   font-weight: 500;
   padding: 1px 7px;
@@ -207,6 +222,22 @@ function onMenuSelect(key: string) {
   margin: 4px 0 0;
   font-size: 12px;
   color: var(--text-muted);
+}
+.acc-card__vip-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid rgba(237, 207, 131, 0.24);
+  border-radius: 3px;
+  background: #24211c;
+  color: #edcf83;
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.1px;
+  line-height: 1;
+  transform: translateY(-1px);
 }
 
 :root[data-skin="brutal"] .acc-card__menu-btn {

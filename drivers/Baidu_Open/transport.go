@@ -18,6 +18,7 @@ const (
 	pcsBaseURL = "https://d.pcs.baidu.com"
 
 	opUserInfo   = "user_info"
+	opQuota      = "quota"
 	opFileList   = "file_list"
 	opFileMetas  = "file_metas"
 	opFileMgr    = "file_manager"
@@ -35,6 +36,7 @@ const (
 
 var opPath = map[string]string{
 	opUserInfo:   pathUserInfo,
+	opQuota:      "/api/quota",
 	opFileList:   pathFile,
 	opFileMetas:  pathMedia,
 	opFileMgr:    pathFile,

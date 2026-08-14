@@ -46,6 +46,7 @@ var config = driver.Config{
 	AuthType:               driver.AuthToken,
 	TokenLifetime:          7 * 24 * time.Hour,
 	RefreshAdvance:         24 * time.Hour,
+	SupportsAccountProfile: true,
 	ProvideHashes:          []string{"md5"},
 	RapidUploadHashes:      []string{"md5"},
 	UploadConflictPolicies: []string{"overwrite", "rename", "skip", "fail"},
@@ -364,6 +365,7 @@ var (
 	_ driver.AuthRefresher            = (*Driver)(nil)
 	_ driver.AuthCredentialConsumer   = (*Driver)(nil)
 	_ driver.AuthPersistConsumer      = (*Driver)(nil)
+	_ driver.AccountProfileProvider   = (*Driver)(nil)
 	_ driver.ConnectionErrorExplainer = (*Driver)(nil)
 	_ driver.RequestIntervalConsumer  = (*Driver)(nil)
 	_ driver.QRLoginProvider          = (*Driver)(nil)

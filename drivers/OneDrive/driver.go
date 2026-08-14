@@ -46,6 +46,7 @@ var config = driver.Config{
 	OAuthName:              "OneDrive",
 	TokenLifetime:          time.Hour,
 	RefreshAdvance:         10 * time.Minute,
+	SupportsAccountProfile: true,
 	UploadConflictPolicies: []string{"overwrite", "rename", "skip", "fail"},
 }
 
@@ -176,6 +177,7 @@ var (
 	_ driver.AuthRefresher            = (*Driver)(nil)
 	_ driver.AuthCredentialConsumer   = (*Driver)(nil)
 	_ driver.AuthPersistConsumer      = (*Driver)(nil)
+	_ driver.AccountProfileProvider   = (*Driver)(nil)
 	_ driver.ConnectionErrorExplainer = (*Driver)(nil)
 	_ driver.RequestIntervalConsumer  = (*Driver)(nil)
 )

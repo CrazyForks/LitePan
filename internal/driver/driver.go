@@ -42,7 +42,8 @@ type Config struct {
 	// QRDeviceField 是 Addition 中保存设备来源的 JSON 字段名，与 QRDevices 配套。
 	QRDeviceField string
 	// InternalExperimental 为内部实验性驱动：默认不展示在前端驱动列表，需解锁开发模式后可见。
-	InternalExperimental bool
+	InternalExperimental   bool
+	SupportsAccountProfile bool
 }
 
 // Meta 是所有驱动必须实现的元信息与生命周期接口。
@@ -77,6 +78,12 @@ type FullListLister interface {
 	// ResolveDirPath 返回目录的完整远端路径（以 / 分隔、不含末尾斜杠，根为 ""）。
 	// 清单条目只带 pid，需要它把 pid 翻译成路径；实现方应尽量使用自己的内存缓存。
 	ResolveDirPath(ctx context.Context, dirID string) (string, error)
+}
+
+// AccountProfileProvider 可选：返回账号昵称、会员与容量资料。
+// 资料仅在存储管理页按天后台刷新，不参与文件访问链路。
+type AccountProfileProvider interface {
+	GetAccountProfile(ctx context.Context) (*domain.AccountProfile, error)
 }
 
 // InfoGetter 可选：单文件信息。

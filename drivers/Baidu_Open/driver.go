@@ -31,20 +31,21 @@ type Driver struct {
 }
 
 var config = driver.Config{
-	Name:           "baidu_open",
-	DisplayName:    "百度网盘Open",
-	Description:    "百度网盘官方开放API接入，当前支持OAuth认证与文件浏览",
-	CardTags:       []string{"官方授权", "OAuth", "MD5分享"},
-	SortOrder:      5,
-	AuthLabel:      "OAuth",
-	CardColor:      "#2932E1",
-	CardLogo:       "/logos/baidu.png",
-	DefaultRoot:    "/",
-	AuthType:       driver.AuthToken,
-	OAuthName:      "百度网盘Open",
-	TokenLifetime:  30 * 24 * time.Hour,
-	RefreshAdvance: 10 * time.Hour,
-	ProvideHashes:  []string{"md5"},
+	Name:                   "baidu_open",
+	DisplayName:            "百度网盘Open",
+	Description:            "百度网盘官方开放API接入，当前支持OAuth认证与文件浏览",
+	CardTags:               []string{"官方授权", "OAuth", "MD5分享"},
+	SortOrder:              5,
+	AuthLabel:              "OAuth",
+	CardColor:              "#2932E1",
+	CardLogo:               "/logos/baidu.png",
+	DefaultRoot:            "/",
+	AuthType:               driver.AuthToken,
+	SupportsAccountProfile: true,
+	OAuthName:              "百度网盘Open",
+	TokenLifetime:          30 * 24 * time.Hour,
+	RefreshAdvance:         10 * time.Hour,
+	ProvideHashes:          []string{"md5"},
 }
 
 func New() driver.Driver { return &Driver{} }

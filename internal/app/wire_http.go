@@ -35,6 +35,7 @@ func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core
 	router := api.NewRouter(api.Deps{
 		Logs:              logs,
 		AccountSvc:        svc.account,
+		AccountProfile:    svc.accountProfile,
 		Accounts:          st.store.Accounts,
 		Configs:           st.store.Configs,
 		Settings:          st.settings,

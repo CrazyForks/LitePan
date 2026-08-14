@@ -17,6 +17,7 @@ import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { useSectionTabRoute } from "@/composables/useSectionTabRoute";
 import { useSettingsPageDirty } from "@/composables/useSettingsPageDirty";
 import { useAuthStore } from "@/stores/auth";
+import { useAccountsStore } from "@/stores/accounts";
 import AppButton from "@/components/base/AppButton.vue";
 import AppInput from "@/components/base/AppInput.vue";
 import AppSelect from "@/components/base/AppSelect.vue";
@@ -80,6 +81,12 @@ function revertSkinDraft() {
 const ACCENTS = ["var(--brand)", "#f59e0b", "#10b981", "#6366f1", "#ec4899"];
 
 const auth = useAuthStore();
+const accountsStore = useAccountsStore();
+
+const ACCOUNT_DISPLAY_SETTING_KEYS = new Set([
+  "account_show_profile",
+  "account_show_membership",
+]);
 
 const { loading, runLoad } = useSettingsLoad();
 useAdminPageLoading("settings", loading);
@@ -128,8 +135,14 @@ const tabs = computed(() => [
 ]);
 
 const systemItems = computed(() => items.value.filter((it) => it.category === "system"));
-const systemChangedKeys = computed(() => systemItems.value.filter((it) => isChanged(it)).map((it) => it.key));
+const accountDisplayItems = computed(() => items.value.filter((it) => it.category === "account_display"));
+const otherSettingsItems = computed(() => [...systemItems.value, ...accountDisplayItems.value]);
+const systemChangedKeys = computed(() => otherSettingsItems.value.filter((it) => isChanged(it)).map((it) => it.key));
 const systemChangedCount = computed(() => systemChangedKeys.value.length);
+const serviceSettingsCards = computed(() => [
+  { key: "auth-log", title: "授权与日志", items: systemItems.value },
+  { key: "account-display", title: "网盘账号显示", items: accountDisplayItems.value },
+].filter((group) => group.items.length > 0));
 
 const passwordsMismatch = computed(
   () =>
@@ -170,7 +183,7 @@ function revertHomepageDraft() {
 }
 
 function revertServicesDraft() {
-  for (const it of systemItems.value) form[it.key] = original[it.key];
+  for (const it of otherSettingsItems.value) form[it.key] = original[it.key];
 }
 
 function isTabDirty(tab: string): boolean {
@@ -390,9 +403,11 @@ async function saveServices() {
   try {
     const changed: Record<string, string> = {};
     for (const key of systemChangedKeys.value) changed[key] = form[key];
+    const accountDisplayChanged = Object.keys(changed).some((key) => ACCOUNT_DISPLAY_SETTING_KEYS.has(key));
     if (Object.keys(changed).length > 0) {
       applyPayload(await saveSettings(changed));
     }
+    if (accountDisplayChanged) await accountsStore.loadAccounts();
     toast.success("其他设置已保存");
   } catch (e) {
     toast.error(getApiErrorMessage(e, "保存失败"));
@@ -663,9 +678,14 @@ async function submit() {
       </SettingsCard>
 
       <template v-else-if="isServicesTab">
-        <SettingsCard v-if="systemItems.length" title="授权与日志" :accent="accentColor">
+        <SettingsCard
+          v-for="group in serviceSettingsCards"
+          :key="group.key"
+          :title="group.title"
+          :accent="accentColor"
+        >
           <SettingsRow
-            v-for="it in systemItems"
+            v-for="it in group.items"
             :key="it.key"
             :show-changed-badge="true"
             :changed="isChanged(it)"

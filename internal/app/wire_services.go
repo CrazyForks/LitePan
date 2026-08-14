@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"litepan/internal/account"
+	"litepan/internal/accountprofile"
 	"litepan/internal/automation"
 	"litepan/internal/cacheretention"
 	"litepan/internal/config"
@@ -31,6 +32,7 @@ type servicesBundle struct {
 	offlineDownloads *offlinedownload.Service
 	playback         *playback.Service
 	account          *account.Service
+	accountProfile   *accountprofile.Service
 	strm             *strm.Service
 	mediaOrganize    *mediaorganize.Service
 	strmScrape       *strmscrape.Service
@@ -110,6 +112,7 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 			return domain.NormalizeOAuthServerURL(st.settings.String(settings.KeyOAuthServerURL))
 		},
 	})
+	accountProfileSvc := accountprofile.New(core.exec)
 	uploadSvc := upload.NewManager(upload.Options{
 		Exec:     core.exec,
 		Files:    fileSvc,
@@ -161,6 +164,7 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		offlineDownloads: offlineDownloadSvc,
 		playback:         playbackSvc,
 		account:          accountSvc,
+		accountProfile:   accountProfileSvc,
 		strm:             strmSvc,
 		mediaOrganize:    mediaOrganizeSvc,
 		strmScrape:       strmScrapeSvc,

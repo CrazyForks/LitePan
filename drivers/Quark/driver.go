@@ -28,17 +28,18 @@ type Driver struct {
 }
 
 var config = driver.Config{
-	Name:                "quark",
-	DisplayName:         "夸克网盘",
-	Description:         "夸克网盘接入，支持Cookie认证和文件管理功能",
-	CardTags:            []string{"扫码登录", "Cookie", "本机代理"},
-	SortOrder:           6,
-	AuthLabel:           "Cookie",
-	CardColor:           "#2f7bff",
-	CardLogo:            "/logos/quark.png",
-	DefaultRoot:         "0",
-	AuthType:            driver.AuthCookie,
-	HealthCheckInterval: 70 * time.Minute,
+	Name:                   "quark",
+	DisplayName:            "夸克网盘",
+	Description:            "夸克网盘接入，支持Cookie认证和文件管理功能",
+	CardTags:               []string{"扫码登录", "Cookie", "本机代理"},
+	SortOrder:              6,
+	AuthLabel:              "Cookie",
+	CardColor:              "#2f7bff",
+	CardLogo:               "/logos/quark.png",
+	DefaultRoot:            "0",
+	AuthType:               driver.AuthCookie,
+	HealthCheckInterval:    70 * time.Minute,
+	SupportsAccountProfile: true,
 }
 
 func New() driver.Driver { return &Driver{} }
@@ -142,6 +143,7 @@ var (
 	_ driver.AuthRefresher            = (*Driver)(nil)
 	_ driver.AuthCredentialConsumer   = (*Driver)(nil)
 	_ driver.AuthPersistConsumer      = (*Driver)(nil)
+	_ driver.AccountProfileProvider   = (*Driver)(nil)
 	_ driver.ConnectionErrorExplainer = (*Driver)(nil)
 	_ driver.RequestIntervalConsumer  = (*Driver)(nil)
 	_ driver.QRLoginProvider          = (*Driver)(nil)

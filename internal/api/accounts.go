@@ -5,7 +5,9 @@ import (
 	"net/http"
 
 	"litepan/internal/account"
+	"litepan/internal/domain"
 	"litepan/internal/driver"
+	"litepan/internal/settings"
 )
 
 type accountDTO struct {
@@ -23,6 +25,10 @@ type accountDTO struct {
 	SortOrder       int    `json:"sort_order"`
 	CreatedAt       string `json:"created_at,omitempty"`
 	UpdatedAt       string `json:"updated_at,omitempty"`
+	ProfileNickname string `json:"profile_nickname,omitempty"`
+	ProfileVIP      string `json:"profile_vip,omitempty"`
+	ProfileUsed     int64  `json:"profile_used_bytes,omitempty"`
+	ProfileTotal    int64  `json:"profile_total_bytes,omitempty"`
 }
 
 func viewToDTO(v account.View) accountDTO {
@@ -95,9 +101,31 @@ func (h *Handler) listAccounts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	showProfile := h.settings == nil || h.settings.Bool(settings.KeyAccountShowProfile)
+	showMembership := h.settings == nil || h.settings.Bool(settings.KeyAccountShowMembership)
+	if h.accountProfile != nil && (showProfile || showMembership) {
+		accounts := make([]*domain.Account, 0, len(list))
+		for _, v := range list {
+			accounts = append(accounts, v.Account)
+		}
+		h.accountProfile.RefreshDaily(r.Context(), accounts)
+	}
 	dtos := make([]accountDTO, 0, len(list))
 	for _, v := range list {
-		dtos = append(dtos, viewToDTO(v))
+		dto := viewToDTO(v)
+		if h.accountProfile != nil && (showProfile || showMembership) {
+			if p, ok := h.accountProfile.Get(v.Account.ID); ok {
+				if showProfile {
+					dto.ProfileNickname = p.Nickname
+					dto.ProfileUsed = p.UsedBytes
+					dto.ProfileTotal = p.TotalBytes
+				}
+				if showMembership {
+					dto.ProfileVIP = p.Membership
+				}
+			}
+		}
+		dtos = append(dtos, dto)
 	}
 	writeOK(w, dtos)
 }
@@ -188,6 +216,24 @@ func (h *Handler) setDefaultAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeOK(w, viewToDTO(v))
+}
+
+func (h *Handler) refreshAccountProfile(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if h.accountProfile == nil {
+		writeErr(w, domain.Errf(domain.CodeNotImplement))
+		return
+	}
+	p, err := h.accountProfile.Refresh(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeOK(w, map[string]any{"nickname": p.Nickname, "vip": p.Membership, "used_bytes": p.UsedBytes, "total_bytes": p.TotalBytes})
 }
 
 func dtoToInput(d accountDTO) account.Input {

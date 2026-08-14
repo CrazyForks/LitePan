@@ -21,6 +21,7 @@ const (
 	refreshURL = "https://passportapi.115.com/open/refreshToken"
 
 	pathList         = "/open/ufile/files"
+	pathUserInfo     = "/open/user/info"
 	pathFileInfo     = "/open/folder/get_info"
 	pathDownload     = "/open/ufile/downurl"
 	pathMkdir        = "/open/folder/add"
