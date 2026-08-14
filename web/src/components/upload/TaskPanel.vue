@@ -305,7 +305,6 @@ function onDocumentClick(event: MouseEvent) {
   if (!settingsOpen.value) return;
   const target = event.target as HTMLElement | null;
   if (target?.closest(".panel-head-actions")) return;
-  // 目录选择器传送到 body，不在设置面板 DOM 内；操作子弹层时不应关闭后面的设置。
   if (target?.closest(".overlay--nested")) return;
   settingsOpen.value = false;
 }
@@ -476,7 +475,9 @@ function buildUploadRow(task: UploadTask): PanelRow {
         ? "跨盘接棒"
         : task.source_type === "offline_handoff"
           ? "离线接棒"
-          : "手动上传",
+          : task.source_type === "server_local"
+            ? "服务器上传"
+            : "手动上传",
     status: uploadStatusLabel(task),
     statusDetail: uploadStatusDetail(task),
     statusClass: displayStatus,

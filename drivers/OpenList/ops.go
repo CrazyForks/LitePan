@@ -20,7 +20,17 @@ func (d *Driver) CreateFolder(ctx context.Context, parentID, name string) (*doma
 	if name == "" {
 		return nil, domain.Errorf(domain.CodeValidation, "文件夹名称不能为空")
 	}
-	target := joinPath(d.normalizePath(parentID), name)
+	if name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
+		return nil, domain.Errorf(domain.CodeValidation, "文件夹名称不合法")
+	}
+	parent, err := d.normalizePath(parentID)
+	if err != nil {
+		return nil, err
+	}
+	target, err := d.normalizePath(joinPath(parent, name))
+	if err != nil {
+		return nil, err
+	}
 	if err := d.apiRequest(ctx, http.MethodPost, "/fs/mkdir", mkdirReq{Path: target}, nil, nil); err != nil {
 		return nil, err
 	}
@@ -28,19 +38,22 @@ func (d *Driver) CreateFolder(ctx context.Context, parentID, name string) (*doma
 }
 
 func (d *Driver) RenameFile(ctx context.Context, fileID, newName string) error {
-	p := d.normalizePath(fileID)
+	p, err := d.normalizePath(fileID)
+	if err != nil {
+		return err
+	}
 	name := strings.TrimSpace(newName)
-	if p == "/" {
+	if p == d.rootPath() {
 		return domain.Errorf(domain.CodeValidation, "根目录不支持重命名")
 	}
-	if name == "" {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
 		return domain.Errorf(domain.CodeValidation, "新名称不能为空")
 	}
 	return d.apiRequest(ctx, http.MethodPost, "/fs/rename", renameReq{Path: p, Name: name}, nil, nil)
 }
 
 func (d *Driver) DeleteFiles(ctx context.Context, fileIDs []string) error {
-	groups, err := groupByParent(fileIDs, "删除")
+	groups, err := d.groupByParent(fileIDs, "删除")
 	if err != nil {
 		return err
 	}
@@ -63,13 +76,15 @@ func (d *Driver) CopyFiles(ctx context.Context, fileIDs []string, targetParentID
 	return d.batchDirOp(ctx, fileIDs, targetParentID, "/fs/copy", "复制")
 }
 
-// batchDirOp 按来源目录分组执行移动/复制（OpenList 的 move/copy 一次只能操作同一目录下的项）。
 func (d *Driver) batchDirOp(ctx context.Context, fileIDs []string, targetParentID, apiPath, verb string) error {
-	groups, err := groupByParent(fileIDs, verb)
+	groups, err := d.groupByParent(fileIDs, verb)
 	if err != nil {
 		return err
 	}
-	dst := d.normalizePath(targetParentID)
+	dst, err := d.normalizePath(targetParentID)
+	if err != nil {
+		return err
+	}
 	for src, names := range groups {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -81,21 +96,19 @@ func (d *Driver) batchDirOp(ctx context.Context, fileIDs []string, targetParentI
 	return nil
 }
 
-// groupByParent 把文件 ID 按父目录分组；根目录本身不允许操作。
-func groupByParent(fileIDs []string, verb string) (map[string][]string, error) {
+func (d *Driver) groupByParent(fileIDs []string, verb string) (map[string][]string, error) {
 	groups := make(map[string][]string)
 	for _, id := range fileIDs {
-		p := strings.TrimSpace(id)
-		if p == "" {
+		if strings.TrimSpace(id) == "" {
 			continue
 		}
-		if p == "/" {
+		p, err := d.normalizePath(id)
+		if err != nil {
+			return nil, err
+		}
+		if p == d.rootPath() {
 			return nil, domain.Errorf(domain.CodeValidation, "根目录不支持%s", verb)
 		}
-		if !strings.HasPrefix(p, "/") {
-			p = "/" + p
-		}
-		p = path.Clean(p)
 		dir, name := path.Split(p)
 		groups[path.Clean(dir)] = append(groups[path.Clean(dir)], name)
 	}
@@ -103,7 +116,10 @@ func groupByParent(fileIDs []string, verb string) (map[string][]string, error) {
 }
 
 func (d *Driver) GetFileInfo(ctx context.Context, fileID string) (*domain.FileItem, error) {
-	p := d.normalizePath(fileID)
+	p, err := d.normalizePath(fileID)
+	if err != nil {
+		return nil, err
+	}
 	var resp fsGetResp
 	if err := d.apiRequest(ctx, http.MethodPost, "/fs/get", fsGetReq{Path: p}, &resp, nil); err != nil {
 		return nil, err
@@ -113,7 +129,10 @@ func (d *Driver) GetFileInfo(ctx context.Context, fileID string) (*domain.FileIt
 }
 
 func (d *Driver) ListFiles(ctx context.Context, parentID string) ([]domain.FileItem, error) {
-	dir := d.normalizePath(parentID)
+	dir, err := d.normalizePath(parentID)
+	if err != nil {
+		return nil, err
+	}
 	var resp fsListResp
 	if err := d.apiRequest(ctx, http.MethodPost, "/fs/list", fsListReq{
 		pageReq: pageReq{Page: 1, PerPage: 0},
@@ -130,7 +149,10 @@ func (d *Driver) ListFiles(ctx context.Context, parentID string) ([]domain.FileI
 }
 
 func (d *Driver) ResolveDownload(ctx context.Context, req driver.DownloadRequest) (*domain.DownloadInfo, error) {
-	p := d.normalizePath(req.FileID)
+	p, err := d.normalizePath(req.FileID)
+	if err != nil {
+		return nil, err
+	}
 	headers := map[string]string{}
 	if d.add.PassUA {
 		headers["User-Agent"] = d.downloadUA(req.UA)
@@ -171,7 +193,6 @@ func (d *Driver) downloadUA(raw string) string {
 	return ua
 }
 
-// apiRequest 发请求并解析 OpenList 通用包装；401/403 且有账号密码时自动重登后重试一次。
 func (d *Driver) apiRequest(ctx context.Context, method, apiPath string, body, out any, headers map[string]string) error {
 	if err := d.waitOperationDelay(ctx); err != nil {
 		return err

@@ -1,15 +1,16 @@
 package upload
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"sort"
 	"time"
 
+	"litepan/internal/domain"
 	"litepan/pkg/timeutil"
 )
 
-// markMissingLocalFileFailed 把因本地文件缺失而无法继续的任务标记为失败。
 func markMissingLocalFileFailed(st *taskState) {
 	st.Status = StatusFailed
 	st.Message = "上传失败"
@@ -46,6 +47,69 @@ func (m *Manager) snapshot(st *taskState) *Task {
 	return &t
 }
 
+const deleteStopTimeout = 5 * time.Second
+
+// 删除前等待任务退出，避免后台仍在传输。
+func (m *Manager) stopTaskForDelete(ctx context.Context, taskID string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	m.mu.Lock()
+	st, ok := m.tasks[taskID]
+	if !ok {
+		m.mu.Unlock()
+		return nil
+	}
+	active := st.Status == StatusPending || st.Status == StatusRunning
+	if !active && st.cancel == nil {
+		m.mu.Unlock()
+		return nil
+	}
+	done := st.runDone
+	if done == nil {
+		m.mu.Unlock()
+		return domain.Errorf(domain.CodeInternal, "上传任务状态异常，请稍后再次删除")
+	}
+	select {
+	case <-done:
+		m.mu.Unlock()
+		return nil
+	default:
+	}
+
+	cancel := st.cancel
+	if active {
+		st.Status = StatusCanceled
+		st.SpeedBytesPerSecond = 0
+		st.Message = "正在停止上传任务"
+		st.Error = ""
+		st.UpdatedAt = timeutil.UnixFloat(time.Now())
+	}
+	st.cancelMode = "delete"
+	snap := st
+	m.mu.Unlock()
+
+	if active {
+		_ = m.persistTask(snap)
+		m.broadcast()
+	}
+	if cancel != nil {
+		cancel()
+	}
+	m.runCond.Broadcast()
+
+	timer := time.NewTimer(deleteStopTimeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return domain.Errorf(domain.CodeInternal, "任务正在停止，请稍后再次删除")
+	case <-timer.C:
+		return domain.Errorf(domain.CodeInternal, "任务正在停止，请稍后再次删除")
+	}
+}
+
 func (m *Manager) popTask(taskID string) *taskState {
 	m.mu.Lock()
 	st, ok := m.tasks[taskID]
@@ -53,20 +117,9 @@ func (m *Manager) popTask(taskID string) *taskState {
 		m.mu.Unlock()
 		return nil
 	}
-	cancel := st.cancel
-	if cancel != nil {
-		st.cancelMode = "delete"
-	}
 	delete(m.tasks, taskID)
 	m.mu.Unlock()
 	m.deletePersisted(taskID)
-	if cancel != nil {
-		cancel()
-		select {
-		case <-st.runDone:
-		case <-time.After(30 * time.Second):
-		}
-	}
 	return st
 }
 

@@ -9,12 +9,10 @@ import (
 	"litepan/internal/domain"
 )
 
-// guestRole 对应 OpenList 的 GUEST（游客模式）；挂载需站点开启“允许挂载”。
 const guestRole = 1
 
 const defaultOperationDelayMS = 300
 
-// pageReq 与 OpenList 的分页参数一致；PerPage=0 表示一次返回全部。
 type pageReq struct {
 	Page    int `json:"page"`
 	PerPage int `json:"per_page"`
@@ -96,7 +94,6 @@ type publicSettingsResp struct {
 	AllowMounted string `json:"allow_mounted"`
 }
 
-// respEnvelope 是 OpenList 通用响应包装。
 type respEnvelope struct {
 	Code    int             `json:"code"`
 	Message string          `json:"message"`
@@ -107,7 +104,6 @@ func fileToItem(dir string, f objResp) domain.FileItem {
 	return objToItem(joinPath(dir, f.Name), f)
 }
 
-// objToItem 用给定的绝对路径作为文件 ID 构造 FileItem。
 func objToItem(id string, f objResp) domain.FileItem {
 	item := domain.FileItem{
 		ID:      id,
@@ -124,7 +120,6 @@ func objToItem(id string, f objResp) domain.FileItem {
 	return item
 }
 
-// parseHashInfo 解析 OpenList 的 hashinfo（形如 {"md5":"...","sha1":"..."}）。
 func parseHashInfo(info string) map[domain.HashType]string {
 	info = strings.TrimSpace(info)
 	if info == "" || !strings.HasPrefix(info, "{") {
@@ -148,25 +143,29 @@ func parseHashInfo(info string) map[domain.HashType]string {
 	return out
 }
 
-// rootPath 返回配置的根目录路径，默认 "/"。
 func (d *Driver) rootPath() string {
 	r := strings.TrimSpace(d.add.RootPath)
 	if r == "" {
 		return "/"
 	}
-	return "/" + strings.Trim(r, "/")
+	return path.Clean("/" + strings.Trim(r, "/"))
 }
 
-// normalizePath 把文件 ID（即 OpenList 绝对路径）规范为带前导斜杠的形式。
-func (d *Driver) normalizePath(id string) string {
+// OpenList 文件 ID 是路径，必须限制在配置的根目录内。
+func (d *Driver) normalizePath(id string) (string, error) {
 	p := strings.TrimSpace(id)
 	if p == "" || p == "/" || p == "0" || strings.EqualFold(p, "root") {
-		return d.rootPath()
+		return d.rootPath(), nil
 	}
+	root := d.rootPath()
 	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
+		p = joinPath(root, p)
 	}
-	return path.Clean(p)
+	p = path.Clean(p)
+	if root != "/" && p != root && !strings.HasPrefix(p, root+"/") {
+		return "", domain.Errorf(domain.CodeValidation, "路径超出 OpenList 根目录范围")
+	}
+	return p, nil
 }
 
 func joinPath(dir, name string) string {

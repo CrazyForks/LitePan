@@ -3,6 +3,8 @@ package upload
 import (
 	"context"
 	"strings"
+
+	"litepan/internal/domain"
 )
 
 func (m *Manager) Delete(ctx context.Context, taskID string, deleteUploadedFile bool) (bool, error) {
@@ -17,15 +19,14 @@ func (m *Manager) Delete(ctx context.Context, taskID string, deleteUploadedFile 
 			return true, err
 		}
 	}
+	if err := m.stopTaskForDelete(ctx, taskID); err != nil {
+		return true, err
+	}
 	popped := m.popTask(taskID)
 	if popped == nil {
-		return false, nil
+		return true, domain.Errorf(domain.CodeInternal, "任务正在停止，请稍后再次删除")
 	}
-	if popped.CleanupLocalMode != "" {
-		m.cleanupLocalSource(popped.localPath, popped.CleanupLocalPath, popped.CleanupLocalMode)
-	} else {
-		m.removeLocalFile(popped.localPath)
-	}
+	m.cleanupLocalSourceAfterDelete(popped)
 	m.broadcast()
 	return true, nil
 }
@@ -61,7 +62,6 @@ func (m *Manager) BatchDelete(ctx context.Context, taskIDs []string, deleteUploa
 		}
 		items = append(items, item{id: id, st: st, fileID: strings.TrimSpace(fileID)})
 	}
-	// 勾选删除网盘文件时，按账号合并成一次批量删除，避免逐文件请求。
 	if deleteUploadedFile {
 		type groupKey struct {
 			accountID int64
@@ -83,7 +83,6 @@ func (m *Manager) BatchDelete(ctx context.Context, taskIDs []string, deleteUploa
 		for _, g := range order {
 			var err error
 			if m.files != nil {
-				// 走文件服务：标准删除流程 + 发布文件变更事件
 				err = m.files.DeleteFiles(ctx, g.accountID, byGroup[g], g.parent)
 			} else {
 				err = m.deleteUploadedFiles(ctx, g.accountID, byGroup[g])
@@ -100,7 +99,6 @@ func (m *Manager) BatchDelete(ctx context.Context, taskIDs []string, deleteUploa
 			result.FailedTaskIDs = append(result.FailedTaskIDs, id)
 			result.FailedMessages[id] = msg
 		}
-		// 删除网盘文件成功后，若其所在目录已空，顺带删除空目录（根目录除外）。
 		for _, g := range order {
 			if g.parent == "" || m.files == nil {
 				continue
@@ -128,20 +126,34 @@ func (m *Manager) BatchDelete(ctx context.Context, taskIDs []string, deleteUploa
 		if _, failed := result.FailedMessages[it.id]; failed {
 			continue
 		}
-		popped := m.popTask(it.id)
-		if popped == nil {
-			result.MissingTaskIDs = append(result.MissingTaskIDs, it.id)
+		if err := m.stopTaskForDelete(ctx, it.id); err != nil {
+			result.FailedTaskIDs = append(result.FailedTaskIDs, it.id)
+			result.FailedMessages[it.id] = err.Error()
 			continue
 		}
-		if popped.CleanupLocalMode != "" {
-			m.cleanupLocalSource(popped.localPath, popped.CleanupLocalPath, popped.CleanupLocalMode)
-		} else {
-			m.removeLocalFile(popped.localPath)
+		popped := m.popTask(it.id)
+		if popped == nil {
+			result.FailedTaskIDs = append(result.FailedTaskIDs, it.id)
+			result.FailedMessages[it.id] = "任务正在停止，请稍后再次删除"
+			continue
 		}
+		m.cleanupLocalSourceAfterDelete(popped)
 		result.DeletedTaskIDs = append(result.DeletedTaskIDs, it.id)
 	}
 	if len(result.DeletedTaskIDs) > 0 {
 		m.broadcast()
 	}
 	return result
+}
+
+// 删除任务时不碰服务器上传的用户源文件。
+func (m *Manager) cleanupLocalSourceAfterDelete(st *taskState) {
+	if st == nil || st.SourceType == SourceTypeServerLocal {
+		return
+	}
+	if st.CleanupLocalMode != "" {
+		m.cleanupLocalSource(st.localPath, st.CleanupLocalPath, st.CleanupLocalMode)
+		return
+	}
+	m.removeLocalFile(st.localPath)
 }

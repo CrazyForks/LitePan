@@ -128,6 +128,18 @@ func (s *Service) ListAllFiles(ctx context.Context, accountID int64, parentID st
 	return out, err
 }
 
+func (s *Service) SupportsFullList(ctx context.Context, accountID int64) (bool, error) {
+	if err := s.exec.Check(ctx, accountID); err != nil {
+		return false, err
+	}
+	var supported bool
+	err := s.exec.Run(ctx, accountID, func(drv driver.Driver) error {
+		_, supported = drv.(driver.FullListLister)
+		return nil
+	})
+	return supported, err
+}
+
 // ResolveDirPath 反查目录完整远端路径（清单模式 pid→路径 补漏用）。
 func (s *Service) ResolveDirPath(ctx context.Context, accountID int64, dirID string) (string, error) {
 	if err := s.exec.Check(ctx, accountID); err != nil {

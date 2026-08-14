@@ -73,6 +73,7 @@ type toggleUploadDriver struct {
 type cancelUploadDriver struct {
 	started  chan struct{}
 	canceled chan struct{}
+	release  chan struct{}
 }
 
 func (d *toggleUploadDriver) Config() driver.Config      { return driver.Config{Name: "mock"} }
@@ -96,6 +97,9 @@ func (d *cancelUploadDriver) UploadLocalFile(ctx context.Context, _ driver.Local
 	close(d.started)
 	<-ctx.Done()
 	close(d.canceled)
+	if d.release != nil {
+		<-d.release
+	}
 	return nil, ctx.Err()
 }
 func (d *toggleUploadDriver) UploadLocalFile(_ context.Context, req driver.LocalUploadRequest) (*driver.LocalUploadResult, error) {
@@ -309,7 +313,6 @@ func (d *failingDeleterDriver) DeleteFiles(context.Context, []string) error {
 	return errors.New("cloud delete failed")
 }
 
-// 勾选「同时删除网盘文件」删除成功后，应发 FileMutated 让对应目录缓存精准失效。
 func TestDeleteUploadedFilePublishesMutation(t *testing.T) {
 	bus := eventbus.New(nil)
 	t.Cleanup(func() { _ = bus.Close(context.Background()) })
@@ -928,6 +931,68 @@ func TestDeleteOfflineHandoffTaskRemovesSourceDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(sourceDir); !os.IsNotExist(err) {
 		t.Fatalf("source dir still exists: %v", err)
+	}
+}
+
+func TestDeleteActiveServerLocalTaskKeepsSourceUntilWorkerStops(t *testing.T) {
+	drv := &cancelUploadDriver{
+		started:  make(chan struct{}),
+		canceled: make(chan struct{}),
+		release:  make(chan struct{}),
+	}
+	m := NewManager(Options{
+		Exec:     driverexec.New(fakeProvider{drv: drv}, nil),
+		Accounts: fakeUploadAccounts{},
+		DataDir:  t.TempDir(),
+	})
+	source := filepath.Join(t.TempDir(), "source.mkv")
+	if err := os.WriteFile(source, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	task, err := m.CreateServerLocalTask(context.Background(), ServerLocalCreateParams{
+		AccountID:        1,
+		FileName:         "source.mkv",
+		LocalPath:        source,
+		SourceType:       SourceTypeServerLocal,
+		CleanupLocalMode: CleanupLocalFileOnSuccess,
+		TotalBytes:       4,
+		TargetPath:       "target",
+		ConflictPolicy:   "overwrite",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-drv.started:
+	case <-time.After(time.Second):
+		t.Fatal("服务器上传任务未启动")
+	}
+
+	deleteCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	found, err := m.Delete(deleteCtx, task.TaskID, false)
+	if !found || err == nil {
+		t.Fatalf("delete found=%v err=%v，期望任务仍在停止中", found, err)
+	}
+	if _, err := os.Stat(source); err != nil {
+		t.Fatalf("上传协程未退出前不应删除服务器源文件: %v", err)
+	}
+	if _, ok := m.Get(context.Background(), task.TaskID); !ok {
+		t.Fatal("上传协程未退出前不应移除任务")
+	}
+
+	close(drv.release)
+	select {
+	case <-drv.canceled:
+	case <-time.After(time.Second):
+		t.Fatal("删除任务未取消上传协程")
+	}
+	found, err = m.Delete(context.Background(), task.TaskID, false)
+	if !found || err != nil {
+		t.Fatalf("上传协程退出后删除任务失败: found=%v err=%v", found, err)
+	}
+	if _, err := os.Stat(source); err != nil {
+		t.Fatalf("取消服务器上传任务不应删除源文件: %v", err)
 	}
 }
 

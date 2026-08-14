@@ -11,24 +11,20 @@ import (
 	"litepan/internal/driver"
 )
 
-// useEnhancedScan 决定任务是否走清单增强模式：
-// 开关开启、驱动支持 FullListLister 即可；分支执行保持原分支递归逻辑，
-// 自动执行且任务开了分支检查也维持分支逻辑。只有“全部执行”切换增强清单模式
-// （此时忽略分支，扫任务根全量）。
-func useEnhancedScan(task *domain.StrmTask, deps ScanDeps, runMode string) bool {
+func useEnhancedScan(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode string) (bool, error) {
 	if !deps.Settings.Tool115TreeEnabled {
-		return false
+		return false, nil
 	}
 	if deps.Files == nil || deps.DirCache == nil {
-		return false
+		return false, nil
 	}
 	if runMode == domain.StrmRunModeBranch {
-		return false
+		return false, nil
 	}
 	if task.BranchCheckEnabled && runMode != domain.StrmRunModeFull {
-		return false
+		return false, nil
 	}
-	return true
+	return deps.Files.SupportsFullList(ctx, task.AccountID)
 }
 
 // scanEnhancedTask 以 cur=0 全量清单替代逐目录递归：

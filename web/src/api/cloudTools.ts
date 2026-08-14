@@ -60,5 +60,5 @@ export const localUploadApi = {
   browse: (mapping: string, path = "") =>
     http.post<LocalUploadBrowseResult>("/admin/tools/local-upload/browse", { mapping, path }),
   upload: (payload: LocalUploadCreatePayload) =>
-    http.post<{ tasks: unknown[]; count: number }>("/admin/tools/local-upload/upload", payload),
+    http.post<{ accepted: boolean; count: number }>("/admin/tools/local-upload/upload", payload),
 };

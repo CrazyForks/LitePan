@@ -195,7 +195,7 @@ async function startLocalUpload() {
       client_task_id: batchKey,
       items,
     });
-    toast.success(`已创建 ${res.count} 个上传任务，可在上传任务面板查看进度`);
+    toast.success(`已受理 ${res.count} 个文件，任务将陆续显示在上传面板`);
     if (isFolder) {
       props.onFolderUploadAccepted?.(batchKey, res.count);
     } else {

@@ -107,13 +107,11 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (*Task, error) {
 	return tasks[0], nil
 }
 
-// CreateBatch 批量创建上传任务（含按 ClientTaskID 去重）。
 func (m *Manager) CreateBatch(ctx context.Context, params []CreateParams) ([]*Task, error) {
 	return m.createBatch(ctx, params)
 }
 
-// RenameTask 在上传任务尚未开始传输时更新目标文件名与目标目录。
-// 返回 renamed=false 表示任务已开始或已完成，本次改名未生效（调用方不应因此报错）。
+// RenameTask 仅修改尚未开始的任务。
 func (m *Manager) RenameTask(_ context.Context, taskID, newName, newTargetPath, newDisplayPath string) (bool, error) {
 	name := strings.TrimSpace(newName)
 	if name == "" {
@@ -192,7 +190,6 @@ func (m *Manager) createBatch(ctx context.Context, params []CreateParams) ([]*Ta
 	return result, nil
 }
 
-// Stop 取消并等待全部上传与跨盘任务退出，确保后续可以安全关闭任务仓储。
 func (m *Manager) Stop(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -334,18 +331,23 @@ func (m *Manager) CreateServerLocalTask(ctx context.Context, p ServerLocalCreate
 	return tasks[0], nil
 }
 
-// CreateServerLocalTasks 会先校验全部本地文件，再一次性持久化并启动任务。
-// 任一任务写库失败时，整批任务都不会进入运行队列。
 func (m *Manager) CreateServerLocalTasks(ctx context.Context, params []ServerLocalCreateParams) ([]*Task, error) {
 	if len(params) == 0 {
-		return nil, domain.Errorf(domain.CodeValidation, "离线交棒任务不能为空")
+		return nil, domain.Errorf(domain.CodeValidation, "服务器上传任务不能为空")
 	}
 	result := make([]*Task, len(params))
 	prepared := make([]CreateParams, 0, len(params))
 	preparedIndexes := make([]int, 0, len(params))
 	for i, p := range params {
 		if strings.TrimSpace(p.LocalPath) == "" {
-			return nil, domain.Errorf(domain.CodeValidation, "离线交棒缺少本地文件路径")
+			return nil, domain.Errorf(domain.CodeValidation, "服务器上传缺少本地文件路径")
+		}
+		sourceType := strings.TrimSpace(p.SourceType)
+		if sourceType == "" {
+			sourceType = SourceTypeOfflineHandoff
+		}
+		if sourceType != SourceTypeOfflineHandoff && sourceType != SourceTypeServerLocal {
+			return nil, domain.Errorf(domain.CodeValidation, "服务器上传来源类型不合法")
 		}
 		if p.ClientTaskID != "" {
 			if existing := m.FindByClientTaskID(p.ClientTaskID); existing != nil {
@@ -371,7 +373,7 @@ func (m *Manager) CreateServerLocalTasks(ctx context.Context, params []ServerLoc
 			DriverType:        p.DriverType,
 			FileName:          p.FileName,
 			DisplayName:       p.DisplayName,
-			SourceType:        SourceTypeOfflineHandoff,
+			SourceType:        sourceType,
 			TargetPath:        p.TargetPath,
 			TargetDisplayPath: p.TargetDisplayPath,
 			LocalPath:         p.LocalPath,
@@ -459,8 +461,6 @@ func (m *Manager) Get(_ context.Context, taskID string) (*Task, bool) {
 	return t, true
 }
 
-// RemoveTasksByAccount 清理无法在账号删除后继续执行的上传任务。
-// 目标账号被删除时全部清理；源账号被删除时，只清理仍处于源盘下载阶段的跨盘任务。
 func (m *Manager) RemoveTasksByAccount(ctx context.Context, accountID int64) (int64, error) {
 	if accountID <= 0 {
 		return 0, nil

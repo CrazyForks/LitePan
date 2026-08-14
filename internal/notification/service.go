@@ -87,6 +87,13 @@ func (s *Service) DeleteByRef(ctx context.Context, category string, refID int64)
 	return s.repo.DeleteByRef(ctx, category, refID)
 }
 
+func (s *Service) Notify(ctx context.Context, level, category, title, message string, accountID, refID int64) {
+	if s == nil {
+		return
+	}
+	s.persist(ctx, level, category, title, message, accountID, refID)
+}
+
 func (s *Service) onAuthFailed(ctx context.Context, e eventbus.AccountAuthFailed) {
 	if !e.Fatal {
 		return

@@ -60,6 +60,8 @@ const (
 	SourceTypeManual         = "manual"
 	SourceTypeCrossTransfer  = "cross_transfer"
 	SourceTypeOfflineHandoff = "offline_handoff"
+	// 服务器本地上传，删除任务时保留用户源文件。
+	SourceTypeServerLocal = "server_local"
 )
 
 const (
@@ -122,6 +124,7 @@ type ServerLocalCreateParams struct {
 	DriverType        string
 	FileName          string
 	DisplayName       string
+	SourceType        string
 	TargetPath        string
 	TargetDisplayPath string
 	LocalPath         string

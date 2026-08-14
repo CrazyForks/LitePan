@@ -30,7 +30,10 @@ func (d *Driver) UploadLocalFile(ctx context.Context, req driver.LocalUploadRequ
 		return nil, err
 	}
 	fileSize := localFile.Size
-	parentID := d.normalizePath(req.ParentID)
+	parentID, err := d.normalizePath(req.ParentID)
+	if err != nil {
+		return nil, err
+	}
 	policy := uploadutil.NormalizeConflictPolicy(req.ConflictPolicy)
 
 	uploadutil.NotifyProgress(req.OnProgress, 0, fileSize, "正在计算文件校验值")
@@ -81,7 +84,6 @@ func (d *Driver) UploadLocalFile(ctx context.Context, req driver.LocalUploadRequ
 	}, nil
 }
 
-// resolveUploadName 处理冲突策略：overwrite 直接覆盖，skip 跳过，fail 报错，rename 追加序号。
 func (d *Driver) resolveUploadName(ctx context.Context, parentID, name, policy string) (string, bool, error) {
 	if policy == "overwrite" {
 		return name, false, nil
@@ -116,7 +118,6 @@ func (d *Driver) resolveUploadName(ctx context.Context, parentID, name, policy s
 	}
 }
 
-// uploadStream 以 PUT 流式上传到 OpenList /api/fs/put。
 func (d *Driver) uploadStream(ctx context.Context, targetPath string, size int64, md5, sha1, policy string, modTime *time.Time, body *uploadutil.ReadProgress) error {
 	u := strings.TrimRight(strings.TrimSpace(d.add.Address), "/") + "/api/fs/put"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, body)

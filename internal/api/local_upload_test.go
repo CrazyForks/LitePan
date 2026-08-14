@@ -1,6 +1,7 @@
 package api
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -23,26 +24,35 @@ func TestCleanRelativePath(t *testing.T) {
 	}
 }
 
-func TestIsWithinRoot(t *testing.T) {
-	root := filepath.Clean("/app/data/updatefiles")
-	ok := []string{
-		"/app/data/updatefiles",
-		"/app/data/updatefiles/媒体库/电影.mkv",
+func TestResolveLocalUploadSourceRejectsEscapingSymlink(t *testing.T) {
+	root := t.TempDir()
+	inside := filepath.Join(root, "inside.mkv")
+	if err := os.WriteFile(inside, []byte("inside"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	for _, p := range ok {
-		if !isWithinRoot(p, root) {
-			t.Errorf("应在映射根内: %s", p)
-		}
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "outside.mkv")
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	bad := []string{
-		"/app/data/updatefiles2/电影.mkv",
-		"/app/data/other/电影.mkv",
-		"/etc/passwd",
+	link := filepath.Join(root, "outside-link.mkv")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
 	}
-	for _, p := range bad {
-		if isWithinRoot(p, root) {
-			t.Errorf("不应在映射根内: %s", p)
-		}
+
+	resolved, err := resolveLocalUploadSource(inside, root)
+	if err != nil {
+		t.Fatalf("映射目录内文件被错误拒绝: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(inside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != want {
+		t.Fatalf("inside resolved=%q want %q", resolved, want)
+	}
+	if _, err := resolveLocalUploadSource(link, root); err == nil {
+		t.Fatal("指向映射目录外的链接未被拒绝")
 	}
 }
 

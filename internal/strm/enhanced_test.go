@@ -21,6 +21,18 @@ type enhancedTestDriver struct {
 	resolveCnt int
 }
 
+type standardScanTestDriver struct{ listCalls int }
+
+func (d *standardScanTestDriver) Config() driver.Config      { return driver.Config{Name: "standard-test"} }
+func (d *standardScanTestDriver) GetAddition() any           { return &struct{}{} }
+func (d *standardScanTestDriver) Init(context.Context) error { return nil }
+func (d *standardScanTestDriver) Drop(context.Context) error { return nil }
+func (d *standardScanTestDriver) Ping(context.Context) error { return nil }
+func (d *standardScanTestDriver) ListFiles(_ context.Context, _ string) ([]domain.FileItem, error) {
+	d.listCalls++
+	return nil, nil
+}
+
 func (d *enhancedTestDriver) Config() driver.Config      { return driver.Config{Name: "enhanced-test"} }
 func (d *enhancedTestDriver) GetAddition() any           { return &struct{}{} }
 func (d *enhancedTestDriver) Init(context.Context) error { return nil }
@@ -39,7 +51,7 @@ func (d *enhancedTestDriver) ResolveDirPath(_ context.Context, dirID string) (st
 
 type memDirCache struct {
 	mu   sync.Mutex
-	m    map[string]string // accountID/dirID -> path
+	m    map[string]string
 	seen map[string]time.Time
 }
 
@@ -257,12 +269,36 @@ func TestEnhancedScanDisabledForBranchTaskAutoRun(t *testing.T) {
 		StrmDir:  root,
 		Settings: ScanSettings{Tool115TreeEnabled: true},
 	}, domain.StrmRunModeAuto)
-	// 分支任务走普通路径：远端 0 文件 + 本地 0 STRM 不应报错，也不应调用清单接口。
 	if err != nil {
 		t.Fatalf("分支任务不应走增强路径: %v", err)
 	}
 	if drv.resolveCnt != 0 {
 		t.Fatalf("分支任务不应反查目录，实际 %d", drv.resolveCnt)
+	}
+}
+
+func TestEnhancedScanFallsBackWhenDriverLacksCapability(t *testing.T) {
+	root := t.TempDir()
+	drv := &standardScanTestDriver{}
+	files := file.NewService(driverexec.New(enhancedTestProvider{drv: drv}, nil), nil, nil, nil, nil, nil)
+	task := &domain.StrmTask{
+		ID:           4,
+		AccountID:    1,
+		ParentID:     "lib",
+		Path:         "/库",
+		Extensions:   "mkv",
+		OutputFolder: "任务",
+	}
+	if _, err := ScanTask(context.Background(), task, ScanDeps{
+		Files:    files,
+		DirCache: newMemDirCache(),
+		StrmDir:  root,
+		Settings: ScanSettings{Tool115TreeEnabled: true},
+	}, domain.StrmRunModeAuto); err != nil {
+		t.Fatalf("普通驱动应回退递归扫描: %v", err)
+	}
+	if drv.listCalls == 0 {
+		t.Fatal("普通驱动未走递归扫描")
 	}
 }
 
@@ -276,7 +312,7 @@ func TestEnhancedScanUsedForBranchTaskFullRun(t *testing.T) {
 	}
 	files := file.NewService(driverexec.New(enhancedTestProvider{drv: drv}, nil), nil, nil, nil, nil, nil)
 	task := &domain.StrmTask{
-		ID:                 4,
+		ID:                 5,
 		AccountID:          1,
 		ParentID:           "lib",
 		Path:               "/库",

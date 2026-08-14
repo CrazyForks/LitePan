@@ -92,6 +92,7 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		fuse:      fuseSvc,
 		readCache: fuseReadCache,
 		strm:      coord,
+		strmSvc:   strmSvc,
 		retention: retentionCoord,
 		media:     mediaOrganizeSvc,
 		favorites: favoritesSvc,

@@ -19,6 +19,7 @@ type accountLifecycle struct {
 	fuse      *fusemount.Service
 	readCache *fusereadcache.Service
 	strm      *strm.Coordinator
+	strmSvc   *strm.Service
 	retention *cacheretention.Coordinator
 	media     *mediaorganize.Service
 	favorites *favorites.Service
@@ -67,6 +68,11 @@ func (a accountLifecycle) OnAccountDeleted(ctx context.Context, accountID int64)
 	if a.strm != nil {
 		if _, err := a.strm.RemoveTasksByAccount(ctx, accountID); err != nil {
 			return fmt.Errorf("清理 STRM 任务失败: %w", err)
+		}
+	}
+	if a.strmSvc != nil {
+		if _, err := a.strmSvc.ClearDirCache(ctx, accountID); err != nil {
+			return fmt.Errorf("清理 STRM 路径映射表失败: %w", err)
 		}
 	}
 	if a.retention != nil {

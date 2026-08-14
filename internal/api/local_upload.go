@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -69,7 +70,6 @@ func (h *Handler) loadLocalUploadMappings() []localUploadMapping {
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		return nil
 	}
-	// 只保留合法项
 	valid := out[:0]
 	seen := make(map[string]struct{}, len(out))
 	for _, m := range out {
@@ -174,7 +174,7 @@ type localUploadEntry struct {
 func (h *Handler) browseLocalUpload(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Mapping string `json:"mapping"`
-		Path    string `json:"path"` // 相对映射根的目录，空表示根
+		Path    string `json:"path"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		writeErr(w, err)
@@ -315,15 +315,24 @@ func (h *Handler) createLocalUploadTasks(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 异步批量创建任务：接口立即返回，前端乐观显示占位批次，避免界面卡在创建中。
 	ctx := context.WithoutCancel(r.Context())
-	go h.createLocalUploadTasksSync(ctx, m, in.AccountID, in.TargetPath,
-		strings.TrimSpace(in.TargetDisplay), in.ClientTaskID, in.DisplayName, conflict, sources)
+	go func() {
+		created, err := h.createLocalUploadTasksSync(ctx, m, in.AccountID, in.TargetPath,
+			strings.TrimSpace(in.TargetDisplay), in.ClientTaskID, in.DisplayName, conflict,
+			sources)
+		if err == nil {
+			return
+		}
+		h.logError("服务器上传任务未全部创建", "requested", len(sources), "created", len(created), "err", err.Error())
+		if h.notifications != nil {
+			h.notifications.Notify(ctx, "warning", "upload", "服务器上传任务未全部创建",
+				fmt.Sprintf("已创建 %d/%d 个上传任务：%v", len(created), len(sources), err), in.AccountID, 0)
+		}
+	}()
 
 	writeOK(w, map[string]any{"accepted": true, "count": len(sources)})
 }
 
-// createLocalUploadTasksSync 后台批量创建上传任务（分批 CreateBatch）。
 func (h *Handler) createLocalUploadTasksSync(
 	ctx context.Context,
 	m localUploadMapping,
@@ -335,43 +344,60 @@ func (h *Handler) createLocalUploadTasksSync(
 	batch := make([]upload.CreateParams, 0, batchSize)
 	seq := 0
 	var tasks []*upload.Task
+	targetDirs := map[string]string{"": targetRoot}
+	skipped := 0
+	var firstErr error
+	recordFailure := func(err error) {
+		skipped++
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
 	accountName, driverType := "", ""
 	if h.accountSvc != nil {
 		accountName, driverType, _ = h.accountSvc.LookupUploadAccount(ctx, accountID)
 	}
-	flush := func() {
+	flush := func() error {
 		if len(batch) == 0 {
-			return
+			return nil
 		}
 		if h.uploads == nil {
-			h.logError("上传服务未初始化，本机上传任务创建失败", "count", len(batch))
 			batch = batch[:0]
-			return
+			return domain.Errorf(domain.CodeInternal, "上传服务未初始化")
 		}
 		created, err := h.uploads.CreateBatch(ctx, batch)
-		if err != nil {
-			h.logError("批量创建本机上传任务失败", "count", len(batch), "err", err.Error())
-		} else {
-			tasks = append(tasks, created...)
-		}
 		batch = batch[:0]
+		if err != nil {
+			return err
+		}
+		tasks = append(tasks, created...)
+		return nil
 	}
 	for _, s := range sources {
 		if err := ctx.Err(); err != nil {
 			return tasks, err
 		}
-		targetParent := targetRoot
-		if s.relDir != "" {
-			parent, err := h.ensureLocalUploadTargetDir(ctx, accountID, targetRoot, s.relDir)
+		targetParent, ok := targetDirs[s.relDir]
+		if !ok {
+			parent, err := h.ensureLocalUploadTargetDir(ctx, accountID, targetRoot, s.relDir, targetDirs)
 			if err != nil {
 				h.logError("创建网盘子目录失败", "dir", s.relDir, "err", err.Error())
+				recordFailure(fmt.Errorf("创建目录 %s 失败：%w", s.relDir, err))
 				continue
 			}
 			targetParent = parent
+			targetDirs[s.relDir] = targetParent
 		}
-		info, err := statLocalFile(s.abs)
+		localPath, err := resolveLocalUploadSource(s.abs, m.Path)
 		if err != nil {
-			h.logError("读取本地文件失败", "path", s.abs, "err", err.Error())
+			h.logError("检查服务器上传文件失败", "path", s.abs, "err", err.Error())
+			recordFailure(fmt.Errorf("检查文件 %s 失败：%w", filepath.Base(s.abs), err))
+			continue
+		}
+		info, err := statLocalFile(localPath)
+		if err != nil {
+			h.logError("读取本地文件失败", "path", localPath, "err", err.Error())
+			recordFailure(fmt.Errorf("读取文件 %s 失败：%w", filepath.Base(s.abs), err))
 			continue
 		}
 		taskID := clientTaskID
@@ -387,17 +413,25 @@ func (h *Handler) createLocalUploadTasksSync(
 			DisplayName:       displayName,
 			TargetPath:        targetParent,
 			TargetDisplayPath: joinLocalDisplayPath(targetDisplay, s.relDir),
-			LocalPath:         s.abs,
+			LocalPath:         localPath,
 			TotalBytes:        info.Size(),
 			ConflictPolicy:    conflict,
+			SourceType:        upload.SourceTypeServerLocal,
 			CleanupLocalMode:  upload.CleanupLocalModeKeep,
 		})
 		seq++
 		if len(batch) >= batchSize {
-			flush()
+			if err := flush(); err != nil {
+				return tasks, err
+			}
 		}
 	}
-	flush()
+	if err := flush(); err != nil {
+		return tasks, err
+	}
+	if skipped > 0 {
+		return tasks, fmt.Errorf("有 %d 个文件未创建上传任务：%w", skipped, firstErr)
+	}
 	return tasks, nil
 }
 
@@ -408,6 +442,22 @@ type localUploadSource struct {
 
 func statLocalFile(abs string) (fs.FileInfo, error) {
 	return os.Stat(abs)
+}
+
+// 解析符号链接后检查边界。
+func resolveLocalUploadSource(abs, root string) (string, error) {
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	resolvedPath, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", err
+	}
+	if !isWithinRoot(resolvedPath, resolvedRoot) {
+		return "", domain.Errorf(domain.CodeValidation, "路径超出映射目录范围")
+	}
+	return resolvedPath, nil
 }
 
 func joinLocalDisplayPath(base, relDir string) string {
@@ -430,18 +480,30 @@ func (h *Handler) logError(msg string, args ...any) {
 	slog.Error(msg, args...)
 }
 
-// ensureLocalUploadTargetDir 从根目录 ID 开始逐级解析/创建网盘子目录，返回最终目录 ID。
-func (h *Handler) ensureLocalUploadTargetDir(ctx context.Context, accountID int64, rootID, relDir string) (string, error) {
+func (h *Handler) ensureLocalUploadTargetDir(ctx context.Context, accountID int64, rootID, relDir string, cache map[string]string) (string, error) {
 	if h.files == nil {
 		return "", domain.Errorf(domain.CodeInternal, "文件服务未就绪")
+	}
+	if cache == nil {
+		cache = make(map[string]string)
+	}
+	if _, ok := cache[""]; !ok {
+		cache[""] = rootID
 	}
 	relDir = strings.Trim(strings.ReplaceAll(relDir, "\\", "/"), "/")
 	if relDir == "" {
 		return rootID, nil
 	}
 	cur := rootID
+	parts := make([]string, 0, strings.Count(relDir, "/")+1)
 	for _, part := range strings.Split(relDir, "/") {
 		if part == "" {
+			continue
+		}
+		parts = append(parts, part)
+		key := strings.Join(parts, "/")
+		if cached, ok := cache[key]; ok {
+			cur = cached
 			continue
 		}
 		items, err := h.files.List(ctx, accountID, cur, false)
@@ -463,6 +525,7 @@ func (h *Handler) ensureLocalUploadTargetDir(ctx context.Context, accountID int6
 			next = created.ID
 		}
 		cur = next
+		cache[key] = cur
 	}
 	return cur, nil
 }

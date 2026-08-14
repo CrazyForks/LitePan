@@ -111,7 +111,11 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 	if root == "" {
 		root = "strm"
 	}
-	if useEnhancedScan(task, deps, runMode) {
+	enhanced, err := useEnhancedScan(ctx, task, deps, runMode)
+	if err != nil {
+		return result, err
+	}
+	if enhanced {
 		return scanEnhancedTask(ctx, task, deps, root, exts, metaExts, excludeDirs, excludeFiles,
 			minMediaBytes, metaMaxBytes, failures)
 	}
