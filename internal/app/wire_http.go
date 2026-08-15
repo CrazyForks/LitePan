@@ -49,6 +49,7 @@ func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core
 		Strm:              svc.strm,
 		CacheRetention:    svc.cacheRetention,
 		MediaOrganize:     svc.mediaOrganize,
+		AIOrganize:        svc.aiOrganize,
 		StrmScrape:        svc.strmScrape,
 		Automation:        svc.automation,
 		Fuse:              svc.fuse,

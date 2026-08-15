@@ -45,6 +45,13 @@ export interface LocalUploadCreatePayload {
   items: { rel_path: string; is_dir: boolean }[];
 }
 
+export interface AIOrganizeConfig {
+  enabled: boolean;
+  base_url: string;
+  api_key: string;
+  model: string;
+}
+
 export const cloudToolsApi = {
   status115: () => http.get<CloudTool115Status>("/admin/tools/115-strm/status"),
   set115Enabled: (enabled: boolean) =>
@@ -61,4 +68,12 @@ export const localUploadApi = {
     http.post<LocalUploadBrowseResult>("/admin/tools/local-upload/browse", { mapping, path }),
   upload: (payload: LocalUploadCreatePayload) =>
     http.post<{ accepted: boolean; count: number }>("/admin/tools/local-upload/upload", payload),
+};
+
+export const aiOrganizeApi = {
+  getConfig: () => http.get<AIOrganizeConfig>("/admin/tools/ai-organize/config"),
+  saveConfig: (payload: AIOrganizeConfig) =>
+    http.put<AIOrganizeConfig>("/admin/tools/ai-organize/config", payload),
+  testConfig: (payload: AIOrganizeConfig) =>
+    http.post<{ ok: boolean }>("/admin/tools/ai-organize/test", payload),
 };

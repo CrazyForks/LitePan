@@ -161,6 +161,17 @@ const planEditingName = ref("");
 const planEditingSaving = ref(false);
 const tmdbTesting = ref(false);
 let planProgressTimer: number | null = null;
+const aiWaitSeconds = ref(0);
+let aiWaitStartedAt = 0;
+let aiWaitTimer: number | null = null;
+
+const isAIRecognizing = computed(() => planProgress.value.stage === "ai_recognition");
+const aiProgressTitle = computed(() => {
+  const chunk = planProgress.value.ai_chunk || 0;
+  const chunks = planProgress.value.ai_chunks || 0;
+  if (chunks > 1 && chunk > 0) return `正在进行 AI 辅助识别 · 第 ${chunk}/${chunks} 批`;
+  return "正在等待 AI 识别";
+});
 
 const preview = useOrganizePlanPreview();
 
@@ -590,7 +601,10 @@ function startPlanProgressPolling(taskId: string) {
   planProgress.value = {};
   const tick = async () => {
     try {
-      planProgress.value = await fetchMediaOrganizeProgress(taskId);
+      const next = await fetchMediaOrganizeProgress(taskId);
+      planProgress.value = next;
+      if (next.stage === "ai_recognition") startAIWaitTimer();
+      else stopAIWaitTimer();
     } catch {}
   };
   void tick();
@@ -602,6 +616,25 @@ function stopPlanProgressPolling() {
     window.clearInterval(planProgressTimer);
     planProgressTimer = null;
   }
+  stopAIWaitTimer();
+}
+
+function startAIWaitTimer() {
+  if (aiWaitTimer) return;
+  aiWaitStartedAt = Date.now();
+  aiWaitSeconds.value = 0;
+  aiWaitTimer = window.setInterval(() => {
+    aiWaitSeconds.value = Math.floor((Date.now() - aiWaitStartedAt) / 1000);
+  }, 1000);
+}
+
+function stopAIWaitTimer() {
+  if (aiWaitTimer) {
+    window.clearInterval(aiWaitTimer);
+    aiWaitTimer = null;
+  }
+  aiWaitStartedAt = 0;
+  aiWaitSeconds.value = 0;
 }
 
 async function previewPlan(task: MediaOrganizeTask) {
@@ -1043,14 +1076,24 @@ defineExpose({
       <div class="organize-plan-content">
           <div v-if="planLoading" class="organize-plan-loading">
         <BusySpinner variant="notch" :size="42" color="var(--brand)" />
-        <div class="organize-plan-loading__title">正在扫描并生成计划…</div>
-        <div class="organize-plan-loading__metrics">
+        <div class="organize-plan-loading__title">
+          {{ isAIRecognizing ? aiProgressTitle : "正在扫描并生成计划…" }}
+        </div>
+        <div v-if="isAIRecognizing" class="organize-plan-loading__metrics">
+          <span class="organize-plan-metric">待识别 {{ planProgress.ai_total || 0 }} 部</span>
+          <span class="organize-plan-metric">已完成 {{ planProgress.ai_completed || 0 }} 部</span>
+          <span v-if="planProgress.ai_cached" class="organize-plan-metric">复用结果 {{ planProgress.ai_cached }} 部</span>
+        </div>
+        <div v-else class="organize-plan-loading__metrics">
           <span class="organize-plan-metric">扫描目录 {{ planProgress.scanned_dirs || 0 }}</span>
           <span class="organize-plan-metric">媒体文件 {{ planProgress.scanned_files || 0 }}</span>
           <span class="organize-plan-metric">已分组 {{ planProgress.groups || 0 }}</span>
           <span class="organize-plan-metric">已生成 {{ planProgress.actions || 0 }} 个动作</span>
         </div>
-        <div v-if="planProgress.current_dir" class="organize-plan-loading__current">
+        <div v-if="isAIRecognizing" class="organize-plan-loading__current">
+          已等待 {{ aiWaitSeconds }} 秒 · 模型响应后会自动继续
+        </div>
+        <div v-else-if="planProgress.current_dir" class="organize-plan-loading__current">
           当前批次: {{ planProgress.current_dir }}
         </div>
       </div>
@@ -1146,6 +1189,7 @@ defineExpose({
                 </div>
                 <span class="organize-plan-group-right">
                   <span class="organize-plan-group-badges">
+                    <span v-if="group.aiAssisted" class="organize-plan-group-ai">AI 介入</span>
                     <span v-if="group.tmdbId" class="organize-plan-group-tmdb">tmdb-{{ group.tmdbId }}</span>
                     <span v-else class="organize-plan-group-notmdb">无 TMDB</span>
                     <span class="organize-plan-group-count">{{ group.actionCount }} 项</span>
@@ -2032,12 +2076,16 @@ defineExpose({
 }
 
 .organize-plan-old {
+  flex: 0 1 auto;
+  max-width: 36%;
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .organize-plan-new {
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--text);
   font-weight: 600;
   overflow: hidden;
@@ -2091,6 +2139,15 @@ defineExpose({
   color: var(--brand);
   background: color-mix(in srgb, var(--brand) 10%, var(--surface));
   padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.organize-plan-group-ai {
+  font-size: 12px;
+  color: #72550c;
+  background: color-mix(in srgb, #d5a72b 15%, var(--surface));
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, #d5a72b 32%, transparent);
   border-radius: 999px;
 }
 

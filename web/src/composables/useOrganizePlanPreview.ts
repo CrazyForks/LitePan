@@ -31,6 +31,7 @@ export interface PlanGroup {
   key: string;
   tmdbId: string;
   tmdbUrl: string;
+  aiAssisted: boolean;
   dirAction: MediaOrganizePlanAction | null;
   virtualDir: boolean;
   hasDirInfo: boolean;
@@ -292,6 +293,9 @@ export function useOrganizePlanPreview() {
                 : "movie"
             }/${encodeURIComponent(g.tmdbId)}`
           : "",
+        aiAssisted: [g.dirAction, ...g.actions].some(
+          (action) => action?.metadata?.recognition_source === "ai",
+        ),
         dirAction: g.dirAction,
         virtualDir,
         hasDirInfo: Boolean(g.dirAction || (titleOld && titleNew)),

@@ -2,8 +2,10 @@
 import { onMounted, ref } from "vue";
 import { getApiErrorMessage } from "@/api/client";
 import {
+  aiOrganizeApi,
   cloudToolsApi,
   localUploadApi,
+  type AIOrganizeConfig,
   type CloudTool115Status,
   type LocalUploadMapping,
 } from "@/api/cloudTools";
@@ -11,6 +13,7 @@ import { confirm } from "@/composables/useConfirm";
 import { toast } from "@/composables/useToast";
 import { useSettingsLoad } from "@/composables/useSettingsLoad";
 import AppButton from "@/components/base/AppButton.vue";
+import AppModal from "@/components/base/AppModal.vue";
 import "@/styles/admin-shared.css";
 
 const { runLoad } = useSettingsLoad();
@@ -26,16 +29,102 @@ const mappingOpen = ref(false);
 const newMappingName = ref("");
 const newMappingPath = ref("");
 
+const aiConfig = ref<AIOrganizeConfig>({
+  enabled: false,
+  base_url: "https://api.deepseek.com",
+  api_key: "",
+  model: "deepseek-chat",
+});
+const aiDraft = ref<AIOrganizeConfig>({ ...aiConfig.value });
+const aiSaving = ref(false);
+const aiTesting = ref(false);
+const aiSettingsOpen = ref(false);
+const enableAfterSave = ref(false);
+
 async function load() {
   await runLoad(async () => {
-    const [st, lu] = await Promise.all([
+    const [st, lu, ai] = await Promise.all([
       cloudToolsApi.status115(),
       localUploadApi.getConfig().catch(() => ({ enabled: false, mappings: [] })),
+      aiOrganizeApi.getConfig(),
     ]);
     status.value = st;
     localEnabled.value = lu.enabled;
     localMappings.value = lu.mappings;
+    aiConfig.value = ai;
   }, "加载网盘工具状态失败");
+}
+
+function openAISettings(pendingEnable = false) {
+  enableAfterSave.value = pendingEnable;
+  aiDraft.value = { ...aiConfig.value };
+  aiSettingsOpen.value = true;
+}
+
+function closeAISettings() {
+  aiSettingsOpen.value = false;
+  enableAfterSave.value = false;
+}
+
+function aiConfigComplete(config: AIOrganizeConfig) {
+  return Boolean(config.base_url.trim() && config.api_key.trim() && config.model.trim());
+}
+
+async function toggleAIEnabled() {
+  if (!aiConfig.value.enabled && !aiConfigComplete(aiConfig.value)) {
+    openAISettings(true);
+    toast.info("先填写 API 地址、API Key 和模型名称");
+    return;
+  }
+  aiSaving.value = true;
+  try {
+    aiConfig.value = await aiOrganizeApi.saveConfig({
+      ...aiConfig.value,
+      enabled: !aiConfig.value.enabled,
+    });
+    toast.success(aiConfig.value.enabled ? "AI 辅助增强已启用" : "AI 辅助增强已停用");
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "修改开关失败"));
+  } finally {
+    aiSaving.value = false;
+  }
+}
+
+async function testAIConfig() {
+  if (!aiConfigComplete(aiDraft.value)) {
+    toast.error("请先填完模型配置");
+    return;
+  }
+  aiTesting.value = true;
+  try {
+    await aiOrganizeApi.testConfig(aiDraft.value);
+    toast.success("连接成功，模型已正确返回 JSON");
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "连接测试失败"));
+  } finally {
+    aiTesting.value = false;
+  }
+}
+
+async function saveAIConfig() {
+  if (!aiConfigComplete(aiDraft.value)) {
+    toast.error("请填完 API 地址、API Key 和模型名称");
+    return;
+  }
+  aiSaving.value = true;
+  try {
+    aiConfig.value = await aiOrganizeApi.saveConfig({
+      ...aiDraft.value,
+      enabled: enableAfterSave.value || aiDraft.value.enabled,
+    });
+    aiSettingsOpen.value = false;
+    enableAfterSave.value = false;
+    toast.success(aiConfig.value.enabled ? "模型配置已保存并启用" : "模型配置已保存");
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "保存模型配置失败"));
+  } finally {
+    aiSaving.value = false;
+  }
 }
 
 onMounted(load);
@@ -120,7 +209,7 @@ async function saveMappings() {
 
 async function clearCache() {
   const ok = await confirm({
-    title: "清空路径映射表？",
+    title: "清空映射数据？",
     message:
       `将删除 ${status.value.cache_count.toLocaleString("zh-CN")} 条目录路径映射记录，` +
       "下次该账号执行 STRM 任务时会重新解析目录路径，用于纠正目录被移动 / 重命名后的路径漂移。此操作不影响网盘文件与已生成的 STRM 文件。",
@@ -136,7 +225,7 @@ async function clearCache() {
     toast.success(`已清空 ${res.removed.toLocaleString("zh-CN")} 条路径映射记录`);
     await load();
   } catch (e) {
-    toast.error(getApiErrorMessage(e, "清空路径映射表失败"));
+    toast.error(getApiErrorMessage(e, "清空映射数据失败"));
   } finally {
     clearing.value = false;
   }
@@ -193,7 +282,7 @@ async function clearCache() {
           </div>
           <div class="tool-card__actions">
             <AppButton variant="danger" :disabled="clearing" @click="clearCache">
-              {{ clearing ? "清空中…" : "清空路径映射表" }}
+              {{ clearing ? "清空中…" : "清空映射数据" }}
             </AppButton>
           </div>
         </div>
@@ -249,42 +338,107 @@ async function clearCache() {
           </div>
         </div>
       </article>
+
+      <article class="tool-card" :class="aiConfig.enabled ? 'is-enabled' : 'is-disabled'">
+        <span class="tool-card__bar" :class="aiConfig.enabled ? 'is-enabled' : 'is-disabled'" />
+        <div class="tool-card__head">
+          <div class="tool-card__logo tool-card__ai-logo" aria-hidden="true">AI</div>
+          <div class="tool-card__meta">
+            <h3 class="tool-card__name">
+              AI 辅助增强工具
+              <span class="tool-card__tag">通用</span>
+            </h3>
+            <p class="tool-card__driver">已接入目录整理 · 低置信作品批量补判</p>
+          </div>
+          <button
+            class="check-toggle"
+            type="button"
+            :class="{ on: aiConfig.enabled }"
+            :aria-label="aiConfig.enabled ? '停用 AI 辅助增强工具' : '启用 AI 辅助增强工具'"
+            :disabled="aiSaving"
+            title="启用 / 停用"
+            @click="toggleAIEnabled"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                d="M3.5 8.5 6.5 11.5 12.5 4.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+        <p class="tool-card__desc">
+          提供可复用的 AI 识别能力，目前已用于目录整理。模型只返回识别结果，
+          仍由原功能生成计划并执行，后续可供其他功能接入。
+        </p>
+        <div class="tool-card__row">
+          <div class="tool-card__stat tool-card__stat--model">
+            <span class="tool-card__num">{{ aiConfig.model || "待配置" }}</span>
+          </div>
+          <div class="tool-card__actions">
+            <AppButton variant="secondary" :disabled="aiSaving" @click="openAISettings(false)">
+              配置模型参数
+            </AppButton>
+          </div>
+        </div>
+      </article>
     </div>
 
-    <!-- 映射设置弹窗 -->
-    <div class="local-mapping-overlay" :class="{ 'is-open': mappingOpen }" @click.self="closeMappings">
-      <div class="local-mapping-modal">
-        <h3 class="local-mapping-modal__title">本机上传 · 目录映射设置</h3>
-        <div class="local-mapping-modal__body">
-          <p class="local-mapping-tip">
-            在 docker-compose 中先映射宿主机目录，再按容器内路径添加标签。
-            前台从本机上传时按标签浏览，不会暴露服务器其他路径。
-          </p>
-          <div class="local-mapping-list">
-            <div v-for="m in localMappings" :key="m.name" class="local-mapping-item">
-              <span class="local-mapping-item__name">{{ m.name }}</span>
-              <span class="local-mapping-item__path">{{ m.path }}</span>
-              <button class="local-mapping-item__del" type="button" title="删除" @click="removeMapping(m.name)">
-                ✕
-              </button>
-            </div>
-            <div v-if="localMappings.length === 0" class="local-mapping-empty">还没有映射目录</div>
-          </div>
-          <div class="local-mapping-add">
-            <input v-model="newMappingName" type="text" placeholder="标签名，如：媒体库" />
-            <input v-model="newMappingPath" type="text" placeholder="容器内路径，如：/app/data/updatefiles" />
-            <AppButton variant="primary" @click="addMapping">添加</AppButton>
-          </div>
-          <p class="local-mapping-hint">示例：<code>- /vol1/1000/updatefiles:/app/data/updatefiles</code></p>
+    <AppModal :open="mappingOpen" title="本机上传 · 目录映射设置" size="md" @close="closeMappings">
+      <p class="local-mapping-tip">
+        在 docker-compose 中先映射宿主机目录，再按容器内路径添加标签。
+        前台从本机上传时按标签浏览，不会暴露服务器其他路径。
+      </p>
+      <div class="local-mapping-list">
+        <div v-for="m in localMappings" :key="m.name" class="local-mapping-item">
+          <span class="local-mapping-item__name">{{ m.name }}</span>
+          <span class="local-mapping-item__path">{{ m.path }}</span>
+          <button class="local-mapping-item__del" type="button" title="删除" @click="removeMapping(m.name)">✕</button>
         </div>
-        <div class="local-mapping-modal__actions">
-          <AppButton variant="secondary" @click="closeMappings">取消</AppButton>
-          <AppButton variant="primary" :disabled="localSaving" @click="saveMappings">
-            {{ localSaving ? "保存中…" : "保存" }}
-          </AppButton>
-        </div>
+        <div v-if="localMappings.length === 0" class="local-mapping-empty">还没有映射目录</div>
       </div>
-    </div>
+      <div class="local-mapping-add">
+        <input v-model="newMappingName" type="text" placeholder="标签名，如：媒体库" />
+        <input v-model="newMappingPath" type="text" placeholder="容器内路径，如：/app/data/updatefiles" />
+        <AppButton variant="primary" @click="addMapping">添加</AppButton>
+      </div>
+      <p class="local-mapping-hint">示例：<code>- /vol1/1000/updatefiles:/app/data/updatefiles</code></p>
+      <template #footer>
+        <AppButton variant="secondary" @click="closeMappings">取消</AppButton>
+        <AppButton variant="primary" :disabled="localSaving" @click="saveMappings">
+          {{ localSaving ? "保存中…" : "保存" }}
+        </AppButton>
+      </template>
+    </AppModal>
+
+    <AppModal :open="aiSettingsOpen" title="AI 辅助增强工具 · 模型设置" size="md" @close="closeAISettings">
+      <label class="ai-settings-field">
+        <span>API 地址</span>
+        <input v-model.trim="aiDraft.base_url" type="url" placeholder="https://api.deepseek.com" />
+      </label>
+      <label class="ai-settings-field">
+        <span>模型名称</span>
+        <input v-model.trim="aiDraft.model" type="text" placeholder="例如 deepseek-chat" />
+      </label>
+      <label class="ai-settings-field">
+        <span>API Key</span>
+        <input v-model.trim="aiDraft.api_key" type="password" autocomplete="new-password" placeholder="sk-..." />
+      </label>
+      <p class="local-mapping-hint">同一目录树在 24 小时内重新生成计划时会复用识别结果。</p>
+      <template #footer>
+        <AppButton class="ai-settings-test" variant="secondary" :disabled="aiTesting || aiSaving" @click="testAIConfig">
+          {{ aiTesting ? "测试中…" : "测试连接" }}
+        </AppButton>
+        <AppButton variant="secondary" :disabled="aiSaving" @click="closeAISettings">取消</AppButton>
+        <AppButton variant="primary" :disabled="aiSaving" @click="saveAIConfig">
+          {{ aiSaving ? "保存中…" : enableAfterSave ? "保存并启用" : "保存" }}
+        </AppButton>
+      </template>
+    </AppModal>
   </div>
 </template>
 
@@ -340,6 +494,15 @@ async function clearCache() {
   flex-shrink: 0;
   object-fit: cover;
 }
+.tool-card__ai-logo {
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  background: linear-gradient(145deg, #7167e8, #3f8eea);
+}
 .tool-card__name {
   margin: 0;
   font-size: 15px;
@@ -394,6 +557,15 @@ async function clearCache() {
   align-items: baseline;
   gap: 8px;
 }
+.tool-card__stat--model {
+  min-width: 0;
+}
+.tool-card__stat--model .tool-card__num {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .tool-card__num {
   font-size: 16px;
   font-weight: 700;
@@ -444,31 +616,6 @@ async function clearCache() {
   cursor: not-allowed;
 }
 
-.local-mapping-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.4);
-  display: none;
-  align-items: center;
-  justify-content: center;
-  z-index: var(--z-modal);
-}
-.local-mapping-overlay.is-open {
-  display: flex;
-}
-.local-mapping-modal {
-  width: 520px;
-  max-width: calc(100vw - 40px);
-  background: var(--surface);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-pop);
-  padding: 22px;
-}
-.local-mapping-modal__title {
-  margin: 0 0 12px;
-  font-size: 16px;
-  font-weight: 700;
-}
 .local-mapping-tip {
   font-size: 12px;
   color: var(--text-muted);
@@ -553,11 +700,31 @@ async function clearCache() {
   border-radius: 5px;
   padding: 1px 5px;
 }
-.local-mapping-modal__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 18px;
+.ai-settings-field {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--text-regular);
+  font-size: 13px;
+  font-weight: 600;
+}
+.ai-settings-field input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--text);
+}
+.ai-settings-field input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 14%, transparent);
+}
+.ai-settings-test {
+  margin-right: auto;
 }
 
 </style>

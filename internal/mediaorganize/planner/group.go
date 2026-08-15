@@ -300,7 +300,33 @@ func (p *Planner) groupEntries(entries []batchEntry) (map[groupKey][]batchEntry,
 		entry.specialLabel = specialLabel
 		groups[key] = append(groups[key], entry)
 	}
-	return groups, pending
+	return attachSingleTVWorkRoot(groups), pending
+}
+
+func attachSingleTVWorkRoot(groups map[groupKey][]batchEntry) map[groupKey][]batchEntry {
+	if len(groups) != 1 {
+		return groups
+	}
+	for key, items := range groups {
+		if key.mediaKind != "tv" || key.dirID != "" || len(items) == 0 || len(items[0].ancestors) == 0 {
+			return groups
+		}
+		root := items[0].ancestors[0]
+		if root.ID == "" || root.Name == "" || rules.IsGenericMediaDir(root.Name) ||
+			rules.IsSeasonDirName(root.Name) || rules.IsEpisodeRangeDirName(root.Name) || rules.IsSpecialContentDirName(root.Name) {
+			return groups
+		}
+		for _, item := range items[1:] {
+			if len(item.ancestors) == 0 || item.ancestors[0].ID != root.ID {
+				return groups
+			}
+		}
+		delete(groups, key)
+		key.dirID = root.ID
+		key.dirName = root.Name
+		groups[key] = items
+	}
+	return groups
 }
 
 func shouldPreferStructuredMovieDir(fileParsed, dirParsed rules.ParsedMedia, ancestors []rules.Ancestor, fileName string) bool {

@@ -19,6 +19,7 @@ import (
 	"litepan/internal/account"
 	"litepan/internal/accountprofile"
 	"litepan/internal/adminauth"
+	"litepan/internal/aiorganize"
 	"litepan/internal/apikey"
 	"litepan/internal/auth"
 	"litepan/internal/automation"
@@ -64,6 +65,7 @@ type Deps struct {
 	Strm              *strm.Service
 	CacheRetention    *cacheretention.Service
 	MediaOrganize     *mediaorganize.Service
+	AIOrganize        *aiorganize.Service
 	StrmScrape        *strmscrape.Service
 	Automation        *automation.Service
 	Fuse              *fusemount.Service
@@ -96,6 +98,7 @@ type Handler struct {
 	strm              *strm.Service
 	cacheRetention    *cacheretention.Service
 	mediaOrganize     *mediaorganize.Service
+	aiOrganize        *aiorganize.Service
 	strmScrape        *strmscrape.Service
 	automation        *automation.Service
 	fuse              *fusemount.Service
@@ -135,6 +138,7 @@ func NewRouter(d Deps) http.Handler {
 		strm:              d.Strm,
 		cacheRetention:    d.CacheRetention,
 		mediaOrganize:     d.MediaOrganize,
+		aiOrganize:        d.AIOrganize,
 		strmScrape:        d.StrmScrape,
 		automation:        d.Automation,
 		fuse:              d.Fuse,
@@ -277,6 +281,11 @@ func NewRouter(d Deps) http.Handler {
 					r.Put("/config", h.updateLocalUploadConfig)
 					r.Post("/browse", h.browseLocalUpload)
 					r.Post("/upload", h.createLocalUploadTasks)
+				})
+				r.Route("/tools/ai-organize", func(r chi.Router) {
+					r.Get("/config", h.getAIOrganizeConfig)
+					r.Put("/config", h.updateAIOrganizeConfig)
+					r.Post("/test", h.testAIOrganizeConfig)
 				})
 				r.Route("/media-organize", func(r chi.Router) {
 					r.Get("/tasks", h.listMediaOrganizeTasks)

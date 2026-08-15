@@ -27,6 +27,12 @@ type Progress struct {
 	PlannedWorks int    `json:"planned_works"`
 	MaxWorks     int    `json:"max_works"`
 	QuotaReached bool   `json:"quota_reached"`
+	AITotal      int    `json:"ai_total"`
+	AICompleted  int    `json:"ai_completed"`
+	AICached     int    `json:"ai_cached"`
+	AIFailed     int    `json:"ai_failed"`
+	AIChunk      int    `json:"ai_chunk"`
+	AIChunks     int    `json:"ai_chunks"`
 }
 
 type TaskConfig struct {

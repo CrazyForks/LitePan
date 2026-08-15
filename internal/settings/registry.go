@@ -68,6 +68,10 @@ const (
 	KeyMOAlignMediaTags        = "mo_align_media_tags"
 	KeyMOMaxWorksPerRun        = "mo_max_works_per_run"
 	KeyMOOverwriteExisting     = "mo_overwrite_existing"
+	KeyAIOrganizeEnabled       = "ai_organize_enabled"
+	KeyAIOrganizeBaseURL       = "ai_organize_base_url"
+	KeyAIOrganizeAPIKey        = "ai_organize_api_key"
+	KeyAIOrganizeModel         = "ai_organize_model"
 )
 
 // Type 决定后台表单控件与校验方式。
@@ -199,6 +203,31 @@ func defaultSpecs() []Spec {
 		boolSpec(KeyMOAlignMediaTags, "media_organize", "强迫症模式", "同后缀文件保持媒体信息标签一致。", "false"),
 		intSpec(KeyMOMaxWorksPerRun, "media_organize", "每次最多整理作品数", "单次执行最多处理的作品数，0 表示不限制。", "50", "", 0, 10000),
 		boolSpec(KeyMOOverwriteExisting, "media_organize", "同名冲突时覆盖", "目标位置已有同名文件时覆盖，默认跳过。", "false"),
+		{
+			Key:     KeyAIOrganizeEnabled,
+			Type:    TypeBool,
+			Default: "false",
+			Hidden:  true,
+		},
+		{
+			Key:     KeyAIOrganizeBaseURL,
+			Type:    TypeString,
+			Default: "https://api.deepseek.com",
+			Hidden:  true,
+		},
+		{
+			Key:       KeyAIOrganizeAPIKey,
+			Type:      TypeString,
+			Default:   "",
+			Sensitive: true,
+			Hidden:    true,
+		},
+		{
+			Key:     KeyAIOrganizeModel,
+			Type:    TypeString,
+			Default: "deepseek-chat",
+			Hidden:  true,
+		},
 		{
 			Key:         KeyOAuthServerURL,
 			Type:        TypeString,

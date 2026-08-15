@@ -11,6 +11,7 @@ import (
 
 	"litepan/internal/domain"
 	"litepan/internal/mediaorganize/moplan"
+	"litepan/internal/mediaorganize/recognition"
 	"litepan/internal/mediaorganize/rules"
 )
 
@@ -58,6 +59,13 @@ type Planner struct {
 	tmdbAvailable     bool
 	seasonFolderTpl   string
 	tvSeasonsCache    map[string][]map[string]any
+	recognition       recognition.Enhancer
+	deferred          []deferredGroup
+	applyingAI        bool
+}
+
+func (p *Planner) SetRecognitionEnhancer(enhancer recognition.Enhancer) {
+	p.recognition = enhancer
 }
 
 func New(
@@ -197,6 +205,9 @@ func (p *Planner) Build() (*moplan.Plan, error) {
 		return p.finalize(), nil
 	}
 	if err := p.scanAndPlan(p.parentID); err != nil {
+		return nil, err
+	}
+	if err := p.runRecognitionEnhancement(); err != nil {
 		return nil, err
 	}
 	p.tryWholeDirMoveOptimization()

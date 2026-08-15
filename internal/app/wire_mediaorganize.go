@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"litepan/internal/aiorganize"
 	"litepan/internal/domain"
 	"litepan/internal/file"
 	"litepan/internal/logx"
@@ -14,21 +15,22 @@ import (
 	"litepan/internal/settings"
 )
 
-func wireMediaOrganize(st *storeBundle, files *file.Service, logs *logx.Manager, dataDir string) *mediaorganize.Service {
+func wireMediaOrganize(st *storeBundle, files *file.Service, logs *logx.Manager, dataDir string, ai *aiorganize.Service) *mediaorganize.Service {
 	return mediaorganize.NewService(mediaorganize.ServiceOptions{
 		Repo:     st.store.MediaOrganizeTasks,
 		Files:    files,
 		Settings: st.settings,
 		DataDir:  dataDir,
 		Log:      logs.For(logx.ModuleFileOp),
-		Planner:  plannerAdapter{files: files, settings: st.settings},
+		Planner:  plannerAdapter{files: files, settings: st.settings, recognition: ai},
 		Executor: executorAdapter{files: files},
 	})
 }
 
 type plannerAdapter struct {
-	files    *file.Service
-	settings *settings.Service
+	files       *file.Service
+	settings    *settings.Service
+	recognition *aiorganize.Service
 }
 
 func (a plannerAdapter) Build(
@@ -65,6 +67,12 @@ func (a plannerAdapter) Build(
 				"planned_works": p.PlannedWorks,
 				"max_works":     p.MaxWorks,
 				"quota_reached": p.QuotaReached,
+				"ai_total":      p.AITotal,
+				"ai_completed":  p.AICompleted,
+				"ai_cached":     p.AICached,
+				"ai_failed":     p.AIFailed,
+				"ai_chunk":      p.AIChunk,
+				"ai_chunks":     p.AIChunks,
 			})
 		}
 	}
@@ -89,6 +97,7 @@ func (a plannerAdapter) Build(
 		progressFn,
 		stopFn,
 	)
+	p.SetRecognitionEnhancer(a.recognition)
 	return p.Build()
 }
 

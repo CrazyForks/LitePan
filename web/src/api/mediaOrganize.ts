@@ -72,6 +72,12 @@ export interface MediaOrganizeProgress {
   planned_works?: number;
   max_works?: number;
   quota_reached?: boolean;
+  ai_total?: number;
+  ai_completed?: number;
+  ai_cached?: number;
+  ai_failed?: number;
+  ai_chunk?: number;
+  ai_chunks?: number;
 }
 
 export interface MediaOrganizeLogEntry {

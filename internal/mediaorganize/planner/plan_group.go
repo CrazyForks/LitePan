@@ -9,6 +9,16 @@ import (
 )
 
 func (p *Planner) planGroup(key groupKey, items []batchEntry, alignDefaults map[bucketKey]map[string]any) error {
+	return p.planGroupWithMatch(key, items, alignDefaults, nil, true)
+}
+
+func (p *Planner) planGroupWithMatch(
+	key groupKey,
+	items []batchEntry,
+	alignDefaults map[bucketKey]map[string]any,
+	knownMatch *tmdbMatchResult,
+	allowRecognition bool,
+) error {
 	isTV := key.mediaKind == "tv"
 	groupUID := groupUIDOf(key)
 	title := strings.TrimSpace(key.title)
@@ -24,13 +34,19 @@ func (p *Planner) planGroup(key groupKey, items []batchEntry, alignDefaults map[
 	}
 
 	if title == "" {
+		if allowRecognition && p.deferForRecognition(key, items, alignDefaults, "无法识别标题，请手动匹配", "无法识别", nil) {
+			return nil
+		}
 		p.recordNeedsMatch(key, items, "无法识别标题，请手动匹配", nil)
 		for _, entry := range items {
 			p.skip(entry.item, "无法识别")
 		}
 		return nil
 	}
-	if p.isLowConfidenceGroup(key, items) {
+	if allowRecognition && p.isLowConfidenceGroup(key, items) {
+		if p.deferForRecognition(key, items, alignDefaults, "识别置信度过低，请手动匹配", "识别置信度过低", nil) {
+			return nil
+		}
 		p.recordNeedsMatch(key, items, "识别置信度过低，请手动匹配", nil)
 		for _, entry := range items {
 			p.skip(entry.item, "识别置信度过低")
@@ -39,11 +55,24 @@ func (p *Planner) planGroup(key groupKey, items []batchEntry, alignDefaults map[
 	}
 
 	var tmdbInfo tmdbMatchResult
-	if p.useTMDB && p.tmdbAvailable {
+	if knownMatch != nil {
+		tmdbInfo = *knownMatch
+	} else if p.useTMDB && p.tmdbAvailable {
 		var err error
 		tmdbInfo, err = p.matchTMDBForGroup(key, items)
 		if err != nil {
 			return err
+		}
+	}
+	if allowRecognition && p.useTMDB && p.tmdbAvailable && tmdbInfo.tmdbID == "" && p.findExistingTMDBIDInGroup(items) == "" {
+		matchReason := "TMDB 未匹配到影片，可手动选择"
+		skipReason := "未匹配 TMDB"
+		if tmdbInfo.ambiguous {
+			matchReason = "TMDB 存在多个版本，请手动选择"
+			skipReason = "TMDB 存在多个版本"
+		}
+		if p.deferForRecognition(key, items, alignDefaults, matchReason, skipReason, &tmdbInfo) {
+			return nil
 		}
 	}
 	if tmdbInfo.ambiguous {
@@ -533,6 +562,8 @@ func (p *Planner) buildReason(key groupKey, tmdbID, displayTitle string, season,
 	}
 	if tmdbID != "" {
 		bits = append(bits, "TMDB "+tmdbID)
+	} else if p.applyingAI {
+		bits = append(bits, "AI 识别·未经 TMDB 验证")
 	} else {
 		bits = append(bits, "仅文件名识别")
 	}
