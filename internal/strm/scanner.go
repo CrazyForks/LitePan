@@ -226,6 +226,7 @@ func finalizeScan(
 	if log == nil {
 		log = slog.Default()
 	}
+	taskRelDir := TaskRelDir(task.GroupDir, task.OutputFolder)
 	state := harvest.state
 	candidates := harvest.candidates
 	metadataItems := harvest.metadataItems
@@ -233,17 +234,17 @@ func finalizeScan(
 	subtreeHasMedia := harvest.subtreeHasMedia
 
 	selected, _ := selectConflictWinners(candidates, deps.Settings.ConflictPolicy)
-	metadataItems = alignMetadataItems(task.OutputFolder, selected, metadataItems, deps.Settings.ISOFilenameEnabled)
+	metadataItems = alignMetadataItems(taskRelDir, selected, metadataItems, deps.Settings.ISOFilenameEnabled)
 	seen := make(map[string]struct{})
 
 	for _, item := range selected {
 		result.ScannedCount++
-		relPath := LocalRelPath(task.OutputFolder, item.relDirs, item.fileName, deps.Settings.ISOFilenameEnabled)
+		relPath := LocalRelPath(taskRelDir, item.relDirs, item.fileName, deps.Settings.ISOFilenameEnabled)
 		if addOversizedPathFailure(failures, ScanFailureStrm, relPath, false) {
 			continue
 		}
 		seen[filepath.ToSlash(relPath)] = struct{}{}
-		if _, err := MigrateLegacyISOStrmFile(root, task.OutputFolder, item.relDirs, item.fileName, item.fileID, deps.Settings.ISOFilenameEnabled); err != nil {
+		if _, err := MigrateLegacyISOStrmFile(root, taskRelDir, item.relDirs, item.fileName, item.fileID, deps.Settings.ISOFilenameEnabled); err != nil {
 			failures.Add(ScanFailureStrm, filepath.ToSlash(relPath), err.Error())
 			continue
 		}
@@ -272,7 +273,7 @@ func finalizeScan(
 		cleanupSkipped = nil
 	}
 	if cleanupEnabled && len(seen) == 0 {
-		localCount, err := countScopedStrmFiles(root, task.OutputFolder, cleanupScopes, cleanupSkipped)
+		localCount, err := countScopedStrmFiles(root, taskRelDir, cleanupScopes, cleanupSkipped)
 		if err != nil {
 			return result, err
 		}
@@ -291,7 +292,7 @@ func finalizeScan(
 		syncResult, err := syncMetadata(ctx, metadataSyncRequest{
 			AccountID:    task.AccountID,
 			Root:         root,
-			OutputFolder: task.OutputFolder,
+			OutputFolder: taskRelDir,
 			Mode:         deps.Settings.MetadataSyncMode,
 			Extensions:   metaExts,
 			MaxSizeBytes: metaMaxBytes,
@@ -310,11 +311,11 @@ func finalizeScan(
 	}
 
 	if cleanupEnabled {
-		removed, err := cleanupScopedStaleFiles(root, task.OutputFolder, seen, cleanupScopes, cleanupSkipped, failures)
+		removed, err := cleanupScopedStaleFiles(root, taskRelDir, seen, cleanupScopes, cleanupSkipped, failures)
 		if err != nil {
 			return result, err
 		}
-		n, err := cleanupMissingRemoteChildDirs(root, task.OutputFolder, state.remoteChildren, failures, log)
+		n, err := cleanupMissingRemoteChildDirs(root, taskRelDir, state.remoteChildren, failures, log)
 		if err != nil {
 			return result, err
 		}
@@ -502,7 +503,7 @@ func walkBaseBranchEntry(
 				continue
 			}
 			childRel := append(append([]string{}, relDirs...), name)
-			if hasLocalStrmUnder(strmRoot, task.OutputFolder, childRel) {
+			if hasLocalStrmUnder(strmRoot, TaskRelDir(task.GroupDir, task.OutputFolder), childRel) {
 				skippedDirs[dirKey(childRel)] = struct{}{}
 				markSubtreeMedia(subtreeHasMedia, childRel)
 				continue
@@ -562,7 +563,7 @@ func walkBaseBranchEntry(
 				if metaMaxBytes > 0 && item.Size > metaMaxBytes {
 					continue
 				}
-				dirMeta = append(dirMeta, newMetadataItem(item.ID, name, task.OutputFolder, relDirs))
+				dirMeta = append(dirMeta, newMetadataItem(item.ID, name, TaskRelDir(task.GroupDir, task.OutputFolder), relDirs))
 			}
 		}
 	}
@@ -659,7 +660,7 @@ func walkScope(
 					if metaMaxBytes > 0 && item.Size > metaMaxBytes {
 						continue
 					}
-					dirMeta = append(dirMeta, newMetadataItem(item.ID, name, task.OutputFolder, n.relDirs))
+					dirMeta = append(dirMeta, newMetadataItem(item.ID, name, TaskRelDir(task.GroupDir, task.OutputFolder), n.relDirs))
 				}
 			}
 		}

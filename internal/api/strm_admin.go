@@ -21,6 +21,7 @@ type strmTaskDTO struct {
 	ScanMode            string `json:"scan_mode"`
 	Extensions          string `json:"extensions"`
 	OutputFolder        string `json:"output_folder"`
+	GroupDir            string `json:"group_dir"`
 	ApiInterval         int    `json:"api_interval"`
 	ExcludeDirKeywords  string `json:"exclude_dir_keywords"`
 	ExcludeFileKeywords string `json:"exclude_file_keywords"`
@@ -586,6 +587,7 @@ func fromStrmTaskDTO(in strmTaskDTO) *domain.StrmTask {
 		ScanMode:            in.ScanMode,
 		Extensions:          in.Extensions,
 		OutputFolder:        in.OutputFolder,
+		GroupDir:            in.GroupDir,
 		ApiInterval:         in.ApiInterval,
 		ExcludeDirKeywords:  in.ExcludeDirKeywords,
 		ExcludeFileKeywords: in.ExcludeFileKeywords,
@@ -613,6 +615,7 @@ func toStrmTaskDTO(task *domain.StrmTask, meta strm.TaskListMeta, automationMana
 		ScanMode:            task.ScanMode,
 		Extensions:          task.Extensions,
 		OutputFolder:        task.OutputFolder,
+		GroupDir:            task.GroupDir,
 		ApiInterval:         task.ApiInterval,
 		ExcludeDirKeywords:  task.ExcludeDirKeywords,
 		ExcludeFileKeywords: task.ExcludeFileKeywords,

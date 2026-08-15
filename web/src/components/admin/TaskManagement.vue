@@ -45,6 +45,7 @@ import AppSelect from "@/components/base/AppSelect.vue";
 import AppStateBlock from "@/components/base/AppStateBlock.vue";
 import TimeWheelPicker from "@/components/base/TimeWheelPicker.vue";
 import SettingsSegment from "@/components/admin/SettingsSegment.vue";
+import SettingsHelpTooltip from "@/components/admin/SettingsHelpTooltip.vue";
 import AdminTaskTabHeader from "@/components/admin/AdminTaskTabHeader.vue";
 import type { AdminTaskTabStat } from "@/components/admin/adminTaskTabHeader";
 // StrmSettingsPanel 保持常驻挂载：新建 STRM 任务的默认扫描间隔依赖它加载的设置。
@@ -246,6 +247,7 @@ const emptyForm = (): TaskForm => ({
   scan_mode: "incremental_update",
   extensions: "",
   output_folder: "",
+  group_dir: "",
   api_interval: 200,
   exclude_dir_keywords: "",
   exclude_file_keywords: "",
@@ -422,6 +424,7 @@ const { display: sourceDirDisplay, title: sourceDirTitle } = useAccountPathLabel
   accountId: computed(() => form.account_id),
   path: computed(() => form.path),
   accounts,
+  showLeafOnly: true,
 });
 
 function isTaskEnabled(task: StrmTask): boolean {
@@ -616,6 +619,7 @@ function openEdit(task: StrmTask) {
   form.scan_mode = task.scan_mode;
   form.extensions = task.extensions ?? "";
   form.output_folder = task.output_folder ?? "";
+  form.group_dir = task.group_dir ?? "";
   form.api_interval = task.api_interval ?? 200;
   form.exclude_dir_keywords = task.exclude_dir_keywords ?? "";
   form.exclude_file_keywords = task.exclude_file_keywords ?? "";
@@ -645,6 +649,7 @@ function buildTaskPayload(): StrmTaskInput {
     scan_mode: form.scan_mode,
     extensions: form.extensions,
     output_folder: form.output_folder.trim() || name,
+    group_dir: form.group_dir.trim(),
     api_interval: Number(form.api_interval) || 0,
     exclude_dir_keywords: form.exclude_dir_keywords.trim(),
     exclude_file_keywords: form.exclude_file_keywords.trim(),
@@ -687,7 +692,7 @@ async function runStrmRepairCheck() {
         old_account_id: oldID,
         parent_id: body.parent_id,
         recursive: body.recursive,
-        output_folder: body.output_folder,
+        output_folder: body.group_dir ? `${body.group_dir}/${body.output_folder}` : body.output_folder,
       }),
       sleep(STRM_REPAIR_MIN_LOADING_MS),
     ]);
@@ -771,7 +776,7 @@ async function submitTask() {
       account_id: body.account_id,
       parent_id: body.parent_id,
       recursive: body.recursive,
-      output_folder: body.output_folder,
+      output_folder: body.group_dir ? `${body.group_dir}/${body.output_folder}` : body.output_folder,
     });
     if (!pre.needs_prompt) {
       await finishCreateTask(body);
@@ -1238,13 +1243,26 @@ watch(activeTab, (tab) => {
           </FormField>
         </div>
 
-        <FormField label="选择账号及目录">
-          <AccountFolderField
-            :display="sourceDirDisplay"
-            :title="sourceDirTitle"
-            @browse="pickerOpen = true"
-          />
-        </FormField>
+        <div class="strm-form__row">
+          <FormField label="分组目录">
+            <template #label>
+              分组目录
+              <SettingsHelpTooltip title="分组目录说明">
+                <p>STRM 文件生成到哪个父文件夹下，用来把多个任务归进同一个媒体库目录。</p>
+                <p>留空 = 直接生成在 STRM 根目录；填「电影」= 生成到 /app/strm/电影/任务名/，支持多级「电影/港台」。</p>
+                <p>示例：两个任务都填「电影」，任务名「电影1」「电影2」，会得到 /app/strm/电影/电影1 和 /app/strm/电影/电影2，Emby 只需勾选「电影」文件夹。</p>
+              </SettingsHelpTooltip>
+            </template>
+            <AppInput v-model="form.group_dir" placeholder="留空则生成在根目录，如：电影" />
+          </FormField>
+          <FormField label="选择账号及目录">
+            <AccountFolderField
+              :display="sourceDirDisplay"
+              :title="sourceDirTitle"
+              @browse="pickerOpen = true"
+            />
+          </FormField>
+        </div>
 
         <div class="strm-form__row">
           <FormField label="API额外补偿间隔(毫秒)">

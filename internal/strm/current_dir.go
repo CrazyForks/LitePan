@@ -214,7 +214,7 @@ func (s *Service) prepareCurrentDirectoryWork(ctx context.Context, accountID int
 	if task == nil {
 		return nil, nil
 	}
-	outputFolder := task.OutputFolder
+	outputFolder := TaskRelDir(task.GroupDir, task.OutputFolder)
 	if outputFolder == "" {
 		outputFolder = task.Name
 	}

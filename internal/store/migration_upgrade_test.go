@@ -89,7 +89,10 @@ func TestMigrateV047ToBuiltinOfflineSchema(t *testing.T) {
 	if !applied[18] {
 		t.Error("未记录 0018 迁移")
 	}
-	for version := 19; version <= 20; version++ {
+	if !applied[19] {
+		t.Error("未记录 0019 迁移")
+	}
+	for version := 20; version <= 20; version++ {
 		if applied[version] {
 			t.Errorf("不应存在未发布中间迁移 %04d", version)
 		}

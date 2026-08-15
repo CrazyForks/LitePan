@@ -13,13 +13,13 @@ type strmTaskRepo struct{ db *DB }
 func (r *strmTaskRepo) Create(ctx context.Context, task *domain.StrmTask) (int64, error) {
 	res, err := r.db.write.ExecContext(ctx,
 		`INSERT INTO strm_tasks
-		  (name,account_id,parent_id,path,recursive,scan_interval,scan_mode,extensions,output_folder,
+		  (name,account_id,parent_id,path,recursive,scan_interval,scan_mode,extensions,output_folder,group_dir,
 		   api_interval,exclude_dir_keywords,exclude_file_keywords,sync_metadata,branch_check_enabled,
 		   time_window_enabled,time_start,time_end,schedule_mode,
 		   status,paused_reason,error_message,last_scan_status)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		task.Name, task.AccountID, task.ParentID, task.Path, boolToInt(task.Recursive), task.ScanInterval,
-		task.ScanMode, task.Extensions, task.OutputFolder,
+		task.ScanMode, task.Extensions, task.OutputFolder, task.GroupDir,
 		task.ApiInterval, task.ExcludeDirKeywords, task.ExcludeFileKeywords, boolToInt(task.SyncMetadata),
 		boolToInt(task.BranchCheckEnabled), boolToInt(task.TimeWindowEnabled), task.TimeStart, task.TimeEnd,
 		task.ScheduleMode, task.Status, task.PausedReason, task.ErrorMessage, task.LastScanStatus)
@@ -36,13 +36,13 @@ func (r *strmTaskRepo) Create(ctx context.Context, task *domain.StrmTask) (int64
 func (r *strmTaskRepo) Update(ctx context.Context, task *domain.StrmTask) error {
 	_, err := r.db.write.ExecContext(ctx,
 		`UPDATE strm_tasks
-		 SET name=?,account_id=?,parent_id=?,path=?,recursive=?,scan_interval=?,scan_mode=?,extensions=?,output_folder=?,
+		 SET name=?,account_id=?,parent_id=?,path=?,recursive=?,scan_interval=?,scan_mode=?,extensions=?,output_folder=?,group_dir=?,
 		     api_interval=?,exclude_dir_keywords=?,exclude_file_keywords=?,sync_metadata=?,branch_check_enabled=?,
 		     time_window_enabled=?,time_start=?,time_end=?,schedule_mode=?,
 		     status=?,paused_reason=?,error_message=?,updated_at=CURRENT_TIMESTAMP
 		 WHERE id=?`,
 		task.Name, task.AccountID, task.ParentID, task.Path, boolToInt(task.Recursive), task.ScanInterval,
-		task.ScanMode, task.Extensions, task.OutputFolder,
+		task.ScanMode, task.Extensions, task.OutputFolder, task.GroupDir,
 		task.ApiInterval, task.ExcludeDirKeywords, task.ExcludeFileKeywords, boolToInt(task.SyncMetadata),
 		boolToInt(task.BranchCheckEnabled), boolToInt(task.TimeWindowEnabled), task.TimeStart, task.TimeEnd,
 		task.ScheduleMode, task.Status, task.PausedReason, task.ErrorMessage, task.ID)
@@ -106,7 +106,7 @@ func (r *strmTaskRepo) UpdateScan(ctx context.Context, id int64, patch domain.St
 	return wrapDB(err)
 }
 
-const selectStrmTaskCols = `SELECT id,name,account_id,parent_id,path,recursive,scan_interval,scan_mode,extensions,output_folder,
+const selectStrmTaskCols = `SELECT id,name,account_id,parent_id,path,recursive,scan_interval,scan_mode,extensions,output_folder,group_dir,
        api_interval,exclude_dir_keywords,exclude_file_keywords,sync_metadata,branch_check_enabled,
        time_window_enabled,time_start,time_end,schedule_mode,
        status,paused_reason,error_message,scanned_count,generated_count,updated_count,removed_count,last_scan,last_scan_status,created_at,updated_at
@@ -114,18 +114,18 @@ FROM strm_tasks`
 
 func scanStrmTask(s rowScanner) (*domain.StrmTask, error) {
 	var (
-		task         domain.StrmTask
-		recursive    int
-		syncMeta     int
-		branchCheck  int
-		timeWindow   int
-		lastScan     sql.NullString
-		createdAt    sql.NullString
-		updatedAt    sql.NullString
+		task        domain.StrmTask
+		recursive   int
+		syncMeta    int
+		branchCheck int
+		timeWindow  int
+		lastScan    sql.NullString
+		createdAt   sql.NullString
+		updatedAt   sql.NullString
 	)
 	err := s.Scan(
 		&task.ID, &task.Name, &task.AccountID, &task.ParentID, &task.Path, &recursive,
-		&task.ScanInterval, &task.ScanMode, &task.Extensions, &task.OutputFolder,
+		&task.ScanInterval, &task.ScanMode, &task.Extensions, &task.OutputFolder, &task.GroupDir,
 		&task.ApiInterval, &task.ExcludeDirKeywords, &task.ExcludeFileKeywords, &syncMeta, &branchCheck,
 		&timeWindow, &task.TimeStart, &task.TimeEnd, &task.ScheduleMode,
 		&task.Status, &task.PausedReason, &task.ErrorMessage,

@@ -5,7 +5,7 @@ defineProps<{ label: string; required?: boolean }>();
 <template>
   <div class="form-field">
     <label class="form-field__label">
-      {{ label }}
+      <slot name="label">{{ label }}</slot>
       <span v-if="required" class="form-field__req">*</span>
     </label>
     <slot />

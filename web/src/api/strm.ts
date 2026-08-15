@@ -11,6 +11,7 @@ export interface StrmTask {
   scan_mode: string;
   extensions: string;
   output_folder: string;
+  group_dir: string;
   api_interval: number;
   exclude_dir_keywords: string;
   exclude_file_keywords: string;
@@ -89,6 +90,7 @@ export type StrmTaskInput = Pick<
   | "scan_mode"
   | "extensions"
   | "output_folder"
+  | "group_dir"
   | "api_interval"
   | "exclude_dir_keywords"
   | "exclude_file_keywords"

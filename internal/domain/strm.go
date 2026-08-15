@@ -24,11 +24,11 @@ const (
 )
 
 const (
-	StrmBranchTypeBase       = "base"
-	StrmBranchTypeTemporary  = "temporary"
-	StrmConflictSizeDesc     = "size_desc"
-	StrmConflictSizeAsc      = "size_asc"
-	StrmConflictNameAsc      = "name_asc"
+	StrmBranchTypeBase      = "base"
+	StrmBranchTypeTemporary = "temporary"
+	StrmConflictSizeDesc    = "size_desc"
+	StrmConflictSizeAsc     = "size_asc"
+	StrmConflictNameAsc     = "name_asc"
 )
 
 const StrmRunModeAuto = "auto"
@@ -47,6 +47,7 @@ type StrmTask struct {
 	ScanMode     string
 	Extensions   string
 	OutputFolder string
+	GroupDir     string
 
 	ApiInterval         int
 	ExcludeDirKeywords  string

@@ -98,7 +98,7 @@ func scanEnhancedTask(
 				if metaMaxBytes > 0 && e.Size > metaMaxBytes {
 					continue
 				}
-				metadataItems = append(metadataItems, newMetadataItem(e.FileID, e.Name, task.OutputFolder, relDirs))
+				metadataItems = append(metadataItems, newMetadataItem(e.FileID, e.Name, TaskRelDir(task.GroupDir, task.OutputFolder), relDirs))
 			}
 		}
 	}

@@ -38,9 +38,39 @@ func SafeName(name string) string {
 	return name
 }
 
+// SafeDirSegments 把相对目录字符串拆成安全目录段：
+// 容错前后斜杠与反斜杠、压缩空段，并跳过 "." 与 ".."。
+func SafeDirSegments(raw string) []string {
+	raw = strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/")
+	raw = strings.Trim(raw, "/")
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, seg := range strings.Split(raw, "/") {
+		seg = strings.TrimSpace(seg)
+		if seg == "" || seg == "." || seg == ".." {
+			continue
+		}
+		out = append(out, SafeName(seg))
+	}
+	return out
+}
+
+// NormalizeGroupDir 归一化分组目录，返回存库用的相对路径（如 "电影/港台"，空为根目录）。
+func NormalizeGroupDir(raw string) string {
+	return strings.Join(SafeDirSegments(raw), "/")
+}
+
+// TaskRelDir 返回任务在 STRM 根下的相对目录（分组目录 + 输出文件夹）。
+func TaskRelDir(groupDir, outputFolder string) string {
+	segs := SafeDirSegments(groupDir)
+	segs = append(segs, SafeName(outputFolder))
+	return strings.Join(segs, "/")
+}
+
 func LocalRelPath(outputFolder string, relDirs []string, fileName string, isoFilenameEnabled bool) string {
-	parts := make([]string, 0, len(relDirs)+2)
-	parts = append(parts, SafeName(outputFolder))
+	parts := SafeDirSegments(outputFolder)
 	for _, dir := range relDirs {
 		parts = append(parts, SafeName(dir))
 	}
@@ -110,15 +140,15 @@ func strmContentReferencesFile(content, fileID string) bool {
 }
 
 func TaskOutputDir(strmDir, outputFolder string) string {
-	outputFolder = strings.TrimSpace(outputFolder)
-	if outputFolder == "" {
+	segs := SafeDirSegments(outputFolder)
+	if len(segs) == 0 {
 		return ""
 	}
 	root := strings.TrimSpace(strmDir)
 	if root == "" {
 		root = "strm"
 	}
-	return filepath.Join(root, SafeName(outputFolder))
+	return filepath.Join(append([]string{root}, segs...)...)
 }
 
 func DeleteTaskOutput(strmDir, outputFolder string) error {
