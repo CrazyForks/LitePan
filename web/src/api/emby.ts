@@ -1,7 +1,8 @@
 import { http } from "./client";
 
 export interface EmbyConfig {
-  enabled: boolean;
+  id: string;
+  name: string;
   emby_url: string;
   api_key: string;
   proxy_port: string;
@@ -11,10 +12,16 @@ export interface EmbyConfig {
 }
 
 export interface EmbyConfigUpdate {
-  enabled: boolean;
+  id?: string;
+  name: string;
   emby_url: string;
   api_key: string;
   proxy_port: string;
+}
+
+export interface EmbyConfigState {
+  enabled: boolean;
+  items: EmbyConfig[];
 }
 
 export interface EmbyLibrary {
@@ -24,24 +31,26 @@ export interface EmbyLibrary {
 }
 
 export interface EmbyRefreshRequest {
+  config_id?: string;
   mode?: "global" | "library";
   library_id?: string;
 }
 
-export function fetchEmbyConfig() {
-  return http.get<EmbyConfig>("/admin/emby/config");
+export function fetchEmbyConfigs() {
+  return http.get<EmbyConfigState>("/admin/emby/configs");
 }
 
-export function saveEmbyConfig(values: EmbyConfigUpdate) {
-  return http.put<EmbyConfig>("/admin/emby/config", values);
+export function saveEmbyConfigs(enabled: boolean, items: EmbyConfigUpdate[]) {
+  return http.put<EmbyConfigState>("/admin/emby/configs", { enabled, items });
 }
 
 export function testEmbyConfig(values: EmbyConfigUpdate) {
   return http.post<{ ok: boolean }>("/admin/emby/test", values);
 }
 
-export function fetchEmbyLibraries() {
-  return http.get<EmbyLibrary[]>("/admin/emby/libraries");
+export function fetchEmbyLibraries(configId = "") {
+  const query = configId ? `?config_id=${encodeURIComponent(configId)}` : "";
+  return http.get<EmbyLibrary[]>(`/admin/emby/libraries${query}`);
 }
 
 export function refreshEmbyLibrary(body: EmbyRefreshRequest = {}) {

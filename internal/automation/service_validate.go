@@ -84,6 +84,11 @@ func (s *Service) ValidateRule(ctx context.Context, actions []RuleAction) (Valid
 			}
 			if mode == "library" && strings.TrimSpace(anyString(action.Params["library_id"])) == "" {
 				issues = append(issues, ValidationIssue{Level: "error", Message: "请选择 Emby 媒体库", ActionIndex: index, ActionType: action.Type})
+				continue
+			}
+			embyID := strings.TrimSpace(anyString(action.Params["emby_id"]))
+			if s.emby == nil || !s.hasEmbyConfig(embyID) {
+				issues = append(issues, ValidationIssue{Level: "error", Message: "所选 Emby 配置不存在", ActionIndex: index, ActionType: action.Type})
 			}
 		}
 	}
@@ -107,6 +112,19 @@ func (s *Service) ValidateRule(ctx context.Context, actions []RuleAction) (Valid
 		}
 	}
 	return ValidationResult{OK: len(issues) == 0, Issues: issues}, nil
+}
+
+func (s *Service) hasEmbyConfig(id string) bool {
+	configs := s.emby.Snapshots(nil)
+	if id == "" {
+		return len(configs) > 0
+	}
+	for _, cfg := range configs {
+		if cfg.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) validateOrganizeToStrm(ctx context.Context, organizeTaskID string, strmTaskID int64) (bool, string) {

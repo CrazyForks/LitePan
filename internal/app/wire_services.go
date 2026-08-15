@@ -143,11 +143,12 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		Log:      logs.For(logx.ModuleSystem),
 	})
 	fnosProxySvc := fnosproxy.New(fnosproxy.Options{
-		Settings: st.settings,
-		Playback: playbackSvc,
-		Strm:     strmSvc,
-		StrmDir:  cfg.StrmDir,
-		Log:      logs.For(logx.ModuleSystem),
+		Settings:       st.settings,
+		Playback:       playbackSvc,
+		Strm:           strmSvc,
+		StrmDir:        cfg.StrmDir,
+		Log:            logs.For(logx.ModuleSystem),
+		PortUsedByEmby: embyProxySvc.UsesPort,
 	})
 	automationSvc := automation.New(automation.Options{
 		Rules:      st.store.AutomationRules,

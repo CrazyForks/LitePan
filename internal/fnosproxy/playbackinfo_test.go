@@ -14,6 +14,16 @@ import (
 	"litepan/internal/strm"
 )
 
+func TestUpdateRequestAcceptsNumericPort(t *testing.T) {
+	var in UpdateRequest
+	if err := json.Unmarshal([]byte(`{"proxy_port":18997}`), &in); err != nil {
+		t.Fatal(err)
+	}
+	if in.Port.String() != "18997" {
+		t.Fatalf("端口=%q", in.Port.String())
+	}
+}
+
 // 部分客户端要求媒体流必填字段均为非 null 字符串。
 func TestNormalizeEmbyMediaStreams(t *testing.T) {
 	tests := []struct {

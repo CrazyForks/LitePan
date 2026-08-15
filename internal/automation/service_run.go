@@ -470,6 +470,7 @@ func (s *Service) runEmbyRefresh(ctx context.Context, params map[string]any) map
 		return map[string]any{"status": "failed", "success": false, "message": "Emby 服务未就绪"}
 	}
 	req := embyproxy.RefreshRequest{
+		ConfigID:  strings.TrimSpace(anyString(params["emby_id"])),
 		Mode:      strings.TrimSpace(anyString(params["mode"])),
 		LibraryID: strings.TrimSpace(anyString(params["library_id"])),
 	}
@@ -477,7 +478,6 @@ func (s *Service) runEmbyRefresh(ctx context.Context, params map[string]any) map
 	if err != nil {
 		return map[string]any{"status": "failed", "success": false, "message": err.Error()}
 	}
-	cfg := s.emby.Snapshot(nil)
 	message := "已通知 Emby 刷库"
 	if result.Mode == "library" && result.LibraryName != "" {
 		message = "已通知 Emby 扫描媒体库：" + result.LibraryName
@@ -487,7 +487,8 @@ func (s *Service) runEmbyRefresh(ctx context.Context, params map[string]any) map
 		"success": true,
 		"message": message,
 		"data": map[string]any{
-			"emby_url":     cfg.EmbyURL,
+			"emby_id":      result.ConfigID,
+			"emby_name":    result.ConfigName,
 			"mode":         result.Mode,
 			"task_id":      result.TaskID,
 			"library_id":   result.LibraryID,

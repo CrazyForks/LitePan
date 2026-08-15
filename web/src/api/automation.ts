@@ -71,10 +71,11 @@ export interface AutomationOptionItem {
 export interface AutomationOptions {
   strm_tasks: AutomationOptionItem[];
   organize_tasks: AutomationOptionItem[];
-  emby: {
-    enabled: boolean;
+  emby_configs: Array<{
+    id: string;
+    name: string;
     emby_url: string;
-  };
+  }>;
 }
 
 export interface AutomationTriggerConfig {

@@ -26,6 +26,7 @@ import (
 	"litepan/internal/proxybase"
 	"litepan/internal/settings"
 	"litepan/internal/strm"
+	"litepan/pkg/jsonvalue"
 	"litepan/pkg/strutil"
 )
 
@@ -53,12 +54,13 @@ type cachedSource struct {
 }
 
 type Service struct {
-	settings *settings.Service
-	playback *playback.Service
-	strm     *strm.Service
-	strmDir  string
-	log      *slog.Logger
-	client   *http.Client
+	settings       *settings.Service
+	playback       *playback.Service
+	strm           *strm.Service
+	strmDir        string
+	log            *slog.Logger
+	client         *http.Client
+	portUsedByEmby func(string) bool
 
 	servePlayback func(w http.ResponseWriter, r *http.Request, req playback.Request, intent playback.Intent) error
 
@@ -76,11 +78,12 @@ type Service struct {
 }
 
 type Options struct {
-	Settings *settings.Service
-	Playback *playback.Service
-	Strm     *strm.Service
-	StrmDir  string
-	Log      *slog.Logger
+	Settings       *settings.Service
+	Playback       *playback.Service
+	Strm           *strm.Service
+	StrmDir        string
+	Log            *slog.Logger
+	PortUsedByEmby func(string) bool
 }
 
 type Config struct {
@@ -95,10 +98,10 @@ type Config struct {
 }
 
 type UpdateRequest struct {
-	Enabled  bool   `json:"enabled"`
-	FnosURL  string `json:"fnos_url"`
-	Port     string `json:"proxy_port"`
-	PathMaps string `json:"strm_path_maps"`
+	Enabled  bool                     `json:"enabled"`
+	FnosURL  string                   `json:"fnos_url"`
+	Port     jsonvalue.FlexibleString `json:"proxy_port"`
+	PathMaps string                   `json:"strm_path_maps"`
 }
 
 func New(opts Options) *Service {
@@ -115,12 +118,13 @@ func New(opts Options) *Service {
 		strmDir = "/app/strm"
 	}
 	return &Service{
-		settings: opts.Settings,
-		playback: opts.Playback,
-		strm:     opts.Strm,
-		strmDir:  strmDir,
-		log:      log,
-		client:   client,
+		settings:       opts.Settings,
+		playback:       opts.Playback,
+		strm:           opts.Strm,
+		strmDir:        strmDir,
+		log:            log,
+		client:         client,
+		portUsedByEmby: opts.PortUsedByEmby,
 		servePlayback: func(w http.ResponseWriter, r *http.Request, req playback.Request, intent playback.Intent) error {
 			if opts.Playback == nil {
 				return domain.Errf(domain.CodeNotImplement)
@@ -154,7 +158,7 @@ func (s *Service) Update(ctx context.Context, in UpdateRequest) (Config, error) 
 	if err != nil {
 		return Config{}, err
 	}
-	port, err := proxybase.NormalizeOptionalPort(in.Port)
+	port, err := proxybase.NormalizeOptionalPort(in.Port.String())
 	if err != nil {
 		return Config{}, err
 	}
@@ -185,11 +189,7 @@ func (s *Service) checkPortConflict(port string) error {
 	if s.settings == nil || port == "" {
 		return nil
 	}
-	if !s.settings.Bool(settings.KeyEmbyEnabled) {
-		return nil
-	}
-	embyPort := strings.TrimSpace(s.settings.String(settings.KeyEmbyProxyPort))
-	if embyPort != "" && embyPort == port {
+	if s.portUsedByEmby != nil && s.portUsedByEmby(port) {
 		return domain.Errorf(domain.CodeValidation, "反代端口与 Emby 反代端口冲突")
 	}
 	return nil
@@ -249,7 +249,7 @@ func ConfigFromUpdate(in UpdateRequest) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	port, err := proxybase.NormalizeOptionalPort(in.Port)
+	port, err := proxybase.NormalizeOptionalPort(in.Port.String())
 	if err != nil {
 		return Config{}, err
 	}

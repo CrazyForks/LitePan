@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { getApiErrorMessage } from "@/api/client";
 import {
   aiOrganizeApi,
@@ -14,9 +14,31 @@ import { toast } from "@/composables/useToast";
 import { useSettingsLoad } from "@/composables/useSettingsLoad";
 import AppButton from "@/components/base/AppButton.vue";
 import AppModal from "@/components/base/AppModal.vue";
+import ProxyToolsPanel from "@/components/admin/ProxyToolsPanel.vue";
 import "@/styles/admin-shared.css";
 
+const props = withDefaults(defineProps<{ searchOpen?: boolean }>(), { searchOpen: false });
+const emit = defineEmits<{ "update:searchOpen": [boolean] }>();
+
 const { runLoad } = useSettingsLoad();
+
+const searchQuery = ref("");
+const cardTitles = ["Emby 反代", "飞牛影视反代", "115 网盘 STRM 增强方案", "从服务器上传", "AI 辅助增强工具"];
+
+function matches(title: string) {
+  const q = searchQuery.value.trim().toLowerCase();
+  return !q || title.toLowerCase().includes(q);
+}
+
+const hasMatch = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase();
+  return !q || cardTitles.some((t) => t.toLowerCase().includes(q));
+});
+
+function closeSearch() {
+  searchQuery.value = "";
+  emit("update:searchOpen", false);
+}
 
 const status = ref<CloudTool115Status>({ enabled: false, cache_count: 0, available: false });
 const saving = ref(false);
@@ -234,8 +256,16 @@ async function clearCache() {
 
 <template>
   <div class="cloud-tools">
+    <div v-if="searchOpen" class="tool-search">
+      <div class="tool-search__mask" @click="closeSearch" />
+      <div class="tool-search__box">
+        <input v-model="searchQuery" autofocus placeholder="搜索工具，如：飞牛、Emby、反代" @keydown.esc="closeSearch" />
+        <button type="button" @click="closeSearch">×</button>
+      </div>
+    </div>
     <div class="cloud-tools__grid">
-      <article class="tool-card" :class="status.enabled ? 'is-enabled' : 'is-disabled'">
+      <ProxyToolsPanel :search-query="searchQuery" />
+      <article v-show="matches('115 网盘 STRM 增强方案')" class="tool-card" :class="status.enabled ? 'is-enabled' : 'is-disabled'">
         <span class="tool-card__bar" :class="status.enabled ? 'is-enabled' : 'is-disabled'" />
 
         <div class="tool-card__head">
@@ -290,7 +320,7 @@ async function clearCache() {
       </article>
 
       <!-- 本机上传卡片 -->
-      <article class="tool-card" :class="localEnabled ? 'is-enabled' : 'is-disabled'">
+      <article v-show="matches('从服务器上传')" class="tool-card" :class="localEnabled ? 'is-enabled' : 'is-disabled'">
         <span class="tool-card__bar" :class="localEnabled ? 'is-enabled' : 'is-disabled'" />
         <div class="tool-card__head">
           <img class="tool-card__logo" src="/logos/local.png" alt="本机" />
@@ -339,7 +369,7 @@ async function clearCache() {
         </div>
       </article>
 
-      <article class="tool-card" :class="aiConfig.enabled ? 'is-enabled' : 'is-disabled'">
+      <article v-show="matches('AI 辅助增强工具')" class="tool-card" :class="aiConfig.enabled ? 'is-enabled' : 'is-disabled'">
         <span class="tool-card__bar" :class="aiConfig.enabled ? 'is-enabled' : 'is-disabled'" />
         <div class="tool-card__head">
           <div class="tool-card__logo tool-card__ai-logo" aria-hidden="true">AI</div>
@@ -387,6 +417,7 @@ async function clearCache() {
         </div>
       </article>
     </div>
+    <div v-if="searchOpen && !hasMatch" class="tool-search__empty">没有找到相关工具</div>
 
     <AppModal :open="mappingOpen" title="本机上传 · 目录映射设置" size="md" @close="closeMappings">
       <p class="local-mapping-tip">
@@ -443,6 +474,56 @@ async function clearCache() {
 </template>
 
 <style scoped>
+.tool-search__mask {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: rgba(15, 23, 42, 0.35);
+}
+.tool-search__box {
+  position: fixed;
+  top: 140px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: calc(var(--z-modal) + 1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(520px, calc(100vw - 40px));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  padding: 12px 16px;
+}
+.tool-search__box input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 15px;
+  color: var(--text);
+}
+.tool-search__box button {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+.tool-search__box button:hover {
+  background: var(--border-soft);
+  color: var(--text);
+}
+.tool-search__empty {
+  margin-top: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+  padding: 40px 0;
+}
+
 .cloud-tools__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));

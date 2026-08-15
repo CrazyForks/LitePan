@@ -54,12 +54,6 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	if h.onSettingsUpdated != nil {
 		h.onSettingsUpdated(in)
 	}
-	if embySettingsTouched(in) && h.embyProxy != nil {
-		if err := h.embyProxy.Sync(r.Context()); err != nil {
-			writeErr(w, err)
-			return
-		}
-	}
 	if fnosSettingsTouched(in) && h.fnosProxy != nil {
 		if err := h.fnosProxy.Sync(r.Context()); err != nil {
 			writeErr(w, err)

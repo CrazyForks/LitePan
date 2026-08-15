@@ -344,17 +344,20 @@ func (s *Service) ListOptions(ctx context.Context) (map[string]any, error) {
 			"account_id": task.AccountID,
 		})
 	}
-	embyCfg := embyproxy.Config{}
+	embyConfigs := make([]map[string]any, 0)
 	if s.emby != nil {
-		embyCfg = s.emby.Snapshot(nil)
+		for _, cfg := range s.emby.Snapshots(nil) {
+			embyConfigs = append(embyConfigs, map[string]any{
+				"id":       cfg.ID,
+				"name":     cfg.Name,
+				"emby_url": cfg.EmbyURL,
+			})
+		}
 	}
 	return map[string]any{
 		"strm_tasks":     strmData,
 		"organize_tasks": organizeData,
-		"emby": map[string]any{
-			"enabled":  embyCfg.Enabled,
-			"emby_url": embyCfg.EmbyURL,
-		},
+		"emby_configs":   embyConfigs,
 	}, nil
 }
 

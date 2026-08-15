@@ -503,7 +503,12 @@
           <template v-else-if="configAction.type === 'emby_refresh'">
             <div class="cfg-row">
               <label>Emby配置</label>
-              <div class="ctrl readonly-ctrl">{{ options.emby?.emby_url || '未配置 Emby 地址' }}</div>
+              <AppSelect
+                v-model="configAction.params.emby_id"
+                :options="embyConfigOptions"
+                placeholder="请选择 Emby 配置"
+                @update:model-value="embyId => onEmbyConfigChange(configAction, embyId)"
+              />
             </div>
             <div class="cfg-row">
               <label>扫描方式</label>
@@ -514,12 +519,12 @@
               <AppSelect
                 v-model="configAction.params.library_id"
                 :options="embyLibraryOptions"
-                :disabled="embyLibrariesLoading || !options.emby?.emby_url"
+                :disabled="embyLibrariesLoading || !configAction.params.emby_id"
                 :placeholder="embyLibrariesLoading ? '正在加载媒体库...' : '请选择媒体库'"
                 @update:model-value="libraryId => onEmbyLibraryChange(configAction, libraryId)"
               />
               <div class="field-tip">媒体库列表从 Emby 实时拉取，仅在配置该动作时按需加载。</div>
-              <button class="inline-link-btn" type="button" :disabled="embyLibrariesLoading || !options.emby?.emby_url" @click="ensureEmbyLibrariesLoaded(true)">
+              <button class="inline-link-btn" type="button" :disabled="embyLibrariesLoading || !configAction.params.emby_id" @click="ensureEmbyLibrariesLoaded(true)">
                 {{ embyLibrariesLoading ? '加载中...' : '刷新媒体库列表' }}
               </button>
             </div>
@@ -601,11 +606,12 @@ const expandedRunIds = ref(new Set())
 const runsDrawerVisible = ref(false)
 const runsLoading = ref(false)
 const accounts = ref([])
-const emptyOptions = () => ({ organize_tasks: [], strm_tasks: [], emby: { enabled: false, emby_url: '' } })
+const emptyOptions = () => ({ organize_tasks: [], strm_tasks: [], emby_configs: [] })
 const options = ref(emptyOptions())
 const embyLibraries = ref([])
 const embyLibrariesLoading = ref(false)
 const embyLibrariesLoaded = ref(false)
+const embyLibrariesConfigID = ref('')
 const validationIssues = ref([])
 const validationOk = ref(false)
 const timePickerVisible = ref(false)
@@ -715,11 +721,12 @@ const ACTION_DEFINITIONS = {
     icon: 'fas fa-server',
     desc: '通知 Emby 扫描全部媒体库，或只扫描指定媒体库',
     normalize: params => ({
+      emby_id: String(params.emby_id || defaultEmbyConfig()?.id || ''),
       mode: params.mode === 'library' ? 'library' : 'global',
       library_id: String(params.library_id || ''),
       library_name: String(params.library_name || '')
     }),
-    canApply: action => Boolean(options.value.emby?.emby_url) && (
+    canApply: action => Boolean(findEmbyConfig(action?.params?.emby_id)?.emby_url) && (
       action?.params?.mode !== 'library' || Boolean(String(action?.params?.library_id || '').trim())
     ),
     nodeTitle: action => `Emby ${embyRefreshModeLabel(action)}「${embyRefreshTargetLabel(action)}」`,
@@ -770,6 +777,11 @@ const embyRefreshModeOptions = [
   { value: 'global', label: '全局媒体库扫描' },
   { value: 'library', label: '指定媒体库扫描' }
 ]
+
+const embyConfigOptions = computed(() => (options.value.emby_configs || []).map(item => ({
+  value: item.id,
+  label: item.name
+})))
 
 const embyLibraryOptions = computed(() => embyLibraries.value.map(item => ({
   value: item.id,
@@ -995,6 +1007,7 @@ const resetForm = () => {
   embyLibraries.value = []
   embyLibrariesLoading.value = false
   embyLibrariesLoaded.value = false
+  embyLibrariesConfigID.value = ''
   validationIssues.value = []
   validationOk.value = false
 }
@@ -1089,6 +1102,7 @@ const openConfig = (mode, actionIndex = -1) => {
   if (mode === 'action') {
     const targetAction = pendingConfigAction.value || form.actions[actionIndex]
     if (targetAction?.type === 'emby_refresh') {
+      normalizeEmbyRefreshAction(targetAction)
       void ensureEmbyLibrariesLoaded()
     }
   }
@@ -1375,8 +1389,17 @@ const findEmbyLibraryName = (libraryId) => (
   embyLibraries.value.find(item => String(item.id) === String(libraryId))?.name || ''
 )
 
+const defaultEmbyConfig = () => (
+  (options.value.emby_configs || [])[0] || null
+)
+
+const findEmbyConfig = (embyId) => (
+  (options.value.emby_configs || []).find(item => String(item.id) === String(embyId)) || null
+)
+
 const normalizeEmbyRefreshAction = (action) => {
   if (!action || action.type !== 'emby_refresh') return
+  if (!findEmbyConfig(action.params.emby_id)) action.params.emby_id = defaultEmbyConfig()?.id || ''
   action.params.mode = action.params.mode === 'library' ? 'library' : 'global'
   if (action.params.mode !== 'library') {
     action.params.library_id = ''
@@ -1388,13 +1411,16 @@ const normalizeEmbyRefreshAction = (action) => {
 }
 
 const ensureEmbyLibrariesLoaded = async (force = false) => {
-  if (!options.value.emby?.emby_url) return
+  const action = configAction.value
+  const embyId = String(action?.params?.emby_id || '').trim()
+  if (!findEmbyConfig(embyId)?.emby_url) return
   if (embyLibrariesLoading.value) return
-  if (embyLibrariesLoaded.value && !force) return
+  if (embyLibrariesLoaded.value && embyLibrariesConfigID.value === embyId && !force) return
   embyLibrariesLoading.value = true
   try {
-    embyLibraries.value = await fetchEmbyLibraries()
+    embyLibraries.value = await fetchEmbyLibraries(embyId)
     embyLibrariesLoaded.value = true
+    embyLibrariesConfigID.value = embyId
   } catch (error) {
     if (force || !embyLibrariesLoaded.value) {
       toast.error('加载 Emby 媒体库失败: ' + getApiErrorMessage(error, '请检查 Emby 配置'))
@@ -1402,6 +1428,17 @@ const ensureEmbyLibrariesLoaded = async (force = false) => {
   } finally {
     embyLibrariesLoading.value = false
   }
+}
+
+const onEmbyConfigChange = (action, embyId) => {
+  if (!action || action.type !== 'emby_refresh') return
+  action.params.emby_id = String(embyId || '')
+  action.params.library_id = ''
+  action.params.library_name = ''
+  embyLibraries.value = []
+  embyLibrariesLoaded.value = false
+  embyLibrariesConfigID.value = ''
+  if (action.params.mode === 'library') void ensureEmbyLibrariesLoaded()
 }
 
 const onEmbyRefreshModeChange = (action, mode) => {
@@ -1583,10 +1620,9 @@ const deleteRule = async (rule) => {
   }
 }
 
-const embyDisplayLabel = () => {
-  const url = String(options.value.emby?.emby_url || '').trim()
-  if (url) return url
-  return options.value.emby?.enabled ? '已启用但未填写地址' : '未配置 Emby 地址'
+const embyDisplayLabel = (action) => {
+  const config = findEmbyConfig(action?.params?.emby_id) || defaultEmbyConfig()
+  return config?.name || '未选择 Emby'
 }
 
 const embyRefreshModeLabel = (action) => (
@@ -1594,15 +1630,17 @@ const embyRefreshModeLabel = (action) => (
 )
 
 const embyRefreshTargetLabel = (action) => {
+  const embyName = embyDisplayLabel(action)
   if (action?.params?.mode === 'library') {
-    return findEmbyLibraryName(action?.params?.library_id) || String(action?.params?.library_name || '').trim() || '未选择媒体库'
+    const libraryName = findEmbyLibraryName(action?.params?.library_id) || String(action?.params?.library_name || '').trim() || '未选择媒体库'
+    return `${embyName} · ${libraryName}`
   }
-  return embyDisplayLabel()
+  return embyName
 }
 
 const findTaskLabel = (type, id) => {
   if (type === 'emby_refresh') {
-    return embyDisplayLabel()
+    return embyDisplayLabel({ params: { emby_id: id } })
   }
   if (!id) return '未选择'
   if (type === 'organize') {

@@ -8,32 +8,35 @@ import (
 
 	"litepan/internal/domain"
 	"litepan/internal/embyproxy"
-	"litepan/internal/settings"
 )
 
-func (h *Handler) getEmbyConfig(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) listEmbyConfigs(w http.ResponseWriter, r *http.Request) {
 	if h.embyProxy == nil {
 		writeErr(w, domain.Errf(domain.CodeNotImplement))
 		return
 	}
-	writeOK(w, h.embyProxy.Snapshot(r))
+	writeOK(w, h.embyProxy.State(r))
 }
 
-func (h *Handler) updateEmbyConfig(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) replaceEmbyConfigs(w http.ResponseWriter, r *http.Request) {
 	if h.embyProxy == nil {
 		writeErr(w, domain.Errf(domain.CodeNotImplement))
 		return
 	}
-	var in embyproxy.UpdateRequest
+	var in struct {
+		Enabled bool                      `json:"enabled"`
+		Items   []embyproxy.UpdateRequest `json:"items"`
+	}
 	if err := decodeJSON(r, &in); err != nil {
 		writeErr(w, err)
 		return
 	}
-	if _, err := h.embyProxy.Update(r.Context(), in); err != nil {
+	state, err := h.embyProxy.Replace(r.Context(), in.Enabled, in.Items)
+	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	writeOK(w, h.embyProxy.Snapshot(r))
+	writeOK(w, state)
 }
 
 func (h *Handler) testEmbyConfig(w http.ResponseWriter, r *http.Request) {
@@ -83,24 +86,10 @@ func (h *Handler) listEmbyLibraries(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, domain.Errf(domain.CodeNotImplement))
 		return
 	}
-	data, err := h.embyProxy.ListLibraries(r.Context())
+	data, err := h.embyProxy.ListLibraries(r.Context(), r.URL.Query().Get("config_id"))
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	writeOK(w, data)
-}
-
-func embySettingsTouched(changed map[string]string) bool {
-	for _, key := range []string{
-		settings.KeyEmbyEnabled,
-		settings.KeyEmbyURL,
-		settings.KeyEmbyAPIKey,
-		settings.KeyEmbyProxyPort,
-	} {
-		if _, ok := changed[key]; ok {
-			return true
-		}
-	}
-	return false
 }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onUnmounted, watch } from "vue";
 import { lockPageScroll, unlockPageScroll } from "@/utils/scrollLock";
+import { isTopModal, popModal, pushModal } from "@/composables/modalStack";
 
 const props = withDefaults(
   defineProps<{
@@ -16,8 +17,10 @@ const props = withDefaults(
 );
 const emit = defineEmits<{ close: [] }>();
 
+const myToken = Symbol("modal");
+
 function onKey(e: KeyboardEvent) {
-  if (e.key === "Escape") emit("close");
+  if (e.key === "Escape" && isTopModal(myToken)) emit("close");
 }
 
 function lockPageScrollState(lock: boolean) {
@@ -29,15 +32,18 @@ watch(
   () => props.open,
   (open) => {
     if (open) {
+      pushModal(myToken);
       window.addEventListener("keydown", onKey);
       lockPageScrollState(true);
     } else {
+      popModal(myToken);
       window.removeEventListener("keydown", onKey);
       lockPageScrollState(false);
     }
   },
 );
 onUnmounted(() => {
+  popModal(myToken);
   window.removeEventListener("keydown", onKey);
   lockPageScrollState(false);
 });

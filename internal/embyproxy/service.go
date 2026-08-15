@@ -18,12 +18,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"litepan/internal/domain"
 	"litepan/internal/httpx"
 	"litepan/internal/playback"
 	"litepan/internal/proxybase"
 	"litepan/internal/settings"
 	"litepan/internal/strm"
+	"litepan/pkg/jsonvalue"
 	"litepan/pkg/strutil"
 )
 
@@ -45,7 +48,11 @@ type Service struct {
 
 	servePlayback func(http.ResponseWriter, *http.Request, playback.Request, playback.Intent) error
 
-	mu     sync.Mutex
+	mu       sync.Mutex
+	runtimes map[string]*runtime
+}
+
+type runtime struct {
 	server *http.Server
 	port   int
 	err    string
@@ -59,7 +66,8 @@ type Options struct {
 }
 
 type Config struct {
-	Enabled   bool   `json:"enabled"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
 	EmbyURL   string `json:"emby_url"`
 	APIKey    string `json:"api_key"`
 	Port      string `json:"proxy_port"`
@@ -68,14 +76,30 @@ type Config struct {
 	LastError string `json:"last_error,omitempty"`
 }
 
-type UpdateRequest struct {
-	Enabled bool   `json:"enabled"`
+type storedConfig struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
 	EmbyURL string `json:"emby_url"`
 	APIKey  string `json:"api_key"`
 	Port    string `json:"proxy_port"`
 }
 
+type UpdateRequest struct {
+	ID      string                   `json:"id"`
+	Name    string                   `json:"name"`
+	EmbyURL string                   `json:"emby_url"`
+	APIKey  string                   `json:"api_key"`
+	Port    jsonvalue.FlexibleString `json:"proxy_port"`
+}
+
+type State struct {
+	Enabled bool     `json:"enabled"`
+	Items   []Config `json:"items"`
+}
+
 type RefreshResult struct {
+	ConfigID    string `json:"config_id"`
+	ConfigName  string `json:"config_name"`
 	Mode        string `json:"mode"`
 	TaskID      string `json:"task_id,omitempty"`
 	LibraryID   string `json:"library_id,omitempty"`
@@ -83,6 +107,7 @@ type RefreshResult struct {
 }
 
 type RefreshRequest struct {
+	ConfigID  string `json:"config_id"`
 	Mode      string `json:"mode"`
 	LibraryID string `json:"library_id"`
 }
@@ -108,6 +133,7 @@ func New(opts Options) *Service {
 		strm:     opts.Strm,
 		log:      log,
 		client:   client,
+		runtimes: map[string]*runtime{},
 		servePlayback: func(w http.ResponseWriter, r *http.Request, req playback.Request, intent playback.Intent) error {
 			if opts.Playback == nil {
 				return domain.Errf(domain.CodeNotImplement)
@@ -117,66 +143,116 @@ func New(opts Options) *Service {
 	}
 }
 
-func (s *Service) Snapshot(r *http.Request) Config {
-	cfg := s.configFromSettings()
-	cfg.APIKey = maskSecret(cfg.APIKey)
-	if cfg.Port != "" {
-		cfg.ProxyURL = proxybase.PublicBase(r, cfg.Port)
-	}
+func (s *Service) Snapshots(r *http.Request) []Config {
+	configs := s.configsFromSettings()
 	s.mu.Lock()
-	cfg.Running = s.server != nil
-	cfg.LastError = s.err
-	s.mu.Unlock()
-	return cfg
+	defer s.mu.Unlock()
+	for i := range configs {
+		configs[i].APIKey = maskSecret(configs[i].APIKey)
+		if configs[i].Port != "" {
+			configs[i].ProxyURL = proxybase.PublicBase(r, configs[i].Port)
+		}
+		if rt := s.runtimes[configs[i].ID]; rt != nil {
+			configs[i].Running = rt.server != nil
+			configs[i].LastError = rt.err
+		}
+	}
+	return configs
 }
 
-func (s *Service) Update(ctx context.Context, in UpdateRequest) (Config, error) {
+func (s *Service) State(r *http.Request) State {
+	items := s.Snapshots(r)
+	return State{Enabled: s.enabled() && len(items) > 0, Items: items}
+}
+
+func (s *Service) Snapshot(r *http.Request) Config {
+	configs := s.Snapshots(r)
+	if len(configs) > 0 {
+		return configs[0]
+	}
+	return Config{}
+}
+
+func (s *Service) Replace(ctx context.Context, enabled bool, inputs []UpdateRequest) (State, error) {
 	if s.settings == nil {
-		return Config{}, domain.Errf(domain.CodeNotImplement)
+		return State{}, domain.Errf(domain.CodeNotImplement)
 	}
-	embyURL, err := normalizeEmbyURL(in.EmbyURL, false)
+	stored := s.configsFromSettings()
+	storedByID := make(map[string]Config, len(stored))
+	for _, cfg := range stored {
+		storedByID[cfg.ID] = cfg
+	}
+	configs := make([]Config, 0, len(inputs))
+	seenIDs := make(map[string]struct{}, len(inputs))
+	seenNames := make(map[string]struct{}, len(inputs))
+	seenPorts := make(map[string]struct{}, len(inputs))
+	for _, in := range inputs {
+		cfg, err := ConfigFromUpdate(in)
+		if err != nil {
+			return State{}, err
+		}
+		if cfg.ID == "" {
+			cfg.ID = uuid.NewString()
+		}
+		if _, ok := seenIDs[cfg.ID]; ok {
+			return State{}, domain.Errorf(domain.CodeValidation, "Emby 配置重复")
+		}
+		seenIDs[cfg.ID] = struct{}{}
+		nameKey := strings.ToLower(cfg.Name)
+		if _, ok := seenNames[nameKey]; ok {
+			return State{}, domain.Errorf(domain.CodeValidation, "Emby 配置名称不能重复")
+		}
+		seenNames[nameKey] = struct{}{}
+		if old, ok := storedByID[cfg.ID]; ok && isStoredSecretInput(cfg.APIKey, old.APIKey) {
+			cfg.APIKey = old.APIKey
+		}
+		if cfg.EmbyURL == "" || cfg.APIKey == "" {
+			return State{}, domain.Errorf(domain.CodeValidation, "请填写 Emby 地址和 API Key")
+		}
+		if enabled && cfg.Port == "" {
+			return State{}, domain.Errorf(domain.CodeValidation, "启用 Emby 反代前，请为所有配置填写反代端口")
+		}
+		if cfg.Port != "" {
+			if _, ok := seenPorts[cfg.Port]; ok {
+				return State{}, domain.Errorf(domain.CodeValidation, "多个 Emby 反代不能使用同一个端口")
+			}
+			seenPorts[cfg.Port] = struct{}{}
+			if err := s.checkFnosPortConflict(cfg.Port); err != nil {
+				return State{}, err
+			}
+		}
+		configs = append(configs, cfg)
+	}
+	if len(configs) == 0 {
+		enabled = false
+	}
+	raw, err := json.Marshal(storedConfigs(configs))
 	if err != nil {
-		return Config{}, err
+		return State{}, domain.Wrap(domain.CodeInternal, err)
 	}
-	port, err := proxybase.NormalizeOptionalPort(in.Port)
-	if err != nil {
-		return Config{}, err
-	}
-	apiKey := strings.TrimSpace(in.APIKey)
-	storedAPIKey := s.configFromSettings().APIKey
-	effectiveAPIKey := apiKey
-	if isStoredSecretInput(apiKey, storedAPIKey) {
-		effectiveAPIKey = storedAPIKey
-	}
-	if in.Enabled && port != "" {
-		if embyURL == "" {
-			return Config{}, domain.Errorf(domain.CodeValidation, "启用 Emby 反代并填写端口时，需要填写 Emby 地址")
-		}
-		if effectiveAPIKey == "" {
-			return Config{}, domain.Errorf(domain.CodeValidation, "启用 Emby 反代并填写端口时，需要填写 Emby API Key")
-		}
-		if err := s.checkPortConflict(port); err != nil {
-			return Config{}, err
-		}
-	}
-	changed := map[string]string{
-		settings.KeyEmbyEnabled:   strconv.FormatBool(in.Enabled),
-		settings.KeyEmbyURL:       embyURL,
-		settings.KeyEmbyProxyPort: port,
-	}
-	if !isStoredSecretInput(apiKey, storedAPIKey) {
-		changed[settings.KeyEmbyAPIKey] = apiKey
-	}
-	if err := s.settings.Update(ctx, changed); err != nil {
-		return Config{}, err
+	if err := s.settings.Update(ctx, map[string]string{
+		settings.KeyEmbyEnabled:        strconv.FormatBool(enabled),
+		settings.KeyEmbyProxyInstances: string(raw),
+	}); err != nil {
+		return State{}, err
 	}
 	if err := s.Sync(ctx); err != nil {
-		return s.Snapshot(nil), err
+		return s.State(nil), err
 	}
-	return s.Snapshot(nil), nil
+	return s.State(nil), nil
 }
 
-func (s *Service) checkPortConflict(port string) error {
+func storedConfigs(configs []Config) []storedConfig {
+	out := make([]storedConfig, 0, len(configs))
+	for _, cfg := range configs {
+		out = append(out, storedConfig{
+			ID: cfg.ID, Name: cfg.Name, EmbyURL: cfg.EmbyURL, APIKey: cfg.APIKey, Port: cfg.Port,
+		})
+	}
+	return out
+}
+
+func (s *Service) checkFnosPortConflict(port string) error {
 	if s.settings == nil || port == "" {
 		return nil
 	}
@@ -190,8 +266,25 @@ func (s *Service) checkPortConflict(port string) error {
 	return nil
 }
 
+func (s *Service) UsesPort(port string) bool {
+	if !s.enabled() {
+		return false
+	}
+	port = strings.TrimSpace(port)
+	for _, cfg := range s.configsFromSettings() {
+		if cfg.Port == port {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) Test(ctx context.Context) error {
-	return s.TestConfig(ctx, s.configFromSettings())
+	cfg, err := s.resolveConfig("")
+	if err != nil {
+		return err
+	}
+	return s.TestConfig(ctx, cfg)
 }
 
 func (s *Service) TestUpdate(ctx context.Context, in UpdateRequest) error {
@@ -199,8 +292,8 @@ func (s *Service) TestUpdate(ctx context.Context, in UpdateRequest) error {
 	if err != nil {
 		return err
 	}
-	if isStoredSecretInput(in.APIKey, s.configFromSettings().APIKey) {
-		cfg.APIKey = s.configFromSettings().APIKey
+	if old, findErr := s.resolveConfig(in.ID); findErr == nil && isStoredSecretInput(in.APIKey, old.APIKey) {
+		cfg.APIKey = old.APIKey
 	}
 	return s.TestConfig(ctx, cfg)
 }
@@ -230,8 +323,19 @@ func (s *Service) TestConfig(ctx context.Context, cfg Config) error {
 	return nil
 }
 
-func (s *Service) ListLibraries(ctx context.Context) ([]Library, error) {
-	cfg := s.configFromSettings()
+func (s *Service) ListLibraries(ctx context.Context, configIDs ...string) ([]Library, error) {
+	configID := ""
+	if len(configIDs) > 0 {
+		configID = configIDs[0]
+	}
+	cfg, err := s.resolveConfig(configID)
+	if err != nil {
+		return nil, err
+	}
+	return s.listLibraries(ctx, cfg)
+}
+
+func (s *Service) listLibraries(ctx context.Context, cfg Config) ([]Library, error) {
 	if strings.TrimSpace(cfg.EmbyURL) == "" {
 		return nil, domain.Errorf(domain.CodeValidation, "请先填写 Emby 地址")
 	}
@@ -273,7 +377,10 @@ func (s *Service) ListLibraries(ctx context.Context) ([]Library, error) {
 }
 
 func (s *Service) RefreshLibrary(ctx context.Context, req RefreshRequest) (RefreshResult, error) {
-	cfg := s.configFromSettings()
+	cfg, err := s.resolveConfig(req.ConfigID)
+	if err != nil {
+		return RefreshResult{}, err
+	}
 	if strings.TrimSpace(cfg.EmbyURL) == "" {
 		return RefreshResult{}, domain.Errorf(domain.CodeValidation, "请先填写 Emby 地址")
 	}
@@ -286,9 +393,17 @@ func (s *Service) RefreshLibrary(ctx context.Context, req RefreshRequest) (Refre
 		mode = "global"
 	}
 	if mode == "library" {
-		return s.refreshLibraryByID(ctx, base, cfg.APIKey, strings.TrimSpace(req.LibraryID))
+		result, err := s.refreshLibraryByID(ctx, cfg, strings.TrimSpace(req.LibraryID))
+		return withRefreshConfig(result, cfg), err
 	}
-	return s.refreshAllLibraries(ctx, base, cfg.APIKey)
+	result, err := s.refreshAllLibraries(ctx, base, cfg.APIKey)
+	return withRefreshConfig(result, cfg), err
+}
+
+func withRefreshConfig(result RefreshResult, cfg Config) RefreshResult {
+	result.ConfigID = cfg.ID
+	result.ConfigName = cfg.Name
+	return result
 }
 
 func (s *Service) refreshAllLibraries(ctx context.Context, base, apiKey string) (RefreshResult, error) {
@@ -323,11 +438,11 @@ func (s *Service) refreshAllLibraries(ctx context.Context, base, apiKey string) 
 	return RefreshResult{Mode: "global"}, nil
 }
 
-func (s *Service) refreshLibraryByID(ctx context.Context, base, apiKey, libraryID string) (RefreshResult, error) {
+func (s *Service) refreshLibraryByID(ctx context.Context, cfg Config, libraryID string) (RefreshResult, error) {
 	if libraryID == "" {
 		return RefreshResult{}, domain.Errorf(domain.CodeValidation, "请选择 Emby 媒体库")
 	}
-	libraries, err := s.ListLibraries(ctx)
+	libraries, err := s.listLibraries(ctx, cfg)
 	if err != nil {
 		return RefreshResult{}, err
 	}
@@ -341,13 +456,14 @@ func (s *Service) refreshLibraryByID(ctx context.Context, base, apiKey, libraryI
 	if selected == nil {
 		return RefreshResult{}, domain.Errorf(domain.CodeValidation, "所选 Emby 媒体库不存在")
 	}
+	base := strings.TrimRight(cfg.EmbyURL, "/")
 	query := url.Values{
 		"Recursive":           {"true"},
 		"ImageRefreshMode":    {"Default"},
 		"MetadataRefreshMode": {"Default"},
 		"ReplaceAllImages":    {"false"},
 		"ReplaceAllMetadata":  {"false"},
-		"api_key":             {apiKey},
+		"api_key":             {cfg.APIKey},
 	}.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/Items/"+url.PathEscape(libraryID)+"/Refresh?"+query, nil)
 	if err != nil {
@@ -396,16 +512,24 @@ func (s *Service) findLibraryRefreshTask(ctx context.Context, base, query string
 }
 
 func ConfigFromUpdate(in UpdateRequest) (Config, error) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return Config{}, domain.Errorf(domain.CodeValidation, "请输入 Emby 配置名称")
+	}
+	if len([]rune(name)) > 40 {
+		return Config{}, domain.Errorf(domain.CodeValidation, "Emby 配置名称不能超过 40 个字符")
+	}
 	embyURL, err := normalizeEmbyURL(in.EmbyURL, false)
 	if err != nil {
 		return Config{}, err
 	}
-	port, err := proxybase.NormalizeOptionalPort(in.Port)
+	port, err := proxybase.NormalizeOptionalPort(in.Port.String())
 	if err != nil {
 		return Config{}, err
 	}
 	return Config{
-		Enabled: in.Enabled,
+		ID:      strings.TrimSpace(in.ID),
+		Name:    name,
 		EmbyURL: embyURL,
 		APIKey:  strings.TrimSpace(in.APIKey),
 		Port:    port,
@@ -419,33 +543,64 @@ func (s *Service) Start(ctx context.Context) {
 }
 
 func (s *Service) Sync(ctx context.Context) error {
-	cfg := s.configFromSettings()
-	port, _ := strconv.Atoi(cfg.Port)
-
+	configs := s.configsFromSettings()
+	enabled := s.enabled() && len(configs) > 0
+	wanted := make(map[string]Config, len(configs))
+	if enabled {
+		for _, cfg := range configs {
+			wanted[cfg.ID] = cfg
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.server != nil && (port == 0 || !cfg.Enabled || s.port != port) {
-		s.stopLocked(ctx)
+	for id, rt := range s.runtimes {
+		cfg, ok := wanted[id]
+		port, _ := strconv.Atoi(cfg.Port)
+		if !ok || port == 0 || rt.port != port {
+			s.stopRuntimeLocked(ctx, id)
+		}
 	}
-	s.err = ""
-	if !cfg.Enabled || port == 0 {
-		return nil
+	var firstErr error
+	for _, cfg := range configs {
+		port, _ := strconv.Atoi(cfg.Port)
+		if !enabled || port == 0 {
+			continue
+		}
+		if rt := s.runtimes[cfg.ID]; rt != nil && rt.server != nil && rt.port == port {
+			rt.err = ""
+			continue
+		}
+		if err := s.startRuntimeLocked(cfg, port); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
+	return firstErr
+}
+
+func (s *Service) Shutdown(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id := range s.runtimes {
+		s.stopRuntimeLocked(ctx, id)
+	}
+}
+
+func (s *Service) startRuntimeLocked(cfg Config, port int) error {
+	rt := &runtime{port: port}
+	s.runtimes[cfg.ID] = rt
 	if cfg.EmbyURL == "" || cfg.APIKey == "" {
-		s.err = "启用反代时需要填写 Emby 地址和 API Key"
-		return domain.Errorf(domain.CodeValidation, "%s", s.err)
+		rt.err = "启用反代时需要填写 Emby 地址和 API Key"
+		return domain.Errorf(domain.CodeValidation, "%s", rt.err)
 	}
-	if err := s.checkPortConflict(cfg.Port); err != nil {
-		s.err = err.Error()
+	if err := s.checkFnosPortConflict(cfg.Port); err != nil {
+		rt.err = err.Error()
 		return err
 	}
-	if s.server != nil && s.port == port {
-		return nil
-	}
-
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.handle)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		s.handleConfig(cfg.ID, w, r)
+	})
 	srv := &http.Server{
 		Addr:              ":" + strconv.Itoa(port),
 		Handler:           mux,
@@ -454,38 +609,36 @@ func (s *Service) Sync(ctx context.Context) error {
 	}
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
-		s.err = fmt.Sprintf("Emby 反代端口 %d 监听失败：%v", port, err)
-		return domain.Errorf(domain.CodeDriverError, "%s", s.err)
+		rt.err = fmt.Sprintf("Emby 反代端口 %d 监听失败：%v", port, err)
+		return domain.Errorf(domain.CodeDriverError, "%s", rt.err)
 	}
-	s.server = srv
-	s.port = port
-	go func() {
-		s.log.Info("Emby 反代已监听", "addr", srv.Addr)
+	rt.server = srv
+	go func(id, name string, active *runtime) {
+		s.log.Info("Emby 反代已监听", "name", name, "addr", srv.Addr)
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.mu.Lock()
-			s.err = err.Error()
-			s.server = nil
-			s.port = 0
+			if s.runtimes[id] == active {
+				active.err = err.Error()
+				active.server = nil
+				active.port = 0
+			}
 			s.mu.Unlock()
-			s.log.Error("Emby 反代服务异常退出", "error", err)
+			s.log.Error("Emby 反代服务异常退出", "name", name, "error", err)
 		}
-	}()
+	}(cfg.ID, cfg.Name, rt)
 	return nil
 }
 
-func (s *Service) Shutdown(ctx context.Context) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.stopLocked(ctx)
-}
-
-func (s *Service) stopLocked(ctx context.Context) {
-	if s.server == nil {
+func (s *Service) stopRuntimeLocked(ctx context.Context, id string) {
+	rt := s.runtimes[id]
+	if rt == nil {
 		return
 	}
-	srv := s.server
-	s.server = nil
-	s.port = 0
+	delete(s.runtimes, id)
+	if rt.server == nil {
+		return
+	}
+	srv := rt.server
 	stopCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(stopCtx); err != nil {
@@ -493,25 +646,70 @@ func (s *Service) stopLocked(ctx context.Context) {
 	}
 }
 
-func (s *Service) configFromSettings() Config {
+func (s *Service) configsFromSettings() []Config {
 	if s.settings == nil {
-		return Config{}
+		return nil
 	}
-	return Config{
-		Enabled: s.settings.Bool(settings.KeyEmbyEnabled),
-		EmbyURL: strings.TrimRight(strings.TrimSpace(s.settings.String(settings.KeyEmbyURL)), "/"),
-		APIKey:  strings.TrimSpace(s.settings.String(settings.KeyEmbyAPIKey)),
-		Port:    strings.TrimSpace(s.settings.String(settings.KeyEmbyProxyPort)),
+	var configs []Config
+	if err := json.Unmarshal([]byte(s.settings.String(settings.KeyEmbyProxyInstances)), &configs); err != nil {
+		s.log.Error("Emby 反代配置解析失败", "error", err)
+		return nil
 	}
+	for i := range configs {
+		configs[i].ID = strings.TrimSpace(configs[i].ID)
+		configs[i].Name = strings.TrimSpace(configs[i].Name)
+		configs[i].EmbyURL = strings.TrimRight(strings.TrimSpace(configs[i].EmbyURL), "/")
+		configs[i].APIKey = strings.TrimSpace(configs[i].APIKey)
+		configs[i].Port = strings.TrimSpace(configs[i].Port)
+	}
+	return configs
+}
+
+func (s *Service) enabled() bool {
+	return s.settings != nil && s.settings.Bool(settings.KeyEmbyEnabled)
+}
+
+func (s *Service) resolveConfig(id string) (Config, error) {
+	id = strings.TrimSpace(id)
+	configs := s.configsFromSettings()
+	if id != "" {
+		for _, cfg := range configs {
+			if cfg.ID == id {
+				return cfg, nil
+			}
+		}
+		return Config{}, domain.Errorf(domain.CodeValidation, "所选 Emby 配置不存在")
+	}
+	if len(configs) > 0 {
+		return configs[0], nil
+	}
+	return Config{}, domain.Errorf(domain.CodeValidation, "请先配置 Emby")
 }
 
 func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.resolveConfig("")
+	if err != nil {
+		http.Error(w, "Emby proxy is not configured", http.StatusNotFound)
+		return
+	}
+	s.handleWithConfig(cfg, w, r)
+}
+
+func (s *Service) handleConfig(configID string, w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.resolveConfig(configID)
+	if err != nil {
+		http.Error(w, "Emby proxy is not configured", http.StatusNotFound)
+		return
+	}
+	s.handleWithConfig(cfg, w, r)
+}
+
+func (s *Service) handleWithConfig(cfg Config, w http.ResponseWriter, r *http.Request) {
 	if proxybase.StrmPlayPathRE.MatchString(r.URL.Path) {
 		s.serveSTRM(w, r)
 		return
 	}
-	cfg := s.configFromSettings()
-	if !cfg.Enabled || cfg.EmbyURL == "" || cfg.APIKey == "" {
+	if !s.enabled() || cfg.EmbyURL == "" || cfg.APIKey == "" {
 		http.Error(w, "Emby proxy is not enabled", http.StatusNotFound)
 		return
 	}

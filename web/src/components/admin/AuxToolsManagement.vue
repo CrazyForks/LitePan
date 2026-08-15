@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onDeactivated, ref, watchEffect } from "vue";
+import { useRoute } from "vue-router";
 import AppButton from "@/components/base/AppButton.vue";
 import SectionTabBar from "@/components/admin/SectionTabBar.vue";
 import AdminSettingsDrawer from "@/components/admin/AdminSettingsDrawer.vue";
@@ -11,7 +12,6 @@ import "@/styles/admin-shared.css";
 
 const StrmScrapePanel = defineAsyncComponent(() => import("@/components/admin/StrmScrapePanel.vue"));
 const StrmScrapeSettings = defineAsyncComponent(() => import("@/components/admin/StrmScrapeSettings.vue"));
-const ProxyToolsPanel = defineAsyncComponent(() => import("@/components/admin/ProxyToolsPanel.vue"));
 const CloudToolsPanel = defineAsyncComponent(() => import("@/components/admin/CloudToolsPanel.vue"));
 
 const SCRAPE_TAB = "scrape";
@@ -19,11 +19,11 @@ const PROXY_TAB = "proxy";
 const ENHANCED_TAB = "enhanced";
 const tabs = [
   { key: SCRAPE_TAB, label: "STRM 刮削" },
-  { key: PROXY_TAB, label: "反代工具" },
   { key: ENHANCED_TAB, label: "增强工具" },
 ];
 
 const settingsDrawerOpen = ref(false);
+const enhancedSearchOpen = ref(false);
 const scrapeSettingsVisited = ref(false);
 const scrapePanelRef = ref<InstanceType<typeof StrmScrapePanelComponent> | null>(null);
 const scrapeSettingsRef = ref<SettingsPanelExpose | null>(null);
@@ -41,9 +41,11 @@ function revertDrawerSettings() {
 
 const { confirmDiscardChanges } = useSettingsPageDirty(settingsPageDirty, revertDrawerSettings);
 
+const route = useRoute();
+const initialTab = String(route.query.tab ?? "") === PROXY_TAB ? ENHANCED_TAB : SCRAPE_TAB;
 const { activeTab, setActiveTab } = useSectionTabRoute(
-  SCRAPE_TAB,
-  [SCRAPE_TAB, PROXY_TAB, ENHANCED_TAB],
+	initialTab,
+	[SCRAPE_TAB, ENHANCED_TAB],
   {
     beforeTabChange: async () => {
       if (!settingsDrawerOpen.value) return true;
@@ -57,7 +59,6 @@ const { activeTab, setActiveTab } = useSectionTabRoute(
 
 const drawerSaving = computed(() => readPanelSaving(scrapeSettingsRef.value?.saving));
 const isScrapeTab = computed(() => activeTab.value === SCRAPE_TAB);
-const isProxyTab = computed(() => activeTab.value === PROXY_TAB);
 const isEnhancedTab = computed(() => activeTab.value === ENHANCED_TAB);
 
 async function openScrapeSettings() {
@@ -88,24 +89,32 @@ async function handleDrawerSave() {
 <template>
   <div class="settings">
     <SectionTabBar :model-value="activeTab" :tabs="tabs" @update:model-value="setActiveTab">
-      <template v-if="isScrapeTab" #actions>
-        <AppButton
-          v-if="scrapePanelRef?.running"
-          type="button"
-          variant="secondary"
-          @click="scrapePanelRef?.stopScrape()"
-        >
-          停止刮削
-        </AppButton>
-        <AppButton v-else type="button" variant="primary" @click="scrapePanelRef?.startScrape()">
-          开始刮削
+      <template #actions>
+        <template v-if="isScrapeTab">
+          <AppButton
+            v-if="scrapePanelRef?.running"
+            type="button"
+            variant="secondary"
+            @click="scrapePanelRef?.stopScrape()"
+          >
+            停止刮削
+          </AppButton>
+          <AppButton v-else type="button" variant="primary" @click="scrapePanelRef?.startScrape()">
+            开始刮削
+          </AppButton>
+        </template>
+        <AppButton v-else-if="isEnhancedTab" type="button" variant="secondary" @click="enhancedSearchOpen = true">
+          搜索工具
         </AppButton>
       </template>
     </SectionTabBar>
 
     <StrmScrapePanel v-if="isScrapeTab" ref="scrapePanelRef" @open-settings="openScrapeSettings" />
-    <ProxyToolsPanel v-else-if="isProxyTab" />
-    <CloudToolsPanel v-else-if="isEnhancedTab" />
+    <CloudToolsPanel
+      v-else-if="isEnhancedTab"
+      :search-open="enhancedSearchOpen"
+      @update:search-open="enhancedSearchOpen = $event"
+    />
 
     <AdminSettingsDrawer
       :open="settingsDrawerOpen"

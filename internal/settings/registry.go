@@ -29,9 +29,7 @@ const (
 	KeyLogRetentionDays            = "log_retention_days"
 	KeyLogErrorAckAt               = "log_error_ack_at"
 	KeyEmbyEnabled                 = "emby_enabled"
-	KeyEmbyURL                     = "emby_url"
-	KeyEmbyAPIKey                  = "emby_api_key"
-	KeyEmbyProxyPort               = "emby_proxy_port"
+	KeyEmbyProxyInstances          = "emby_proxy_instances"
 	KeyFnosEnabled                 = "fnos_enabled"
 	KeyFnosURL                     = "fnos_url"
 	KeyFnosProxyPort               = "fnos_proxy_port"
@@ -162,10 +160,8 @@ func defaultSpecs() []Spec {
 			{Value: "error", Label: "Error（错误）"},
 		}),
 		intSpec(KeyLogRetentionDays, "system", "日志保留天数", "按天落盘日志的保留期。自动清理与日志页手动清理都会按该天数删除更早的旧日志。", "30", "天", 1, 365),
-		boolSpec(KeyEmbyEnabled, "emby", "启用 Emby 反代", "开启后且填写反代端口时，LitePan 会启动 Emby 反代服务；不填端口时仅保存 Emby 连接配置。", "false"),
-		stringSpec(KeyEmbyURL, "emby", "Emby 地址", "用于 Emby 反代与后续自动化刷库，例如 http://192.168.1.10:8096。", ""),
-		stringSpec(KeyEmbyAPIKey, "emby", "Emby API Key", "用于访问 Emby 管理 API。返回后台时会脱敏显示。", ""),
-		stringSpec(KeyEmbyProxyPort, "emby", "反代端口", "可留空。填写并启用后，LitePan 会在该端口启动 Emby 反代服务。", ""),
+		{Key: KeyEmbyEnabled, Type: TypeBool, Default: "false", Hidden: true},
+		{Key: KeyEmbyProxyInstances, Type: TypeString, Default: "[]", Sensitive: true, Hidden: true},
 		boolSpec(KeyFnosEnabled, "fnos", "启用飞牛影视反代", "开启后且填写反代端口时，LitePan 会启动飞牛影视反代服务。", "false"),
 		stringSpec(KeyFnosURL, "fnos", "飞牛影视地址", "飞牛影视服务地址，默认端口 8005，例如 http://192.168.1.10:8005。", ""),
 		stringSpec(KeyFnosProxyPort, "fnos", "反代端口", "可留空。填写并启用后，LitePan 会在该端口启动飞牛影视反代服务。", ""),

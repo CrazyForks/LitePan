@@ -86,10 +86,74 @@ func TestMigrateV047ToBuiltinOfflineSchema(t *testing.T) {
 	if !applied[17] {
 		t.Error("未记录 0017 迁移")
 	}
-	for version := 18; version <= 20; version++ {
+	if !applied[18] {
+		t.Error("未记录 0018 迁移")
+	}
+	for version := 19; version <= 20; version++ {
 		if applied[version] {
 			t.Errorf("不应存在未发布中间迁移 %04d", version)
 		}
+	}
+}
+
+func TestMigrateLegacyEmbyConfigToInstances(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, Options{Memory: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.write.ExecContext(ctx, `CREATE TABLE schema_migrations (
+		version INTEGER PRIMARY KEY,
+		applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	migrations, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range migrations {
+		if item.version >= 18 {
+			continue
+		}
+		applyMigrationForTest(t, ctx, db, item)
+	}
+	legacy := map[string]string{
+		"emby_enabled":    "true",
+		"emby_url":        "http://emby.test:8096",
+		"emby_api_key":    "secret-key",
+		"emby_proxy_port": "18097",
+	}
+	for key, value := range legacy {
+		if _, err := db.write.ExecContext(ctx, `INSERT INTO configs(key, value) VALUES (?, ?)`, key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("迁移旧 Emby 配置: %v", err)
+	}
+	var raw string
+	if err := db.write.QueryRowContext(ctx, `SELECT value FROM configs WHERE key = 'emby_proxy_instances'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"id":"default","name":"Emby","emby_url":"http://emby.test:8096","api_key":"secret-key","proxy_port":"18097"}]`
+	if raw != want {
+		t.Fatalf("迁移结果=%s", raw)
+	}
+	var count int
+	if err := db.write.QueryRowContext(ctx, `SELECT COUNT(1) FROM configs WHERE key IN ('emby_url','emby_api_key','emby_proxy_port')`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("仍残留 %d 个旧 Emby 设置", count)
+	}
+	var enabled string
+	if err := db.write.QueryRowContext(ctx, `SELECT value FROM configs WHERE key = 'emby_enabled'`).Scan(&enabled); err != nil {
+		t.Fatal(err)
+	}
+	if enabled != "true" {
+		t.Fatalf("Emby 总开关=%q", enabled)
 	}
 }
 
