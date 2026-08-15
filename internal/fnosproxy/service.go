@@ -900,7 +900,7 @@ func (s *Service) prewarmPlayback(playURL, ua string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		_, _ = s.playback.Resolve(ctx, accountID, fileID, ua, false)
+		_, _ = s.playback.Resolve(ctx, accountID, fileID, ua, false, true)
 	}()
 }
 

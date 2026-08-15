@@ -35,6 +35,7 @@ func (s *metadataLocalResolverStub) Resolve(
 	int64,
 	string, string,
 	bool,
+	bool,
 ) (playback.Resolved, error) {
 	return playback.Resolved{
 		Link: domain.DownloadInfo{LocalPath: s.localPath, Size: s.size},
@@ -45,6 +46,7 @@ func (s *metadataResolverStub) Resolve(
 	ctx context.Context,
 	_ int64,
 	fileID, _ string,
+	_ bool,
 	_ bool,
 ) (playback.Resolved, error) {
 	s.mu.Lock()

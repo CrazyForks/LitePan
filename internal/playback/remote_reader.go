@@ -30,7 +30,7 @@ func (s *Service) OpenRemoteReader(ctx context.Context, accountID int64, fileID,
 	} else {
 		ctx = context.WithoutCancel(ctx)
 	}
-	res, err := s.Resolve(ctx, accountID, fileID, ua, false)
+	res, err := s.Resolve(ctx, accountID, fileID, ua, false, false)
 	if err != nil {
 		return nil, err
 	}

@@ -16,7 +16,13 @@ type Service struct {
 	clientHTTP1 *http.Client
 	clientH2    *http.Client
 	rangeLimits accountRangeLimiter
+	resolveHook DownloadResolverHook
 }
+
+// DownloadResolverHook 允许外部插件在驱动解析前接管下载直链。
+// 返回 handled=true 时使用返回的 DownloadInfo；handled=false 时回落驱动默认解析。
+// playback 为 true 表示本次解析用于“播放/流式”（可接受转码直链），false 表示字节级读取（必须源文件）。
+type DownloadResolverHook func(ctx context.Context, accountID int64, driverType, fileID, ua string, playback bool) (*domain.DownloadInfo, bool, error)
 
 func NewService(exec *driverexec.Executor, c *cache.Service) *Service {
 	return &Service{
@@ -25,6 +31,11 @@ func NewService(exec *driverexec.Executor, c *cache.Service) *Service {
 		clientHTTP1: &http.Client{Transport: newUpstreamTransport(false), CheckRedirect: stripRedirectReferer},
 		clientH2:    &http.Client{Transport: newUpstreamTransport(true), CheckRedirect: stripRedirectReferer},
 	}
+}
+
+// SetDownloadResolverHook 注入下载解析接管钩子，仅在服务启动前调用一次。
+func (s *Service) SetDownloadResolverHook(h DownloadResolverHook) {
+	s.resolveHook = h
 }
 
 func stripRedirectReferer(req *http.Request, via []*http.Request) error {
@@ -48,7 +59,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, req Request,
 		return err
 	}
 	ua := r.UserAgent()
-	res, err := s.Resolve(r.Context(), req.AccountID, req.FileID, ua, false)
+	res, err := s.Resolve(r.Context(), req.AccountID, req.FileID, ua, false, !intent.WebDAV)
 	if err != nil {
 		return err
 	}
@@ -67,9 +78,9 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, req Request,
 	return s.serveStream(w, r, req, res, name, ua, intent)
 }
 
-func (s *Service) Resolve(ctx context.Context, accountID int64, fileID, ua string, refresh bool) (Resolved, error) {
+func (s *Service) Resolve(ctx context.Context, accountID int64, fileID, ua string, refresh, playback bool) (Resolved, error) {
 	if s.cache == nil {
-		return s.resolveFresh(ctx, accountID, fileID, ua)
+		return s.resolveFresh(ctx, accountID, fileID, ua, playback)
 	}
 
 	key := cache.DownloadURLKey(accountID, fileID, ua)
@@ -85,7 +96,7 @@ func (s *Service) Resolve(ctx context.Context, accountID int64, fileID, ua strin
 				return cached, nil
 			}
 		}
-		fresh, err := s.resolveFresh(callCtx, accountID, fileID, ua)
+		fresh, err := s.resolveFresh(callCtx, accountID, fileID, ua, playback)
 		if err != nil {
 			return Resolved{}, err
 		}
@@ -102,17 +113,29 @@ func (s *Service) Resolve(ctx context.Context, accountID int64, fileID, ua strin
 	return res, nil
 }
 
-func (s *Service) resolveFresh(ctx context.Context, accountID int64, fileID, ua string) (Resolved, error) {
+func (s *Service) resolveFresh(ctx context.Context, accountID int64, fileID, ua string, playback bool) (Resolved, error) {
 	var res Resolved
 	err := s.exec.Run(ctx, accountID, func(drv driver.Driver) error {
 		file := domain.FileItem{ID: fileID}
-		dl, err := driverexec.Require[driver.Downloader](drv)
-		if err != nil {
-			return err
+		var link *domain.DownloadInfo
+		if s.resolveHook != nil {
+			if info, handled, err := s.resolveHook(ctx, accountID, drv.Config().Name, fileID, ua, playback); handled {
+				if err != nil {
+					return err
+				}
+				link = info
+			}
 		}
-		link, err := dl.ResolveDownload(ctx, driver.DownloadRequest{FileID: fileID, UA: ua})
-		if err != nil {
-			return err
+		if link == nil {
+			dl, err := driverexec.Require[driver.Downloader](drv)
+			if err != nil {
+				return err
+			}
+			got, err := dl.ResolveDownload(ctx, driver.DownloadRequest{FileID: fileID, UA: ua})
+			if err != nil {
+				return err
+			}
+			link = got
 		}
 		if link.URL == "" && link.LocalPath == "" && !link.ForceProxy {
 			return domain.Errorf(domain.CodeDriverError, "驱动未返回下载地址")

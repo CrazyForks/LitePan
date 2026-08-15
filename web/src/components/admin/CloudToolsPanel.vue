@@ -5,9 +5,13 @@ import {
   aiOrganizeApi,
   cloudToolsApi,
   localUploadApi,
+  quarkTVApi,
   type AIOrganizeConfig,
   type CloudTool115Status,
   type LocalUploadMapping,
+  type QuarkTVAccount,
+  type QuarkTVBinding,
+  type QuarkTVStatus,
 } from "@/api/cloudTools";
 import { confirm } from "@/composables/useConfirm";
 import { toast } from "@/composables/useToast";
@@ -15,6 +19,7 @@ import { useSettingsLoad } from "@/composables/useSettingsLoad";
 import AppButton from "@/components/base/AppButton.vue";
 import AppModal from "@/components/base/AppModal.vue";
 import ProxyToolsPanel from "@/components/admin/ProxyToolsPanel.vue";
+import QuarkTVBindModal from "@/components/admin/QuarkTVBindModal.vue";
 import "@/styles/admin-shared.css";
 
 const props = withDefaults(defineProps<{ searchOpen?: boolean }>(), { searchOpen: false });
@@ -23,7 +28,7 @@ const emit = defineEmits<{ "update:searchOpen": [boolean] }>();
 const { runLoad } = useSettingsLoad();
 
 const searchQuery = ref("");
-const cardTitles = ["Emby 反代", "飞牛影视反代", "115 网盘 STRM 增强方案", "从服务器上传", "AI 辅助增强工具"];
+const cardTitles = ["Emby 反代", "飞牛影视反代", "115 网盘 STRM 增强方案", "从服务器上传", "AI 辅助增强工具", "夸克 STRM 播放接管"];
 
 function matches(title: string) {
   const q = searchQuery.value.trim().toLowerCase();
@@ -63,17 +68,26 @@ const aiTesting = ref(false);
 const aiSettingsOpen = ref(false);
 const enableAfterSave = ref(false);
 
+const qtvStatus = ref<QuarkTVStatus>({ enabled: false, available: false, bindings: [] });
+const qtvSaving = ref(false);
+const qtvAccounts = ref<QuarkTVAccount[]>([]);
+const qtvBindOpen = ref(false);
+const qtvManageOpen = ref(false);
+const qtvUnbindingID = ref<number | null>(null);
+
 async function load() {
   await runLoad(async () => {
-    const [st, lu, ai] = await Promise.all([
+    const [st, lu, ai, qtv] = await Promise.all([
       cloudToolsApi.status115(),
       localUploadApi.getConfig().catch(() => ({ enabled: false, mappings: [] })),
       aiOrganizeApi.getConfig(),
+      quarkTVApi.status().catch(() => ({ enabled: false, available: false, bindings: [] })),
     ]);
     status.value = st;
     localEnabled.value = lu.enabled;
     localMappings.value = lu.mappings;
     aiConfig.value = ai;
+    qtvStatus.value = qtv;
   }, "加载网盘工具状态失败");
 }
 
@@ -252,6 +266,92 @@ async function clearCache() {
     clearing.value = false;
   }
 }
+
+async function toggleQuarkTV() {
+  if (!qtvStatus.value.enabled && qtvStatus.value.bindings.length === 0) {
+    await openQuarkTVBind();
+    toast.info("请先选择夸克账号并扫码绑定 TV 账号");
+    return;
+  }
+  qtvSaving.value = true;
+  const next = !qtvStatus.value.enabled;
+  try {
+    await quarkTVApi.setEnabled(next);
+    qtvStatus.value.enabled = next;
+    toast.success(next ? "已启用：夸克播放请求改走 TV 302 直链" : "已停用：夸克播放恢复网页代理");
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "修改开关失败"));
+  } finally {
+    qtvSaving.value = false;
+  }
+}
+
+function openQuarkTVManage() {
+  qtvManageOpen.value = true;
+}
+
+function closeQuarkTVManage() {
+  qtvManageOpen.value = false;
+}
+
+async function openQuarkTVBind() {
+  try {
+    const res = await quarkTVApi.accounts();
+    const boundIDs = new Set(qtvStatus.value.bindings.map((b) => b.account_id));
+    qtvAccounts.value = res.accounts.filter((a) => !boundIDs.has(a.id));
+    if (qtvAccounts.value.length === 0) {
+      toast.error(res.accounts.length === 0 ? "请先添加并启用夸克网盘账号" : "所有夸克账号均已绑定");
+      return;
+    }
+    qtvManageOpen.value = false;
+    qtvBindOpen.value = true;
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "加载夸克账号失败"));
+  }
+}
+
+function closeQuarkTVBind() {
+  qtvBindOpen.value = false;
+}
+
+async function onQuarkTVBound() {
+  qtvBindOpen.value = false;
+  const st = await quarkTVApi.status().catch(() => ({ enabled: false, available: false, bindings: [] }));
+  qtvStatus.value = st;
+  if (!st.enabled) {
+    qtvSaving.value = true;
+    try {
+      await quarkTVApi.setEnabled(true);
+      qtvStatus.value.enabled = true;
+      toast.success("已启用夸克 STRM 播放接管");
+    } catch (e) {
+      toast.error(getApiErrorMessage(e, "绑定成功但启用失败，请手动开启"));
+    } finally {
+      qtvSaving.value = false;
+    }
+  }
+}
+
+async function unbindQuarkTV(binding: QuarkTVBinding) {
+  const ok = await confirm({
+    title: "解绑夸克 TV？",
+    message: `将解绑「${binding.account_name}」的夸克 TV 绑定，该账号播放恢复网页代理。`,
+    confirmText: "确认解绑",
+    cancelText: "取消",
+    danger: true,
+  }).catch(() => false);
+  if (!ok) return;
+  qtvUnbindingID.value = binding.account_id;
+  try {
+    await quarkTVApi.unbind(binding.account_id);
+    qtvStatus.value = await quarkTVApi.status();
+    toast.success("已解绑");
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "解绑失败"));
+  } finally {
+    qtvUnbindingID.value = null;
+  }
+}
 </script>
 
 <template>
@@ -416,6 +516,54 @@ async function clearCache() {
           </div>
         </div>
       </article>
+
+      <!-- 夸克 STRM 播放接管卡片 -->
+      <article v-show="matches('夸克 STRM 播放接管')" class="tool-card" :class="qtvStatus.enabled ? 'is-enabled' : 'is-disabled'">
+        <span class="tool-card__bar" :class="qtvStatus.enabled ? 'is-enabled' : 'is-disabled'" />
+        <div class="tool-card__head">
+          <img class="tool-card__logo" src="/logos/quark.png" alt="夸克" />
+          <div class="tool-card__meta">
+            <h3 class="tool-card__name">
+              夸克 STRM 播放接管
+              <span class="tool-card__tag">夸克网盘</span>
+              <span class="tool-card__tag tool-card__tag--warn">实验性</span>
+            </h3>
+            <p class="tool-card__driver">作用于夸克网盘 · STRM 播放请求走 TV 302 直链</p>
+          </div>
+          <button
+            class="check-toggle"
+            type="button"
+            :class="{ on: qtvStatus.enabled }"
+            :aria-label="qtvStatus.enabled ? '停用夸克 STRM 播放接管' : '启用夸克 STRM 播放接管'"
+            :disabled="qtvSaving || !qtvStatus.available"
+            title="启用 / 停用"
+            @click="toggleQuarkTV"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                d="M3.5 8.5 6.5 11.5 12.5 4.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+        <p class="tool-card__desc">
+          开启后，夸克网盘账号的 STRM 播放请求改走夸克 TV 的 302 直链，由夸克转码播放，画质会明显下降，且存在部分字幕不可用问题，请根据需要开启或关闭。
+        </p>
+        <div class="tool-card__row">
+          <div class="tool-card__stat">
+            <span class="tool-card__num">{{ qtvStatus.bindings.length }}</span>
+            <span class="tool-card__label">个绑定账号</span>
+          </div>
+          <AppButton variant="secondary" :disabled="qtvSaving" @click="openQuarkTVManage">
+            账号绑定设置
+          </AppButton>
+        </div>
+      </article>
     </div>
     <div v-if="searchOpen && !hasMatch" class="tool-search__empty">没有找到相关工具</div>
 
@@ -470,6 +618,33 @@ async function clearCache() {
         </AppButton>
       </template>
     </AppModal>
+
+    <AppModal :open="qtvManageOpen" title="夸克 STRM 播放接管 · 账号绑定" size="md" @close="closeQuarkTVManage">
+      <div v-if="qtvStatus.bindings.length" class="qtv-list">
+        <div v-for="b in qtvStatus.bindings" :key="b.account_id" class="qtv-item">
+          <div class="qtv-item__main">
+            <strong>{{ b.account_name }}</strong>
+            <span>TV 账号：{{ b.tv_nickname || "未知" }}</span>
+          </div>
+          <AppButton variant="danger" :disabled="qtvUnbindingID === b.account_id" @click="unbindQuarkTV(b)">
+            {{ qtvUnbindingID === b.account_id ? "解绑中…" : "解绑" }}
+          </AppButton>
+        </div>
+      </div>
+      <div v-else class="qtv-empty">还没有绑定账号</div>
+      <template #footer>
+        <div class="modal-footer-center">
+          <AppButton variant="primary" @click="openQuarkTVBind">添加绑定</AppButton>
+        </div>
+      </template>
+    </AppModal>
+
+    <QuarkTVBindModal
+      :open="qtvBindOpen"
+      :accounts="qtvAccounts"
+      @close="closeQuarkTVBind"
+      @bound="onQuarkTVBound"
+    />
   </div>
 </template>
 
@@ -806,6 +981,52 @@ async function clearCache() {
 }
 .ai-settings-test {
   margin-right: auto;
+}
+
+.qtv-list {
+  display: grid;
+  gap: 8px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.qtv-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 11px 13px;
+  background: var(--surface-sunken);
+}
+.qtv-item__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.qtv-item__main strong {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qtv-item__main span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.qtv-empty {
+  padding: 28px 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.modal-footer-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
 }
 
 </style>

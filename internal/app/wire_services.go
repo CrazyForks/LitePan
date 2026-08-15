@@ -21,6 +21,7 @@ import (
 	"litepan/internal/mediaorganize"
 	"litepan/internal/offlinedownload"
 	"litepan/internal/playback"
+	"litepan/internal/quarktv"
 	"litepan/internal/settings"
 	"litepan/internal/strm"
 	"litepan/internal/strmscrape"
@@ -46,6 +47,7 @@ type servicesBundle struct {
 	embyProxy        *embyproxy.Service
 	fnosProxy        *fnosproxy.Service
 	favorites        *favorites.Service
+	quarktv          *quarktv.Service
 }
 
 func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *coreBundle) *servicesBundle {
@@ -116,6 +118,15 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		},
 	})
 	accountProfileSvc := accountprofile.New(core.exec)
+	quarktvSvc := quarktv.New(quarktv.Options{
+		Settings:       st.settings,
+		Bindings:       st.store.QuarkTVBindings,
+		Accounts:       st.store.Accounts,
+		AccountProfile: accountProfileSvc,
+		Log:            logs.For(logx.ModuleSystem),
+	})
+	playbackSvc.SetDownloadResolverHook(quarktvSvc.ResolveHook)
+	lifecycle.quarktv = quarktvSvc
 	uploadSvc := upload.NewManager(upload.Options{
 		Exec:     core.exec,
 		Files:    fileSvc,
@@ -181,5 +192,6 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		embyProxy:        embyProxySvc,
 		fnosProxy:        fnosProxySvc,
 		favorites:        favoritesSvc,
+		quarktv:          quarktvSvc,
 	}
 }

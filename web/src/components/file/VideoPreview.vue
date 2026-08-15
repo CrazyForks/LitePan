@@ -456,6 +456,7 @@ onUnmounted(() => {
             :key="currentFile.id"
             autoplay
             playsinline
+            referrerpolicy="no-referrer"
             preload="metadata"
             @canplay="handleMediaReady"
             @playing="handleMediaPlaying"

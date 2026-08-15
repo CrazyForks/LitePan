@@ -20,6 +20,7 @@ type Store struct {
 	CacheRetentionTasks domain.CacheRetentionTaskRepository
 	AutomationRules     domain.AutomationRuleRepository
 	AutomationRuns      domain.AutomationRunRepository
+	QuarkTVBindings     domain.QuarkTVBindingRepository
 }
 
 // New 基于已打开的 DB 构造仓储集合。
@@ -41,5 +42,6 @@ func New(db *DB) *Store {
 		CacheRetentionTasks: &cacheRetentionRepo{db: db},
 		AutomationRules:     &automationRuleRepo{db: db},
 		AutomationRuns:      &automationRunRepo{db: db},
+		QuarkTVBindings:     &quarktvBindingRepo{db: db},
 	}
 }

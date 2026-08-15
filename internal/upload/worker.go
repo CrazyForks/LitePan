@@ -80,7 +80,7 @@ func (m *Manager) executeCrossTransferDownload(ctx context.Context, taskID strin
 		return false
 	}
 
-	res, err := m.playback.Resolve(ctx, sourceAccountID, sourceFileID, "", false)
+	res, err := m.playback.Resolve(ctx, sourceAccountID, sourceFileID, "", false, false)
 	if err != nil {
 		m.finishCrossTransferDownloadError(ctx, taskID, translateError(err.Error()))
 		return false

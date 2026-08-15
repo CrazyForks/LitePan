@@ -1050,7 +1050,7 @@ func (s *Service) inferLitePanMediaInfo(ctx context.Context, litepanURL, ua stri
 	if !ok {
 		return nil
 	}
-	res, err := s.playback.Resolve(ctx, accountID, fileID, ua, false)
+	res, err := s.playback.Resolve(ctx, accountID, fileID, ua, false, true)
 	if err != nil {
 		return nil
 	}

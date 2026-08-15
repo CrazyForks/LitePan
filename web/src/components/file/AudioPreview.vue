@@ -210,6 +210,7 @@ onUnmounted(() => {
             :key="currentFile.id"
             :src="mediaURL"
             autoplay
+            referrerpolicy="no-referrer"
             preload="metadata"
             @loadedmetadata="handleReady"
             @canplay="handleReady"

@@ -86,7 +86,7 @@ func (h *Handler) downloadFile(w http.ResponseWriter, r *http.Request) {
 		Inline:     r.URL.Query().Get("inline") == "1",
 	}
 	if r.URL.Query().Get("redirect") == "0" {
-		res, err := h.playback.Resolve(r.Context(), accID, fileID, r.UserAgent(), false)
+		res, err := h.playback.Resolve(r.Context(), accID, fileID, r.UserAgent(), false, true)
 		if err != nil {
 			writeErr(w, err)
 			return

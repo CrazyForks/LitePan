@@ -52,6 +52,34 @@ export interface AIOrganizeConfig {
   model: string;
 }
 
+export interface QuarkTVBinding {
+  account_id: number;
+  account_name: string;
+  tv_nickname: string;
+}
+
+export interface QuarkTVStatus {
+  enabled: boolean;
+  available: boolean;
+  bindings: QuarkTVBinding[];
+}
+
+export interface QuarkTVAccount {
+  id: number;
+  name: string;
+}
+
+export interface QuarkTVBindStart {
+  token: string;
+  qr_image: string;
+  expires_in: number;
+}
+
+export interface QuarkTVBindPoll {
+  status: "waiting" | "success" | "failed" | "expired";
+  message: string;
+}
+
 export const cloudToolsApi = {
   status115: () => http.get<CloudTool115Status>("/admin/tools/115-strm/status"),
   set115Enabled: (enabled: boolean) =>
@@ -76,4 +104,17 @@ export const aiOrganizeApi = {
     http.put<AIOrganizeConfig>("/admin/tools/ai-organize/config", payload),
   testConfig: (payload: AIOrganizeConfig) =>
     http.post<{ ok: boolean }>("/admin/tools/ai-organize/test", payload),
+};
+
+export const quarkTVApi = {
+  status: () => http.get<QuarkTVStatus>("/admin/tools/quarktv/status"),
+  setEnabled: (enabled: boolean) =>
+    http.post<{ enabled: boolean }>("/admin/tools/quarktv/enabled", { enabled }),
+  accounts: () => http.get<{ accounts: QuarkTVAccount[] }>("/admin/tools/quarktv/accounts"),
+  bindStart: (accountId: number) =>
+    http.post<QuarkTVBindStart>("/admin/tools/quarktv/bind/start", { account_id: accountId }),
+  bindPoll: (token: string) =>
+    http.post<QuarkTVBindPoll>("/admin/tools/quarktv/bind/poll", { token }),
+  unbind: (accountId: number) =>
+    http.del<{ removed: boolean }>("/admin/tools/quarktv/bind", { account_id: accountId }),
 };

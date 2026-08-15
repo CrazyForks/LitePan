@@ -50,7 +50,7 @@ func (lh *linkHolder) refreshAfterFailure(ctx context.Context, failed domain.Dow
 		return lh.link, false, nil
 	}
 	lh.refreshLeft--
-	res, err := lh.svc.Resolve(ctx, lh.accountID, lh.fileID, lh.ua, true)
+	res, err := lh.svc.Resolve(ctx, lh.accountID, lh.fileID, lh.ua, true, false)
 	if err != nil {
 		return lh.link, false, err
 	}

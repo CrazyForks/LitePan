@@ -37,6 +37,7 @@ import (
 	"litepan/internal/notification"
 	"litepan/internal/offlinedownload"
 	"litepan/internal/playback"
+	"litepan/internal/quarktv"
 	"litepan/internal/settings"
 	"litepan/internal/share/dav"
 	"litepan/internal/strm"
@@ -72,6 +73,7 @@ type Deps struct {
 	CrossTransfer     *crosstransfer.Service
 	EmbyProxy         *embyproxy.Service
 	FnosProxy         *fnosproxy.Service
+	QuarkTV           *quarktv.Service
 	ApiKeys           *apikey.Service
 	Auth              *auth.Service
 	AuthSched         *auth.Scheduler
@@ -105,6 +107,7 @@ type Handler struct {
 	crossTransfer     *crosstransfer.Service
 	embyProxy         *embyproxy.Service
 	fnosProxy         *fnosproxy.Service
+	quarktv           *quarktv.Service
 	apiKeys           *apikey.Service
 	auth              *auth.Service
 	authSched         *auth.Scheduler
@@ -145,6 +148,7 @@ func NewRouter(d Deps) http.Handler {
 		crossTransfer:     d.CrossTransfer,
 		embyProxy:         d.EmbyProxy,
 		fnosProxy:         d.FnosProxy,
+		quarktv:           d.QuarkTV,
 		apiKeys:           d.ApiKeys,
 		auth:              d.Auth,
 		authSched:         d.AuthSched,
@@ -286,6 +290,14 @@ func NewRouter(d Deps) http.Handler {
 					r.Get("/config", h.getAIOrganizeConfig)
 					r.Put("/config", h.updateAIOrganizeConfig)
 					r.Post("/test", h.testAIOrganizeConfig)
+				})
+				r.Route("/tools/quarktv", func(r chi.Router) {
+					r.Get("/status", h.getQuarkTVStatus)
+					r.Post("/enabled", h.setQuarkTVEnabled)
+					r.Get("/accounts", h.listQuarkTVAccounts)
+					r.Post("/bind/start", h.startQuarkTVBind)
+					r.Post("/bind/poll", h.pollQuarkTVBind)
+					r.Delete("/bind", h.unbindQuarkTV)
 				})
 				r.Route("/media-organize", func(r chi.Router) {
 					r.Get("/tasks", h.listMediaOrganizeTasks)
