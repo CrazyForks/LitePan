@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"litepan/internal/accountprofile"
 	"litepan/internal/domain"
 	"litepan/internal/driver"
+	"litepan/internal/eventbus"
 	"litepan/internal/settings"
 )
 
@@ -25,8 +27,10 @@ type Service struct {
 	accountProfile *accountprofile.Service
 	log            *slog.Logger
 
-	mu       sync.Mutex
-	sessions map[string]*qrSession
+	mu              sync.Mutex
+	sessions        map[string]*qrSession
+	invalidNotified map[int64]struct{}
+	bus             *eventbus.Bus
 }
 
 type qrSession struct {
@@ -41,6 +45,7 @@ type Options struct {
 	Bindings       domain.QuarkTVBindingRepository
 	Accounts       domain.AccountRepository
 	AccountProfile *accountprofile.Service
+	Bus            *eventbus.Bus
 	Log            *slog.Logger
 }
 
@@ -51,12 +56,14 @@ func New(opts Options) *Service {
 		log = slog.Default()
 	}
 	return &Service{
-		settings:       opts.Settings,
-		bindings:       opts.Bindings,
-		accounts:       opts.Accounts,
-		accountProfile: opts.AccountProfile,
-		log:            log,
-		sessions:       map[string]*qrSession{},
+		settings:        opts.Settings,
+		bindings:        opts.Bindings,
+		accounts:        opts.Accounts,
+		accountProfile:  opts.AccountProfile,
+		bus:             opts.Bus,
+		log:             log,
+		sessions:        map[string]*qrSession{},
+		invalidNotified: map[int64]struct{}{},
 	}
 }
 
@@ -254,6 +261,7 @@ func (s *Service) PollBind(ctx context.Context, token string) (PollResult, error
 		s.dropSession(token)
 		return PollResult{Status: driver.QRFailed, Message: "保存绑定失败：" + err.Error()}, nil
 	}
+	s.clearBindingInvalid(sess.accountID)
 	s.dropSession(token)
 	return PollResult{Status: driver.QRSuccess}, nil
 }
@@ -281,9 +289,13 @@ func (s *Service) ResolveHook(ctx context.Context, accountID int64, driverType, 
 	defer client.Close()
 	info, err := client.streaming(ctx, fileID)
 	if err != nil {
-		s.log.Warn("夸克 TV 解析失败，回退夸克网页代理", "account_id", accountID, "file_id", fileID, "err", err)
+		s.log.Warn("夸克 TV 解析失败，回退夸克驱动本机代理", "account_id", accountID, "file_id", fileID, "err", err)
+		if domain.IsAuthExpiredError(err) {
+			s.notifyBindingInvalid(ctx, accountID, b)
+		}
 		return nil, false, nil
 	}
+	s.clearBindingInvalid(accountID)
 	deviceID, refreshToken, accessToken, expiresAt := client.Snapshot()
 	if deviceID != b.DeviceID || refreshToken != b.RefreshToken || accessToken != b.AccessToken {
 		updated := *b
@@ -296,6 +308,53 @@ func (s *Service) ResolveHook(ctx context.Context, accountID int64, driverType, 
 		}
 	}
 	return info, true, nil
+}
+
+// notifyBindingInvalid 在夸克 TV 凭证失效时给右上角铃铛发一条通知，同一账号每次进程生命周期内只提醒一次。
+func (s *Service) notifyBindingInvalid(ctx context.Context, accountID int64, b *domain.QuarkTVBinding) {
+	s.mu.Lock()
+	if _, ok := s.invalidNotified[accountID]; ok {
+		s.mu.Unlock()
+		return
+	}
+	s.invalidNotified[accountID] = struct{}{}
+	s.mu.Unlock()
+
+	name := ""
+	if b != nil && b.TVNickname != "" {
+		name = b.TVNickname
+	}
+	if s.accounts != nil && accountID > 0 {
+		if acc, err := s.accounts.Get(ctx, accountID); err == nil && acc != nil && acc.Name != "" {
+			name = acc.Name
+		}
+	}
+	if name == "" {
+		name = fmt.Sprintf("账号 #%d", accountID)
+	}
+
+	s.log.Warn("夸克 TV 凭证已失效，播放已回退网页代理",
+		"account_id", accountID,
+		"tv_nickname", b.TVNickname,
+	)
+	if s.bus == nil {
+		return
+	}
+	s.bus.Publish(context.Background(), eventbus.NotificationCreated{
+		Level:     "warning",
+		Category:  domain.NotificationCategoryQuarkTVWarn,
+		Title:     "夸克 TV 凭证已失效",
+		Message:   fmt.Sprintf("夸克网盘账号「%s」的 TV 凭证已失效，播放已回退到网页代理，请重新扫码绑定。", name),
+		AccountID: accountID,
+		RefID:     0,
+	})
+}
+
+// clearBindingInvalid 清除某账号的失效提醒标记（重新绑定或后续成功解析时调用）。
+func (s *Service) clearBindingInvalid(accountID int64) {
+	s.mu.Lock()
+	delete(s.invalidNotified, accountID)
+	s.mu.Unlock()
 }
 
 func (s *Service) webAccountIdentity(ctx context.Context, accountID int64) (uid, nickname string, err error) {

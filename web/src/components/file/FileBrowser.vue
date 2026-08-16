@@ -9,6 +9,7 @@ import { fileKey, useFileSelection } from "@/composables/useFileSelection";
 import { useFileActions, type DeleteMode } from "@/composables/useFileActions";
 import { showConfirm } from "@/composables/useConfirm";
 import { useUploadTasks } from "@/composables/useUploadTasks";
+import { useUploadEntryController } from "@/composables/useUploadEntryController";
 import CloudLocalUploadPanel from "@/components/file/CloudLocalUploadPanel.vue";
 import { useOfflineDownloads } from "@/composables/useOfflineDownloads";
 import { toast } from "@/composables/useToast";
@@ -172,6 +173,13 @@ const uploadApi = useUploadTasks({
   getRootId,
   getCurrentBreadcrumbNameParts,
   refreshOfflineTasks: (refresh = true, quiet = false) => offline.fetchTasks(refresh, quiet),
+});
+const uploadEntry = useUploadEntryController({
+  ensureUploadNoticeConfirmed: uploadApi.ensureUploadNoticeConfirmed,
+  handleTerminalUploadFile: uploadApi.handleTerminalUploadFile,
+  handleTerminalUploadFolder: uploadApi.handleTerminalUploadFolder,
+  handleTerminalUploadFileChange: uploadApi.handleUploadFileChange,
+  handleTerminalUploadFolderChange: uploadApi.handleUploadFolderChange,
 });
 const { uploadTaskPanelOpen } = uploadApi;
 const transferTaskText = computed(() => {
@@ -937,8 +945,8 @@ onUnmounted(() => {
         @refresh="store.refreshFiles"
         @update:view="setView"
         @create-folder="startCreateFolder"
-        @upload-file="uploadApi.handleUploadFile"
-        @upload-folder="uploadApi.handleUploadFolder"
+        @upload-file="uploadEntry.handleUploadFile"
+        @upload-folder="uploadEntry.handleUploadFolder"
         @offline-download="offline.openModal"
         @batch-delete="fileActions.requestBatchDelete"
         @batch-move="fileActions.requestBatchMove"
@@ -1097,7 +1105,7 @@ onUnmounted(() => {
       type="file"
       multiple
       hidden
-      @change="uploadApi.handleUploadFileChange"
+      @change="uploadEntry.handleUploadFileChange"
     />
     <input
       ref="uploadFolderInput"
@@ -1105,20 +1113,20 @@ onUnmounted(() => {
       multiple
       webkitdirectory
       hidden
-      @change="uploadApi.handleUploadFolderChange"
+      @change="uploadEntry.handleUploadFolderChange"
     />
 
     <CloudLocalUploadPanel
-      :open="uploadApi.localUploadPanelOpen.value"
+      :open="uploadEntry.localUploadPanelOpen.value"
       :account-id="currentAccountId"
       :target-path="currentParentId"
       :target-display-path="getCurrentDisplayPath()"
-      :upload-kind="uploadApi.localUploadKind.value"
+      :upload-kind="uploadEntry.localUploadKind.value"
       :on-enqueue-files="uploadApi.enqueueTerminalFiles"
       :on-tasks-created="uploadApi.afterLocalUploadCreated"
       :on-folder-upload-accepted="uploadApi.registerDirRefreshBatch"
       :on-mark-current-dir-refresh="uploadApi.markCurrentDirRefreshPending"
-      @close="uploadApi.closeLocalUploadPanel"
+      @close="uploadEntry.closeLocalUploadPanel"
       @pick-file="uploadFileInput?.click()"
       @pick-folder="uploadFolderInput?.click()"
     />

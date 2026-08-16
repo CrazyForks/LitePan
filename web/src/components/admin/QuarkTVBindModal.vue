@@ -5,6 +5,7 @@ import { getApiErrorMessage } from "@/api/client";
 import { toast } from "@/composables/useToast";
 import AppButton from "@/components/base/AppButton.vue";
 import AppModal from "@/components/base/AppModal.vue";
+import AppSelect from "@/components/base/AppSelect.vue";
 import BusySpinner from "@/components/base/BusySpinner.vue";
 
 const props = defineProps<{
@@ -28,6 +29,7 @@ let countdownTimer: ReturnType<typeof setInterval> | null = null;
 let errorStreak = 0;
 
 const canStart = computed(() => accountId.value !== null && !binding.value);
+const accountOptions = computed(() => props.accounts.map((a) => ({ value: a.id, label: a.name })));
 
 const expireText = computed(() => {
   if (phase.value === "expired") return "二维码已过期";
@@ -161,9 +163,12 @@ onUnmounted(clearTimers);
   <AppModal :open="open" title="夸克 STRM 播放接管 · 账号绑定" size="md" @close="handleClose">
     <label class="qtv-field">
       <span>选择夸克账号</span>
-      <select v-model.number="accountId" :disabled="binding" @change="phase === 'waiting' ? start() : undefined">
-        <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
-      </select>
+      <AppSelect
+        v-model="accountId"
+        :options="accountOptions"
+        :disabled="binding"
+        @update:modelValue="phase === 'waiting' ? start() : undefined"
+      />
     </label>
 
     <div class="qtv-body">
@@ -203,17 +208,6 @@ onUnmounted(clearTimers);
   color: var(--text-regular);
   font-size: 13px;
   font-weight: 600;
-}
-.qtv-field select {
-  width: 100%;
-  box-sizing: border-box;
-  height: 36px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0 10px;
-  font-size: 13px;
-  background: var(--surface);
-  color: var(--text);
 }
 .qtv-body {
   display: flex;

@@ -112,12 +112,11 @@ func (m *Manager) stopTaskForDelete(ctx context.Context, taskID string) error {
 
 func (m *Manager) popTask(taskID string) *taskState {
 	m.mu.Lock()
-	st, ok := m.tasks[taskID]
-	if !ok {
+	st := m.removeTaskLocked(taskID)
+	if st == nil {
 		m.mu.Unlock()
 		return nil
 	}
-	delete(m.tasks, taskID)
 	m.mu.Unlock()
 	m.deletePersisted(taskID)
 	return st

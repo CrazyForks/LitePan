@@ -16,8 +16,6 @@ import { useUploadTaskActions } from "@/composables/upload/useUploadTaskActions"
 import { useUploadTaskStore } from "@/composables/upload/useUploadTaskStore";
 import { useUploadTaskStream } from "@/composables/upload/useUploadTaskStream";
 import type { UploadRuntimeHooks, UploadTaskDeps } from "@/composables/upload/uploadTaskTypes";
-import { ref } from "vue";
-import { localUploadApi } from "@/api/cloudTools";
 import { showConfirm } from "@/composables/useConfirm";
 
 export type { UploadTaskDeps as Deps } from "@/composables/upload/uploadTaskTypes";
@@ -25,22 +23,6 @@ export type { UploadTaskDeps as Deps } from "@/composables/upload/uploadTaskType
 export function useUploadTasks(deps: UploadTaskDeps) {
   const store = useUploadTaskStore(deps);
   store.restoreLocalUploadTasks();
-
-  const localUploadPanelOpen = ref(false);
-  const localUploadKind = ref<"file" | "folder">("file");
-
-  async function localUploadEnabledNow(): Promise<boolean> {
-    try {
-      const cfg = await localUploadApi.getConfig();
-      return cfg.enabled;
-    } catch {
-      return false;
-    }
-  }
-
-  function closeLocalUploadPanel() {
-    localUploadPanelOpen.value = false;
-  }
 
   function kickUploadTaskPolling() {
     stream.bumpKeepPolling();
@@ -98,32 +80,10 @@ export function useUploadTasks(deps: UploadTaskDeps) {
 
   async function handleUploadFileChange(event: Event) {
     await actions.handleUploadFileChange(event);
-    localUploadPanelOpen.value = false;
   }
 
   async function handleUploadFolderChange(event: Event) {
     await actions.handleUploadFolderChange(event);
-    localUploadPanelOpen.value = false;
-  }
-
-  async function handleUploadFile() {
-    if (await localUploadEnabledNow()) {
-      if (!(await actions.ensureUploadNoticeConfirmed())) return;
-      localUploadKind.value = "file";
-      localUploadPanelOpen.value = true;
-      return;
-    }
-    await actions.handleUploadFile();
-  }
-
-  async function handleUploadFolder() {
-    if (await localUploadEnabledNow()) {
-      if (!(await actions.ensureUploadNoticeConfirmed())) return;
-      localUploadKind.value = "folder";
-      localUploadPanelOpen.value = true;
-      return;
-    }
-    await actions.handleUploadFolder();
   }
 
   hooks.startScheduler = dispatcher.startUploadTaskScheduler;
@@ -182,11 +142,9 @@ export function useUploadTasks(deps: UploadTaskDeps) {
     openUploadTaskPanel: actions.openUploadTaskPanel,
     closeUploadTaskPanel: actions.closeUploadTaskPanel,
     openUploadNoticeFromPanel: actions.openUploadNoticeFromPanel,
-    handleUploadFile,
-    handleUploadFolder,
-    localUploadPanelOpen,
-    localUploadKind,
-    closeLocalUploadPanel,
+    ensureUploadNoticeConfirmed: actions.ensureUploadNoticeConfirmed,
+    handleTerminalUploadFile: actions.handleUploadFile,
+    handleTerminalUploadFolder: actions.handleUploadFolder,
     enqueueTerminalFiles,
     kickUploadTaskPolling,
     markCurrentDirRefreshPending,

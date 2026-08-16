@@ -175,13 +175,19 @@ func (c *Client) doOnce(ctx context.Context, method, pathname string, extra url.
 	if err != nil {
 		return nil, domain.Wrap(domain.CodeDriverError, err)
 	}
+
+	var env errEnvelope
+	_ = json.Unmarshal(body, &env)
+	// 扫码轮询时“用户未确认授权”是预期状态（等待确认 / 用户取消 / 超时），不按失败打 WARN。
+	if env.Errno == 11003 || strings.Contains(env.ErrorInfo, "用户未确认授权") {
+		return nil, domain.Errorf(domain.CodeDriverError, "二维码等待用户确认")
+	}
+
 	if resp.StatusCode >= http.StatusBadRequest {
 		c.logError("夸克 TV 接口请求失败", method, pathname, resp.StatusCode, body)
 		return nil, domain.Errorf(domain.CodeDriverError, "夸克 TV 接口请求失败：HTTP %d", resp.StatusCode)
 	}
 
-	var env errEnvelope
-	_ = json.Unmarshal(body, &env)
 	if !retried && c.tokenInvalid(env) && c.hasRefreshToken() {
 		if err := c.refresh(ctx); err != nil {
 			return nil, err
@@ -248,6 +254,9 @@ func (c *Client) refresh(ctx context.Context) error {
 
 	token, err := c.exchangeToken(ctx, deviceID, refreshToken, true)
 	if err != nil {
+		if isRefreshCredentialError(err) {
+			return domain.Wrap(domain.CodeAuthExpired, err)
+		}
 		return err
 	}
 	c.mu.Lock()
@@ -256,6 +265,25 @@ func (c *Client) refresh(ctx context.Context) error {
 	c.tokenExpiresAt = tokenExpiresAt(token.ExpiresIn)
 	c.mu.Unlock()
 	return nil
+}
+
+// isRefreshCredentialError 判断换 token 失败是否因 refresh_token 本身失效（而非网络/限流等瞬时问题）。
+func isRefreshCredentialError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if ae, ok := domain.AsAppError(err); ok && ae.Code == domain.CodeAuthExpired {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "401") || strings.Contains(msg, "403") || strings.Contains(msg, "unauthorized") {
+		return true
+	}
+	if (strings.Contains(msg, "refresh") || strings.Contains(msg, "token")) &&
+		(strings.Contains(msg, "无效") || strings.Contains(msg, "失效") || strings.Contains(msg, "invalid") || strings.Contains(msg, "expired")) {
+		return true
+	}
+	return strings.Contains(msg, "登录") && (strings.Contains(msg, "失效") || strings.Contains(msg, "过期"))
 }
 
 type tokenResult struct {

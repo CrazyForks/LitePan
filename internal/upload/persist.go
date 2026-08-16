@@ -70,7 +70,7 @@ func (m *Manager) restoreTasks() {
 			}
 		}
 		st.runDone = make(chan struct{})
-		m.tasks[st.TaskID] = st
+		m.addTaskLocked(st)
 		if st.QueueOrder > m.queueOrder {
 			m.queueOrder = st.QueueOrder
 		}

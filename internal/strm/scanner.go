@@ -178,7 +178,7 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 		state.cleanupScopes = append(state.cleanupScopes, cleanupScope{relDirs: scope.relDirs, recursive: scope.recursive})
 		if err := walkScope(ctx, task, deps, scope, exts, metaExts, excludeDirs, excludeFiles,
 			minMediaBytes, metaMaxBytes, task.SyncMetadata,
-			state.remoteChildren, state.metadataDirs, &candidates, &metadataItems, dirHasMedia, subtreeHasMedia); err != nil {
+			state.remoteChildren, state.metadataDirs, state.skippedDirs, &candidates, &metadataItems, dirHasMedia, subtreeHasMedia); err != nil {
 			return result, err
 		}
 	}
@@ -186,7 +186,7 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 		state.cleanupScopes = append(state.cleanupScopes, cleanupScope{relDirs: scope.relDirs, recursive: true})
 		if err := walkScope(ctx, task, deps, scope, exts, metaExts, excludeDirs, excludeFiles,
 			minMediaBytes, metaMaxBytes, task.SyncMetadata,
-			state.remoteChildren, state.metadataDirs, &candidates, &metadataItems, dirHasMedia, subtreeHasMedia); err != nil {
+			state.remoteChildren, state.metadataDirs, state.skippedDirs, &candidates, &metadataItems, dirHasMedia, subtreeHasMedia); err != nil {
 			return result, err
 		}
 	}
@@ -269,9 +269,6 @@ func finalizeScan(
 	cleanupEnabled := task.ScanMode == domain.StrmScanModeIncrementalUpdate || task.ScanMode == domain.StrmScanModeFullSync
 	cleanupScopes := effectiveCleanupScopes(useBranch, state.cleanupScopes)
 	cleanupSkipped := state.skippedDirs
-	if !useBranch {
-		cleanupSkipped = nil
-	}
 	if cleanupEnabled && len(seen) == 0 {
 		localCount, err := countScopedStrmFiles(root, taskRelDir, cleanupScopes, cleanupSkipped)
 		if err != nil {
@@ -407,26 +404,44 @@ func splitRelativePath(rel string) []string {
 	return strings.Split(rel, "/")
 }
 
-func hasLocalStrmUnder(root, outputFolder string, relDirs []string) bool {
-	localRoot := filepath.Join(root, SafeName(outputFolder))
-	for _, dir := range relDirs {
-		localRoot = filepath.Join(localRoot, SafeName(dir))
-	}
+func localChildDirsWithStrm(root, outputFolder string, relDirs []string) map[string]struct{} {
+	localRoot := localTaskDir(root, outputFolder, relDirs)
 	info, err := os.Stat(localRoot)
 	if err != nil || !info.IsDir() {
-		return false
+		return nil
 	}
-	found := false
+	found := make(map[string]struct{})
 	_ = filepath.WalkDir(localRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !d.IsDir() && strings.EqualFold(filepath.Ext(d.Name()), ".strm") {
-			found = true
-			return fs.SkipAll
+		if path == localRoot {
+			return nil
+		}
+		rel, relErr := filepath.Rel(localRoot, path)
+		if relErr != nil {
+			return relErr
+		}
+		rel = filepath.ToSlash(rel)
+		first, _, _ := strings.Cut(rel, "/")
+		first = SafeName(first)
+		if first == "" {
+			return nil
+		}
+		if d.IsDir() {
+			if _, ok := found[first]; ok {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.Contains(rel, "/") && strings.EqualFold(filepath.Ext(d.Name()), ".strm") {
+			found[first] = struct{}{}
 		}
 		return nil
 	})
+	if len(found) == 0 {
+		return nil
+	}
 	return found
 }
 
@@ -458,6 +473,45 @@ func shouldAutoAddTemporaryBranch(ctx context.Context, deps ScanDeps, task *doma
 	return false
 }
 
+// looksLikeNotFound 判断错误是否可视为“目录/对象不存在”。
+func looksLikeNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	if ae, ok := domain.AsAppError(err); ok && ae.Code == domain.CodeNotFound {
+		return true
+	}
+	// 仅对 OpenList 的「object not found」做文案兜底，避免误伤 token/path 等其他 not found。
+	return strings.Contains(strings.ToLower(err.Error()), "object not found")
+}
+
+// dirRelPath 把相对目录段拼成可读的斜杠路径，用于失败记录。
+func dirRelPath(relDirs []string) string {
+	if len(relDirs) == 0 {
+		return "/"
+	}
+	return strings.Join(relDirs, "/")
+}
+
+// listDirWithNotFoundRetry 三段式列目录：正常列 → not found 强刷一次 → 仍 not found 记录失败并跳过。
+// 返回 err 非 nil 表示非 not found 的致命错误，由上层中止扫描。
+func listDirWithNotFoundRetry(ctx context.Context, task *domain.StrmTask, deps ScanDeps, parentID string, relDirs []string) (items []domain.FileItem, skip bool, err error) {
+	items, err = deps.Files.List(ctx, task.AccountID, parentID, false)
+	if err != nil && looksLikeNotFound(err) {
+		items, err = deps.Files.List(ctx, task.AccountID, parentID, true)
+	}
+	if err != nil {
+		if looksLikeNotFound(err) {
+			if deps.Failures != nil {
+				deps.Failures.Add(ScanFailureStrm, dirRelPath(relDirs), err.Error())
+			}
+			return nil, true, nil
+		}
+		return nil, false, err
+	}
+	return items, false, nil
+}
+
 func walkBaseBranchEntry(
 	ctx context.Context,
 	task *domain.StrmTask,
@@ -478,13 +532,19 @@ func walkBaseBranchEntry(
 ) ([]scanScope, map[string]struct{}, error) {
 	relDirs := append([]string{}, scope.relDirs...)
 	reportScanProgress(deps.OnProgress, ScanPhaseScan, 0, 0, dirProgressLabel(relDirs))
-	items, err := deps.Files.List(ctx, task.AccountID, scope.parentID, false)
+	items, skip, err := listDirWithNotFoundRetry(ctx, task, deps, scope.parentID, relDirs)
 	if err != nil {
 		return nil, nil, err
+	}
+	if skip {
+		skippedDirs[dirKey(relDirs)] = struct{}{}
+		return nil, nil, nil
 	}
 	recordMetadataDirectory(metadataDirs, scope.parentID, relDirs)
 
 	currentKey := dirKey(relDirs)
+	outputFolder := TaskRelDir(task.GroupDir, task.OutputFolder)
+	localStrmChildren := localChildDirsWithStrm(strmRoot, outputFolder, relDirs)
 	localHasMedia := false
 	var dirMeta []metadataItem
 	var childScopes []scanScope
@@ -503,7 +563,7 @@ func walkBaseBranchEntry(
 				continue
 			}
 			childRel := append(append([]string{}, relDirs...), name)
-			if hasLocalStrmUnder(strmRoot, TaskRelDir(task.GroupDir, task.OutputFolder), childRel) {
+			if _, ok := localStrmChildren[SafeName(name)]; ok {
 				skippedDirs[dirKey(childRel)] = struct{}{}
 				markSubtreeMedia(subtreeHasMedia, childRel)
 				continue
@@ -515,7 +575,7 @@ func walkBaseBranchEntry(
 				recursive:  true,
 				remotePath: childRemote,
 			}
-			if shouldAutoAddTemporaryBranch(ctx, deps, task, childID, exts) && deps.Branches != nil {
+			if deps.Branches != nil && shouldAutoAddTemporaryBranch(ctx, deps, task, childID, exts) {
 				relativePath := strings.Join(childRel, "/")
 				expiresAt := time.Now().Add(30 * 24 * time.Hour)
 				branch := &domain.StrmBranch{
@@ -544,27 +604,17 @@ func walkBaseBranchEntry(
 		if matchesKeywordRules(name, excludeFiles) {
 			continue
 		}
-		ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
-		if _, ok := exts[ext]; ok {
-			if minMediaBytes > 0 && item.Size < minMediaBytes {
-				continue
-			}
-			*candidates = append(*candidates, mediaCandidate{
-				fileID: item.ID, fileName: name, size: item.Size, relDirs: append([]string{}, relDirs...),
-			})
+		classified := classifyScanFile(item.ID, name, outputFolder, item.Size, relDirs, exts, metaExts, minMediaBytes, metaMaxBytes, syncMetadata)
+		if classified.hasMedia {
+			*candidates = append(*candidates, classified.media)
 			if deps.OnProgress != nil {
 				reportScanProgress(deps.OnProgress, ScanPhaseScan, 0, 1, dirProgressLabel(relDirs))
 			}
 			localHasMedia = true
 			continue
 		}
-		if syncMetadata && len(metaExts) > 0 {
-			if _, ok := metaExts[ext]; ok {
-				if metaMaxBytes > 0 && item.Size > metaMaxBytes {
-					continue
-				}
-				dirMeta = append(dirMeta, newMetadataItem(item.ID, name, TaskRelDir(task.GroupDir, task.OutputFolder), relDirs))
-			}
+		if classified.hasMetadata {
+			dirMeta = append(dirMeta, classified.metadata)
 		}
 	}
 	if localHasMedia {
@@ -599,6 +649,7 @@ func walkScope(
 	syncMetadata bool,
 	remoteChildren map[string]map[string]struct{},
 	metadataDirs map[string]metadataDirectory,
+	skippedDirs map[string]struct{},
 	candidates *[]mediaCandidate,
 	metadataItems *[]metadataItem,
 	dirHasMedia, subtreeHasMedia map[string]bool,
@@ -615,13 +666,18 @@ func walkScope(
 		n := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 		reportScanProgress(deps.OnProgress, ScanPhaseScan, 0, 0, dirProgressLabel(n.relDirs))
-		items, err := deps.Files.List(ctx, task.AccountID, n.parentID, false)
+		items, skip, err := listDirWithNotFoundRetry(ctx, task, deps, n.parentID, n.relDirs)
 		if err != nil {
 			return err
+		}
+		if skip {
+			skippedDirs[dirKey(n.relDirs)] = struct{}{}
+			continue
 		}
 		recordMetadataDirectory(metadataDirs, n.parentID, n.relDirs)
 		childNames := make(map[string]struct{})
 		dirKey := dirKey(n.relDirs)
+		outputFolder := TaskRelDir(task.GroupDir, task.OutputFolder)
 		localHasMedia := false
 		var dirMeta []metadataItem
 		for i := range items {
@@ -641,27 +697,17 @@ func walkScope(
 			if matchesKeywordRules(name, excludeFiles) {
 				continue
 			}
-			ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
-			if _, ok := exts[ext]; ok {
-				if minMediaBytes > 0 && item.Size < minMediaBytes {
-					continue
-				}
-				*candidates = append(*candidates, mediaCandidate{
-					fileID: item.ID, fileName: name, size: item.Size, relDirs: append([]string{}, n.relDirs...),
-				})
+			classified := classifyScanFile(item.ID, name, outputFolder, item.Size, n.relDirs, exts, metaExts, minMediaBytes, metaMaxBytes, syncMetadata)
+			if classified.hasMedia {
+				*candidates = append(*candidates, classified.media)
 				if deps.OnProgress != nil {
 					reportScanProgress(deps.OnProgress, ScanPhaseScan, 0, 1, dirProgressLabel(n.relDirs))
 				}
 				localHasMedia = true
 				continue
 			}
-			if syncMetadata && len(metaExts) > 0 {
-				if _, ok := metaExts[ext]; ok {
-					if metaMaxBytes > 0 && item.Size > metaMaxBytes {
-						continue
-					}
-					dirMeta = append(dirMeta, newMetadataItem(item.ID, name, TaskRelDir(task.GroupDir, task.OutputFolder), n.relDirs))
-				}
+			if classified.hasMetadata {
+				dirMeta = append(dirMeta, classified.metadata)
 			}
 		}
 		recordRemoteChildren(remoteChildren, n.relDirs, childNames)
@@ -1014,13 +1060,13 @@ func cleanupMissingRemoteChildDirs(root, outputFolder string, remoteChildren map
 				continue
 			}
 			childPath := filepath.Join(localBase, e.Name())
-			n := countFilesUnder(childPath)
+			n := countStrmFiles(childPath)
 			if err := os.RemoveAll(childPath); err != nil && !os.IsNotExist(err) {
 				return removed, err
 			}
 			removed += n
 			if log != nil {
-				log.Info("strm cleanup remote deleted dir", "path", childPath, "files_removed", n)
+				log.Info("strm cleanup remote deleted dir", "path", childPath, "strm_removed", n)
 			}
 		}
 	}
@@ -1115,27 +1161,14 @@ func isStrmUnderSkipped(strmRel, taskFolder string, skipped map[string]struct{})
 	suffix := strings.TrimPrefix(rel, prefix+"/")
 	for key := range skipped {
 		if key == "" {
-			continue
+			// 空 key 表示任务根目录被跳过：保护整个任务目录子树，避免误删任意层级 STRM。
+			return true
 		}
 		if suffix == key || strings.HasPrefix(suffix, key+"/") {
 			return true
 		}
 	}
 	return false
-}
-
-func countFilesUnder(dir string) int64 {
-	var n int64
-	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() {
-			n++
-		}
-		return nil
-	})
-	return n
 }
 
 func countStrmFiles(dir string) int64 {

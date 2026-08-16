@@ -13,7 +13,8 @@ import (
 )
 
 type metadataTestDriver struct {
-	items map[string][]domain.FileItem
+	items     map[string][]domain.FileItem
+	listCalls map[string]int
 }
 
 func (d *metadataTestDriver) Config() driver.Config      { return driver.Config{Name: "metadata-test"} }
@@ -22,6 +23,9 @@ func (d *metadataTestDriver) Init(context.Context) error { return nil }
 func (d *metadataTestDriver) Drop(context.Context) error { return nil }
 func (d *metadataTestDriver) Ping(context.Context) error { return nil }
 func (d *metadataTestDriver) ListFiles(_ context.Context, parentID string) ([]domain.FileItem, error) {
+	if d.listCalls != nil {
+		d.listCalls[parentID]++
+	}
 	return d.items[parentID], nil
 }
 
@@ -157,6 +161,52 @@ func TestWalkBaseBranchEntryTreatsSkippedLocalSTRMAsSubtreeMedia(t *testing.T) {
 	got := filterMetadataItems(metadataItems, dirHasMedia, subtreeHasMedia, true)
 	if len(got) != 1 || got[0].relPath != filepath.Join("任务", "电视剧", "poster.jpg") {
 		t.Fatalf("开启父目录元数据后应保留海报，结果=%v", metadataPaths(got))
+	}
+}
+
+func TestWalkBaseBranchEntrySkipsBranchProbeWithoutRepository(t *testing.T) {
+	t.Parallel()
+
+	drv := &metadataTestDriver{
+		items: map[string][]domain.FileItem{
+			"show": {
+				{ID: "season-1", Name: "Season 1", IsDir: true},
+			},
+			"season-1": {
+				{ID: "episode-1", Name: "S01E01.mkv", Size: 10 << 20},
+			},
+		},
+		listCalls: make(map[string]int),
+	}
+	files := file.NewService(driverexec.New(metadataTestProvider{drv: drv}, nil), nil, nil, nil, nil, nil)
+	task := &domain.StrmTask{ID: 1, AccountID: 1, OutputFolder: "任务"}
+	deps := ScanDeps{Files: files}
+	scope := scanScope{parentID: "show", relDirs: []string{"电视剧"}, baseEntry: true}
+
+	var candidates []mediaCandidate
+	var metadataItems []metadataItem
+	dirHasMedia := make(map[string]bool)
+	subtreeHasMedia := make(map[string]bool)
+	skippedDirs := make(map[string]struct{})
+
+	children, _, err := walkBaseBranchEntry(
+		context.Background(), task, deps, scope,
+		map[string]struct{}{"mkv": {}}, nil,
+		nil, nil, 0, 0, false,
+		make(map[string]struct{}), skippedDirs, make(map[string]metadataDirectory), t.TempDir(),
+		&candidates, &metadataItems, dirHasMedia, subtreeHasMedia, nil,
+	)
+	if err != nil {
+		t.Fatalf("扫描基础分支: %v", err)
+	}
+	if len(children) != 1 {
+		t.Fatalf("children=%d, want 1", len(children))
+	}
+	if got := drv.listCalls["show"]; got != 1 {
+		t.Fatalf("根目录 List 次数=%d, want 1", got)
+	}
+	if got := drv.listCalls["season-1"]; got != 0 {
+		t.Fatalf("未启用分支仓库时不应预探测子目录，season-1 List 次数=%d", got)
 	}
 }
 

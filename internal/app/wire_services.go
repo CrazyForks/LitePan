@@ -123,6 +123,7 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		Bindings:       st.store.QuarkTVBindings,
 		Accounts:       st.store.Accounts,
 		AccountProfile: accountProfileSvc,
+		Bus:            core.bus,
 		Log:            logs.For(logx.ModuleSystem),
 	})
 	playbackSvc.SetDownloadResolverHook(quarktvSvc.ResolveHook)

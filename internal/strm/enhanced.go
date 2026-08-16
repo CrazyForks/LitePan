@@ -3,7 +3,6 @@ package strm
 import (
 	"context"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -58,6 +57,7 @@ func scanEnhancedTask(
 	}
 
 	rootSegs := splitRemotePath(task.Path)
+	outputFolder := TaskRelDir(task.GroupDir, task.OutputFolder)
 	var candidates []mediaCandidate
 	var metadataItems []metadataItem
 	dirHasMedia := make(map[string]bool)
@@ -81,25 +81,15 @@ func scanEnhancedTask(
 			continue // 远端路径不在任务根范围内，忽略
 		}
 		recordMetadataDirectory(state.metadataDirs, e.ParentID, relDirs)
-		ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(e.Name)), ".")
-		if _, ok := exts[ext]; ok {
-			if minMediaBytes > 0 && e.Size < minMediaBytes {
-				continue
-			}
-			candidates = append(candidates, mediaCandidate{
-				fileID: e.FileID, fileName: e.Name, size: e.Size, relDirs: append([]string{}, relDirs...),
-			})
+		classified := classifyScanFile(e.FileID, e.Name, outputFolder, e.Size, relDirs, exts, metaExts, minMediaBytes, metaMaxBytes, task.SyncMetadata)
+		if classified.hasMedia {
+			candidates = append(candidates, classified.media)
 			dirHasMedia[dirKey(relDirs)] = true
 			markSubtreeMedia(subtreeHasMedia, relDirs)
 			continue
 		}
-		if task.SyncMetadata && len(metaExts) > 0 {
-			if _, ok := metaExts[ext]; ok {
-				if metaMaxBytes > 0 && e.Size > metaMaxBytes {
-					continue
-				}
-				metadataItems = append(metadataItems, newMetadataItem(e.FileID, e.Name, TaskRelDir(task.GroupDir, task.OutputFolder), relDirs))
-			}
+		if classified.hasMetadata {
+			metadataItems = append(metadataItems, classified.metadata)
 		}
 	}
 

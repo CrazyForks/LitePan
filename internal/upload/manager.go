@@ -54,8 +54,12 @@ type Manager struct {
 	runningDownloads       int
 	runCond                sync.Cond
 	subs                   map[chan []byte]struct{}
+	broadcastPending       bool
+	broadcastDirty         bool
 	subMu                  sync.Mutex
+	clientTaskIndex        map[string]string
 	tempRegistry           *TempRegistry
+	targetDirCache         *uploadTargetDirCache
 	completedOfflineGroups map[string]struct{}
 	runCtx                 context.Context
 	runCancel              context.CancelFunc
@@ -80,6 +84,8 @@ func NewManager(opts Options) *Manager {
 		tasks:                  make(map[string]*taskState),
 		limit:                  defaultLimit,
 		subs:                   make(map[chan []byte]struct{}),
+		clientTaskIndex:        make(map[string]string),
+		targetDirCache:         newUploadTargetDirCache(),
 		completedOfflineGroups: make(map[string]struct{}),
 		runCtx:                 runCtx,
 		runCancel:              runCancel,
@@ -160,7 +166,7 @@ func (m *Manager) createBatch(ctx context.Context, params []CreateParams) ([]*Ta
 			continue
 		}
 		st := m.newTaskStateLocked(p)
-		m.tasks[st.TaskID] = st
+		m.addTaskLocked(st)
 		created = append(created, st)
 		result[i] = m.snapshot(st)
 	}
@@ -171,7 +177,7 @@ func (m *Manager) createBatch(ctx context.Context, params []CreateParams) ([]*Ta
 		if err := m.persistTask(st); err != nil {
 			m.mu.Lock()
 			for _, item := range created {
-				delete(m.tasks, item.TaskID)
+				m.removeTaskLocked(item.TaskID)
 			}
 			m.mu.Unlock()
 			for _, id := range persisted {
@@ -188,6 +194,40 @@ func (m *Manager) createBatch(ctx context.Context, params []CreateParams) ([]*Ta
 		go m.runTask(st.TaskID)
 	}
 	return result, nil
+}
+
+func normalizeClientTaskID(clientTaskID string) string {
+	return strings.TrimSpace(clientTaskID)
+}
+
+func (m *Manager) addTaskLocked(st *taskState) {
+	if st == nil {
+		return
+	}
+	m.tasks[st.TaskID] = st
+	clientTaskID := normalizeClientTaskID(st.ClientTaskID)
+	if clientTaskID == "" {
+		return
+	}
+	if m.clientTaskIndex == nil {
+		m.clientTaskIndex = make(map[string]string)
+	}
+	m.clientTaskIndex[clientTaskID] = st.TaskID
+}
+
+func (m *Manager) removeTaskLocked(taskID string) *taskState {
+	st, ok := m.tasks[taskID]
+	if !ok {
+		return nil
+	}
+	delete(m.tasks, taskID)
+	clientTaskID := normalizeClientTaskID(st.ClientTaskID)
+	if clientTaskID != "" {
+		if indexedID, ok := m.clientTaskIndex[clientTaskID]; ok && indexedID == taskID {
+			delete(m.clientTaskIndex, clientTaskID)
+		}
+	}
+	return st
 }
 
 func (m *Manager) Stop(ctx context.Context) error {
@@ -399,12 +439,22 @@ func (m *Manager) CreateServerLocalTasks(ctx context.Context, params []ServerLoc
 }
 
 func (m *Manager) findByClientTaskIDLocked(clientTaskID string) *taskState {
-	clientTaskID = strings.TrimSpace(clientTaskID)
+	clientTaskID = normalizeClientTaskID(clientTaskID)
 	if clientTaskID == "" {
 		return nil
 	}
+	if taskID, ok := m.clientTaskIndex[clientTaskID]; ok {
+		if st, exists := m.tasks[taskID]; exists && normalizeClientTaskID(st.ClientTaskID) == clientTaskID {
+			return st
+		}
+		delete(m.clientTaskIndex, clientTaskID)
+	}
 	for _, st := range m.tasks {
-		if st.ClientTaskID == clientTaskID {
+		if normalizeClientTaskID(st.ClientTaskID) == clientTaskID {
+			if m.clientTaskIndex == nil {
+				m.clientTaskIndex = make(map[string]string)
+			}
+			m.clientTaskIndex[clientTaskID] = st.TaskID
 			return st
 		}
 	}
