@@ -26,7 +26,7 @@ var (
 	enSeasonSuffixRe = regexp.MustCompile(`(?i)^(?P<title>.+?)[\s._\-]+(?:Season|Series)\s*0*(?P<num>\d{1,3})\s*$`)
 	trailingNumberRe = regexp.MustCompile(`(?P<title>.+?)[\s._\-]*(?P<num>\d{1,2})\s*$`)
 
-	chineseSubTagRe          = regexp.MustCompile(`(?i)[\[【][^\]】]*?(?:字幕组|压制组|压制|字幕社|动漫国|fansub|sub|raws?|喵萌|霜庭云花|爱恋|猎户|动音漫影|花园字幕组|风之圣殿|澄空学园|轻之国度|肉肉|纪伊宫|银光字幕组|Lilith[-\s]?Raws|ANi|VCB[- ]?Studio|DBD|DKB|喵萌奶茶屋|动漫之家)[^\]】]*?[\]】]`)
+	chineseSubTagRe          = regexp.MustCompile(`(?i)[\[【][^\]】]*?(?:字幕组|压制组|压制|字幕社|动漫国|fansub|sub|raws?|喵萌|霜庭云花|爱恋|猎户|动音漫影|花园字幕组|风之圣殿|澄空学园|轻之国度|肉肉|纪伊宫|银光字幕组|北宇治|漫猫|樱都|桜都|萌樱|悠哈璃羽|云歌|氢气烤肉架|拨雪寻春|沸羊羊|极影|织梦|枫叶|猪猪|幻之|曙光|恶魔岛|爱恋字幕社|Lilith[-\s]?Raws|ANi|VCB[- ]?Studio|DBD|DKB|SweetSub|LoliHouse|Nekomoe|MCE|HYSUB|KTXP|MingY|NC[-\s]?Raws|喵萌奶茶屋|动漫之家)[^\]】]*?[\]】]`)
 	animeBracketSquareRe     = regexp.MustCompile(`\[[^\]]+\]`)
 	animeBracketCornerRe     = regexp.MustCompile(`【[^】]+】`)
 	animeEpisodeRe           = regexp.MustCompile(`\s+-\s*(\d{1,4})\s*(?:[\(（]|\[|【|$|[\s.])`)

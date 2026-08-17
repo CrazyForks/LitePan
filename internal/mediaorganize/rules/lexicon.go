@@ -36,6 +36,10 @@ var KnownReleaseGroups = map[string]struct{}{
 	"BiliBili": {}, "ByRA": {}, "ByMQ": {}, "NowYS": {}, "QHstudIo": {}, "RARBG": {},
 	"YTS": {}, "YIFY": {}, "EVO": {}, "GalaxyRG": {}, "MeGusta": {},
 	"FFans": {}, "MNHD": {}, "MTeamWEB": {},
+	// 中文压制组 / 民间组
+	"CMCT": {}, "beAst": {}, "BeAst": {}, "CHDWiKi": {}, "SUM": {}, "CEE": {},
+	// 动漫字幕组（ASCII 尾部形态）
+	"SweetSub": {}, "LoliHouse": {}, "Nekomoe": {}, "MCE": {}, "HYSUB": {}, "KTXP": {}, "MingY": {}, "ANi": {},
 }
 
 var knownReleaseGroupsCI map[string]struct{}

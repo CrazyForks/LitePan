@@ -93,6 +93,68 @@ func intPtrEqual(a, b *int) bool {
 	return *a == *b
 }
 
+func TestReleaseGroupAndSubtitleStripping(t *testing.T) {
+	tests := []struct {
+		name               string
+		input              string
+		wantTitle          string
+		wantYear           *int
+		wantReleaseGroup   string
+	}{
+		{
+			name:             "chinese release group tail cmct",
+			input:            "千与千寻.2019.1080p.WEB-DL.x264-CMCT.mkv",
+			wantTitle:        "千与千寻",
+			wantYear:         intPtr(2019),
+			wantReleaseGroup: "CMCT",
+		},
+		{
+			name:             "chinese release group tail beast",
+			input:            "The.Matrix.1999.1080p.BluRay.x264-beAst.mkv",
+			wantTitle:        "The Matrix",
+			wantYear:         intPtr(1999),
+			wantReleaseGroup: "beAst",
+		},
+		{
+			name:             "anime ascii sub group tail sweetsub",
+			input:            "Spy.x.Family.2022.1080p.WEB-DL.AAC2.0.H.264-SweetSub.mkv",
+			wantTitle:        "Spy x Family",
+			wantYear:         intPtr(2022),
+			wantReleaseGroup: "SweetSub",
+		},
+		{
+			name:      "anime bracket loli house",
+			input:     "[LoliHouse] 孤独摇滚！ - 01 [WebRip 1080p HEVC-10bit AAC][简繁内封字幕].mkv",
+			wantTitle: "孤独摇滚！",
+		},
+		{
+			name:      "anime bracket kitauji sub",
+			input:     "[北宇治字幕组] 吹响吧！上低音号 [1080P].mkv",
+			wantTitle: "吹响吧！上低音号",
+		},
+		{
+			name:      "anime bracket gisou sub",
+			input:     "【极影字幕社】我的青春恋爱物语果然有问题 [01].mkv",
+			wantTitle: "我的青春恋爱物语果然有问题",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NormalizeParsedMedia(ParseFilenameStrict(tt.input))
+			if got.Title != tt.wantTitle {
+				t.Fatalf("title = %q, want %q (full=%+v)", got.Title, tt.wantTitle, got)
+			}
+			if !intPtrEqual(got.Year, tt.wantYear) {
+				t.Fatalf("year = %v, want %v (full=%+v)", got.Year, tt.wantYear, got)
+			}
+			if got.ReleaseGroup != tt.wantReleaseGroup {
+				t.Fatalf("release_group = %q, want %q (full=%+v)", got.ReleaseGroup, tt.wantReleaseGroup, got)
+			}
+		})
+	}
+}
+
 func TestParseFilenameWithStackedEquivalentEpisodeMarkers(t *testing.T) {
 	for _, tt := range []struct {
 		name    string

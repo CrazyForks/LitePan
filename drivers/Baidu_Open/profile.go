@@ -29,9 +29,10 @@ func (d *Driver) GetAccountProfile(ctx context.Context) (*domain.AccountProfile,
 		nick = info.BaiduName
 	}
 	p := &domain.AccountProfile{UserID: strconv.FormatInt(info.UK, 10), Nickname: nick, UsedBytes: quota.Used, TotalBytes: quota.Total}
-	if info.VIPType == 2 {
+	switch info.VIPType {
+	case 2:
 		p.Membership = "SVIP"
-	} else if info.VIPType == 1 {
+	case 1:
 		p.Membership = "VIP"
 	}
 	return p, nil
