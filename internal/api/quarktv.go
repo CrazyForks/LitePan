@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"litepan/internal/domain"
+	"litepan/internal/quarktv"
 )
 
 // getQuarkTVStatus 返回夸克 TV 播放接管卡片状态。
@@ -124,4 +125,33 @@ func (h *Handler) unbindQuarkTV(w http.ResponseWriter, r *http.Request) {
 		h.playback.InvalidateAll()
 	}
 	writeOK(w, map[string]any{"removed": true})
+}
+
+// updateQuarkTVBindingSettings 更新某个绑定账号的播放设置。
+func (h *Handler) updateQuarkTVBindingSettings(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		AccountID           int64  `json:"account_id"`
+		PreferredResolution string `json:"preferred_resolution"`
+		AllowDolby          bool   `json:"allow_dolby"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if h.quarktv == nil {
+		writeErr(w, domain.Errf(domain.CodeNotImplement))
+		return
+	}
+	updated, err := h.quarktv.UpdateBindingSettings(r.Context(), in.AccountID, quarktv.BindingSettings{
+		PreferredResolution: in.PreferredResolution,
+		AllowDolby:          in.AllowDolby,
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if h.playback != nil {
+		h.playback.InvalidateAccount(in.AccountID)
+	}
+	writeOK(w, updated)
 }

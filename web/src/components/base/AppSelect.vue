@@ -4,6 +4,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 interface Option {
   value: string | number | boolean;
   label: string;
+  disabled?: boolean;
+  tag?: string;
 }
 
 const props = withDefaults(
@@ -56,6 +58,7 @@ function toggle() {
 }
 
 function choose(opt: Option) {
+  if (opt.disabled) return;
   emit("update:modelValue", opt.value);
   close();
 }
@@ -101,10 +104,16 @@ onUnmounted(() => {
             v-for="opt in options"
             :key="String(opt.value)"
             class="select__option"
-            :class="{ 'select__option--active': opt.value === modelValue }"
+            :class="{
+              'select__option--active': opt.value === modelValue,
+              'select__option--disabled': opt.disabled,
+            }"
             @click="choose(opt)"
           >
-            {{ opt.label }}
+            <span class="select__option-row">
+              <span>{{ opt.label }}</span>
+              <span v-if="opt.tag" class="select__option-tag">{{ opt.tag }}</span>
+            </span>
           </li>
           <li v-if="!options.length" class="select__empty">无可选项</li>
         </ul>
@@ -182,12 +191,34 @@ onUnmounted(() => {
   font-size: 14px;
   color: var(--text);
 }
+.select__option-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
 .select__option:hover {
   background: var(--border-soft);
 }
 .select__option--active {
   color: var(--brand);
   font-weight: 600;
+}
+.select__option--disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+.select__option--disabled:hover {
+  background: transparent;
+}
+.select__option-tag {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--warning) 14%, var(--surface));
+  color: #b45309;
 }
 .select__empty {
   padding: 8px 12px;

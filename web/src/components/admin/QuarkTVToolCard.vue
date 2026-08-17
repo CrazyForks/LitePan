@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { getApiErrorMessage } from "@/api/client";
 import {
   quarkTVApi,
@@ -11,6 +11,8 @@ import { confirm } from "@/composables/useConfirm";
 import { toast } from "@/composables/useToast";
 import AppButton from "@/components/base/AppButton.vue";
 import AppModal from "@/components/base/AppModal.vue";
+import AppSelect from "@/components/base/AppSelect.vue";
+import SettingsBoolSegment from "@/components/admin/SettingsBoolSegment.vue";
 import CloudToolCard from "@/components/admin/CloudToolCard.vue";
 import QuarkTVBindModal from "@/components/admin/QuarkTVBindModal.vue";
 
@@ -22,6 +24,38 @@ const qtvAccounts = ref<QuarkTVAccount[]>([]);
 const qtvBindOpen = ref(false);
 const qtvManageOpen = ref(false);
 const qtvUnbindingID = ref<number | null>(null);
+const qtvSettingsOpen = ref(false);
+const qtvSettingsSaving = ref(false);
+const qtvEditingBinding = ref<QuarkTVBinding | null>(null);
+const qtvResolution = ref("auto");
+const qtvAllowDolby = ref(false);
+
+const settingsChanged = computed(
+  () =>
+    !!qtvEditingBinding.value &&
+    (qtvResolution.value !== (qtvEditingBinding.value.preferred_resolution || "auto") ||
+      qtvAllowDolby.value !== !!qtvEditingBinding.value.allow_dolby),
+);
+
+const settingsResolutionOptions = computed(() => {
+  const binding = qtvEditingBinding.value;
+  const advancedDisabled = binding ? !supportsAdvancedQuality(binding.membership) : false;
+  return [
+    { value: "auto", label: "自动（最高可用）" },
+    { value: "4k", label: "4K", disabled: advancedDisabled, tag: "SVIP" },
+    { value: "2k", label: "2K", disabled: advancedDisabled, tag: "SVIP" },
+    { value: "super", label: "超清 1080P", disabled: advancedDisabled, tag: "SVIP" },
+    { value: "high", label: "高清 720P", disabled: advancedDisabled, tag: "SVIP" },
+    { value: "normal", label: "标清 480P", disabled: advancedDisabled, tag: "SVIP" },
+    { value: "low", label: "流畅 360P" },
+  ];
+});
+
+const dolbyControlDisabled = computed(() => {
+  const binding = qtvEditingBinding.value;
+  if (!binding) return false;
+  return !supportsAdvancedQuality(binding.membership) && !qtvAllowDolby.value;
+});
 
 function matches(title: string) {
   const q = props.searchQuery.trim().toLowerCase();
@@ -61,6 +95,38 @@ function openManage() {
 
 function closeManage() {
   qtvManageOpen.value = false;
+}
+
+function openSettings(binding: QuarkTVBinding) {
+  qtvEditingBinding.value = binding;
+  qtvResolution.value = binding.preferred_resolution || "auto";
+  qtvAllowDolby.value = !!binding.allow_dolby;
+  qtvSettingsOpen.value = true;
+}
+
+function closeSettings() {
+  if (qtvSettingsSaving.value) return;
+  qtvSettingsOpen.value = false;
+  qtvEditingBinding.value = null;
+}
+
+function resolutionLabel(value: string) {
+  return settingsResolutionOptions.value.find((item) => item.value === value)?.label || "自动（最高可用）";
+}
+
+function bindingSummary(binding: QuarkTVBinding) {
+  const base = resolutionLabel(binding.preferred_resolution || "auto");
+  return `${base} · 杜比${binding.allow_dolby ? "已开启" : "已关闭"}`;
+}
+
+function displayMembership(binding: QuarkTVBinding | null) {
+  if (!binding) return "未知";
+  return binding.membership?.trim() || "未知";
+}
+
+function supportsAdvancedQuality(membership: string) {
+  const value = membership.trim().toUpperCase();
+  return value === "SVIP" || value === "SVIP+" || value === "88VIP";
 }
 
 async function openBind() {
@@ -121,6 +187,28 @@ async function unbind(binding: QuarkTVBinding) {
     qtvUnbindingID.value = null;
   }
 }
+
+async function saveSettings() {
+  if (!qtvEditingBinding.value) return;
+  qtvSettingsSaving.value = true;
+  try {
+    const updated = await quarkTVApi.updateBindingSettings({
+      account_id: qtvEditingBinding.value.account_id,
+      preferred_resolution: qtvResolution.value,
+      allow_dolby: qtvAllowDolby.value,
+    });
+    qtvStatus.value.bindings = qtvStatus.value.bindings.map((item) =>
+      item.account_id === updated.account_id ? updated : item,
+    );
+    qtvEditingBinding.value = updated;
+    qtvSettingsOpen.value = false;
+    toast.success("播放设置已保存");
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "保存播放设置失败"));
+  } finally {
+    qtvSettingsSaving.value = false;
+  }
+}
 </script>
 
 <template>
@@ -174,10 +262,14 @@ async function unbind(binding: QuarkTVBinding) {
           <div class="qtv-item__main">
             <strong>{{ b.account_name }}</strong>
             <span>TV 账号：{{ b.tv_nickname || "未知" }}</span>
+            <span>播放设置：{{ bindingSummary(b) }}</span>
           </div>
-          <AppButton variant="danger" :disabled="qtvUnbindingID === b.account_id" @click="unbind(b)">
-            {{ qtvUnbindingID === b.account_id ? "解绑中…" : "解绑" }}
-          </AppButton>
+          <div class="qtv-item__actions">
+            <AppButton variant="secondary" @click="openSettings(b)">播放设置</AppButton>
+            <AppButton variant="danger" :disabled="qtvUnbindingID === b.account_id" @click="unbind(b)">
+              {{ qtvUnbindingID === b.account_id ? "解绑中…" : "解绑" }}
+            </AppButton>
+          </div>
         </div>
       </div>
       <div v-else class="qtv-empty">还没有绑定账号</div>
@@ -194,6 +286,41 @@ async function unbind(binding: QuarkTVBinding) {
       @close="closeBind"
       @bound="onBound"
     />
+
+    <AppModal :open="qtvSettingsOpen" title="夸克 TV 播放设置" size="md" @close="closeSettings">
+      <div v-if="qtvEditingBinding" class="qtv-settings">
+        <div class="qtv-settings__hint">
+          <strong>{{ qtvEditingBinding.account_name }}</strong>
+          <span>TV 账号：{{ qtvEditingBinding.tv_nickname || "未知" }}</span>
+          <span>当前会员：{{ displayMembership(qtvEditingBinding) }}</span>
+        </div>
+        <label class="qtv-settings__field">
+          <span>清晰度偏好</span>
+          <AppSelect v-model="qtvResolution" :options="settingsResolutionOptions" />
+          <small>自动模式会在非杜比范围内选择当前账号可访问的最高画质。</small>
+        </label>
+        <label class="qtv-settings__field">
+          <div class="qtv-settings__field-head">
+            <span>杜比视界</span>
+            <span class="qtv-settings__tag">SVIP 限额</span>
+          </div>
+          <SettingsBoolSegment
+            v-model="qtvAllowDolby"
+            label="杜比视界"
+            off-label="关闭"
+            on-label="开启"
+            :disabled="dolbyControlDisabled"
+          />
+          <small>开启后优先尝试杜比视界；不可用时会自动降级到上面的清晰度偏好。</small>
+        </label>
+      </div>
+      <template #footer>
+        <AppButton variant="secondary" :disabled="qtvSettingsSaving" @click="closeSettings">取消</AppButton>
+        <AppButton variant="primary" :disabled="qtvSettingsSaving || !settingsChanged" @click="saveSettings">
+          {{ qtvSettingsSaving ? "保存中…" : "保存设置" }}
+        </AppButton>
+      </template>
+    </AppModal>
   </div>
 </template>
 
@@ -276,6 +403,12 @@ async function unbind(binding: QuarkTVBinding) {
   color: var(--text-muted);
 }
 
+.qtv-item__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .qtv-empty {
   padding: 28px 0;
   text-align: center;
@@ -288,5 +421,64 @@ async function unbind(binding: QuarkTVBinding) {
   align-items: center;
   justify-content: center;
   width: 100%;
+}
+
+.qtv-settings {
+  display: grid;
+  gap: 16px;
+}
+
+.qtv-settings__hint {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+.qtv-settings__hint strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.qtv-settings__hint span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.qtv-settings__field {
+  display: grid;
+  gap: 8px;
+}
+
+.qtv-settings__field > span {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.qtv-settings__field-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qtv-settings__tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--warning) 14%, var(--surface));
+  color: #b45309;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.qtv-settings__field small {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 </style>

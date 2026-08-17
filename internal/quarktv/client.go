@@ -400,6 +400,14 @@ type streamingVideoInfo struct {
 	Bitrate     float64 `json:"bitrate,omitempty"`
 }
 
+// StreamingPreference 定义每个绑定账号的播放偏好：
+// 1) PreferredResolution 决定普通清晰度的上限（auto 表示可访问最高）。
+// 2) AllowDolby 控制是否把杜比视界纳入候选。
+type StreamingPreference struct {
+	PreferredResolution string
+	AllowDolby          bool
+}
+
 // streamingResp 是夸克 TV method=streaming 的返回体，video_info 里每个可用清晰度各带一条播放直链。
 type streamingResp struct {
 	Data struct {
@@ -535,6 +543,13 @@ func firstString(m map[string]json.RawMessage, keys ...string) string {
 // streaming 解析夸克 TV 的转码播放直链（video-play 域），供播放器直接 302 使用。
 // 与源文件 download 不同，streaming 输出浏览器可播的 mp4/fmp4，range/seek 更稳。
 func (c *Client) streaming(ctx context.Context, fid string) (*domain.DownloadInfo, error) {
+	return c.streamingWithPreference(ctx, fid, StreamingPreference{
+		PreferredResolution: domain.QuarkTVResolutionAuto,
+		AllowDolby:          false,
+	})
+}
+
+func (c *Client) streamingWithPreference(ctx context.Context, fid string, pref StreamingPreference) (*domain.DownloadInfo, error) {
 	var out streamingResp
 	if err := c.do(ctx, http.MethodGet, "/file", url.Values{
 		"method":     {"streaming"},
@@ -546,32 +561,10 @@ func (c *Client) streaming(ctx context.Context, fid string) (*domain.DownloadInf
 		return nil, err
 	}
 
-	best, bestScore := -1, -1
-	for i, info := range out.Data.VideoInfo {
-		if strings.TrimSpace(info.URL) == "" {
-			continue
-		}
-		score := streamingScore(info)
-		if score > bestScore {
-			best, bestScore = i, score
-		}
-		if c.log != nil {
-			c.log.Info("夸克 TV 播放档位",
-				"fid", fid,
-				"resolution", info.Resolution,
-				"accessable", info.Accessable,
-				"trans_status", info.TransStatus,
-				"format", info.Format,
-				"width", info.Width,
-				"height", info.Height,
-				"size", info.Size,
-			)
-		}
+	info, ok := pickStreamingCandidate(fid, out.Data.VideoInfo, pref, c.log)
+	if !ok {
+		return nil, domain.Errorf(domain.CodeDriverError, "夸克 TV 未返回符合播放偏好的档位")
 	}
-	if best < 0 {
-		return nil, domain.Errorf(domain.CodeDriverError, "夸克 TV 未返回可播放档位")
-	}
-	info := out.Data.VideoInfo[best]
 	if c.log != nil {
 		c.log.Info("夸克 TV 播放直链解析",
 			"fid", fid,
@@ -587,22 +580,69 @@ func (c *Client) streaming(ctx context.Context, fid string) (*domain.DownloadInf
 	}, nil
 }
 
-// streamingScore 给档位打分：优先可访问、直连 mp4，其次高清。分数越大越优先。
-func streamingScore(info streamingVideoInfo) int {
-	score := resolutionRank(info.Resolution)
-	if info.Accessable != 0 {
-		score += 100
+func pickStreamingCandidate(fid string, infos []streamingVideoInfo, pref StreamingPreference, log *slog.Logger) (streamingVideoInfo, bool) {
+	preferred := domain.NormalizeQuarkTVResolution(pref.PreferredResolution)
+	best, bestScore := -1, -1
+	for i, info := range infos {
+		if strings.TrimSpace(info.URL) == "" {
+			continue
+		}
+		score, ok := streamingScore(info, preferred, pref.AllowDolby)
+		if !ok {
+			continue
+		}
+		if score > bestScore {
+			best, bestScore = i, score
+		}
+		if log != nil {
+			log.Info("夸克 TV 播放档位",
+				"fid", fid,
+				"resolution", info.Resolution,
+				"accessable", info.Accessable,
+				"trans_status", info.TransStatus,
+				"format", info.Format,
+				"width", info.Width,
+				"height", info.Height,
+				"size", info.Size,
+			)
+		}
 	}
+	if best < 0 {
+		return streamingVideoInfo{}, false
+	}
+	return infos[best], true
+}
+
+// streamingScore 给档位打分：优先可访问、直连 mp4，其次高清。分数越大越优先。
+func streamingScore(info streamingVideoInfo, preferred string, allowDolby bool) (int, bool) {
+	if info.Accessable == 0 {
+		return 0, false
+	}
+	rank := resolutionRank(info.Resolution)
+	if rank < 0 {
+		return 0, false
+	}
+	if !allowDolby && rank == 7 {
+		return 0, false
+	}
+	maxRank := preferredResolutionRank(preferred, allowDolby)
+	if rank > maxRank {
+		return 0, false
+	}
+	score := resolutionRank(info.Resolution)
+	score += 100
 	switch strings.ToLower(strings.TrimSpace(info.Format)) {
 	case "m3u8", "hls":
 		score -= 1000 // 尽量避开 HLS，浏览器 seek 更稳
 	}
-	return score
+	return score, true
 }
 
 // resolutionRank 把夸克清晰度映射为优先级：低→高。
 func resolutionRank(resolution string) int {
 	switch strings.ToLower(strings.TrimSpace(resolution)) {
+	case "dolby_vision", "dolby-vision", "dovi":
+		return 7
 	case "4k", "uhd", "2160p", "2160":
 		return 6
 	case "2k", "qhd", "1440p", "1440":
@@ -616,6 +656,28 @@ func resolutionRank(resolution string) int {
 	case "low", "360p", "360":
 		return 1
 	default:
-		return 0
+		return -1
+	}
+}
+
+func preferredResolutionRank(preferred string, allowDolby bool) int {
+	if allowDolby {
+		return 7
+	}
+	switch domain.NormalizeQuarkTVResolution(preferred) {
+	case domain.QuarkTVResolution4K:
+		return 6
+	case domain.QuarkTVResolution2K:
+		return 5
+	case domain.QuarkTVResolutionSuper:
+		return 4
+	case domain.QuarkTVResolutionHigh:
+		return 3
+	case domain.QuarkTVResolutionNormal:
+		return 2
+	case domain.QuarkTVResolutionLow:
+		return 1
+	default:
+		return 6
 	}
 }

@@ -109,9 +109,12 @@ func (s *Service) ListQuarkAccounts(ctx context.Context) ([]QuarkAccount, error)
 
 // BindingView 是卡片上的已绑定信息。
 type BindingView struct {
-	AccountID   int64  `json:"account_id"`
-	AccountName string `json:"account_name"`
-	TVNickname  string `json:"tv_nickname"`
+	AccountID           int64  `json:"account_id"`
+	AccountName         string `json:"account_name"`
+	TVNickname          string `json:"tv_nickname"`
+	PreferredResolution string `json:"preferred_resolution"`
+	AllowDolby          bool   `json:"allow_dolby"`
+	Membership          string `json:"membership"`
 }
 
 // Status 是卡片状态。
@@ -140,7 +143,15 @@ func (s *Service) Status(ctx context.Context) (Status, error) {
 			return st, err
 		}
 		if b != nil && b.RefreshToken != "" {
-			st.Bindings = append(st.Bindings, BindingView{AccountID: a.ID, AccountName: a.Name, TVNickname: b.TVNickname})
+			membership := s.bindingMembership(ctx, a.ID)
+			st.Bindings = append(st.Bindings, BindingView{
+				AccountID:           a.ID,
+				AccountName:         a.Name,
+				TVNickname:          b.TVNickname,
+				PreferredResolution: domain.NormalizeQuarkTVResolution(b.PreferredResolution),
+				AllowDolby:          b.AllowDolby,
+				Membership:          membership,
+			})
 		}
 	}
 	return st, nil
@@ -248,14 +259,15 @@ func (s *Service) PollBind(ctx context.Context, token string) (PollResult, error
 
 	deviceID, refreshToken, accessToken, expiresAt := sess.client.Snapshot()
 	binding := &domain.QuarkTVBinding{
-		AccountID:      sess.accountID,
-		DeviceID:       deviceID,
-		RefreshToken:   refreshToken,
-		AccessToken:    accessToken,
-		TokenExpiresAt: expiresAt,
-		TVUID:          tvUID,
-		TVNickname:     tvNickname,
-		BoundAt:        time.Now(),
+		AccountID:           sess.accountID,
+		DeviceID:            deviceID,
+		RefreshToken:        refreshToken,
+		AccessToken:         accessToken,
+		TokenExpiresAt:      expiresAt,
+		TVUID:               tvUID,
+		TVNickname:          tvNickname,
+		PreferredResolution: domain.QuarkTVResolutionAuto,
+		BoundAt:             time.Now(),
 	}
 	if err := s.bindings.Upsert(ctx, binding); err != nil {
 		s.dropSession(token)
@@ -274,6 +286,48 @@ func (s *Service) DeleteBinding(ctx context.Context, accountID int64) error {
 	return s.bindings.Delete(ctx, accountID)
 }
 
+type BindingSettings struct {
+	PreferredResolution string `json:"preferred_resolution"`
+	AllowDolby          bool   `json:"allow_dolby"`
+}
+
+func (s *Service) UpdateBindingSettings(ctx context.Context, accountID int64, in BindingSettings) (*BindingView, error) {
+	if err := s.ensureQuarkAccount(ctx, accountID); err != nil {
+		return nil, err
+	}
+	if s.bindings == nil {
+		return nil, domain.Errf(domain.CodeNotImplement)
+	}
+	b, err := s.bindings.Get(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if b == nil || strings.TrimSpace(b.RefreshToken) == "" {
+		return nil, domain.Errorf(domain.CodeValidation, "该账号还未绑定夸克 TV")
+	}
+	b.PreferredResolution = domain.NormalizeQuarkTVResolution(in.PreferredResolution)
+	b.AllowDolby = in.AllowDolby
+	if err := s.bindings.Upsert(ctx, b); err != nil {
+		return nil, err
+	}
+	acc, err := s.accounts.Get(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	name := ""
+	if acc != nil {
+		name = acc.Name
+	}
+	return &BindingView{
+		AccountID:           b.AccountID,
+		AccountName:         name,
+		TVNickname:          b.TVNickname,
+		PreferredResolution: b.PreferredResolution,
+		AllowDolby:          b.AllowDolby,
+		Membership:          s.bindingMembership(ctx, accountID),
+	}, nil
+}
+
 // ResolveHook 是播放解析接管钩子；返回 handled=true 表示用 TV 直链替换原解析。
 // 仅接管“播放”场景（前台预览/STRM 等），WebDAV、FUSE 等字节级读取（playback=false）不接管。
 func (s *Service) ResolveHook(ctx context.Context, accountID int64, driverType, fileID, ua string, playback bool) (*domain.DownloadInfo, bool, error) {
@@ -287,7 +341,10 @@ func (s *Service) ResolveHook(ctx context.Context, accountID int64, driverType, 
 	client := NewClient(b.DeviceID, b.RefreshToken, b.AccessToken, b.TokenExpiresAt)
 	client.SetLogger(s.log)
 	defer client.Close()
-	info, err := client.streaming(ctx, fileID)
+	info, err := client.streamingWithPreference(ctx, fileID, StreamingPreference{
+		PreferredResolution: b.PreferredResolution,
+		AllowDolby:          b.AllowDolby,
+	})
 	if err != nil {
 		s.log.Warn("夸克 TV 解析失败，回退夸克驱动本机代理", "account_id", accountID, "file_id", fileID, "err", err)
 		if domain.IsAuthExpiredError(err) {
@@ -366,6 +423,22 @@ func (s *Service) webAccountIdentity(ctx context.Context, accountID int64) (uid,
 		return "", "", domain.Errorf(domain.CodeDriverError, "获取夸克账号资料失败：%s", err.Error())
 	}
 	return strings.TrimSpace(profile.UserID), strings.TrimSpace(profile.Nickname), nil
+}
+
+func (s *Service) bindingMembership(ctx context.Context, accountID int64) string {
+	if s.accountProfile == nil {
+		return ""
+	}
+	if prof, ok := s.accountProfile.Get(accountID); ok {
+		if membership := strings.TrimSpace(prof.Membership); membership != "" {
+			return membership
+		}
+	}
+	prof, err := s.accountProfile.Refresh(ctx, accountID)
+	if err != nil || prof == nil {
+		return ""
+	}
+	return strings.TrimSpace(prof.Membership)
 }
 
 func (s *Service) ensureQuarkAccount(ctx context.Context, accountID int64) error {

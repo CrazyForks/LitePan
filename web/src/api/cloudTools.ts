@@ -56,6 +56,9 @@ export interface QuarkTVBinding {
   account_id: number;
   account_name: string;
   tv_nickname: string;
+  preferred_resolution: string;
+  allow_dolby: boolean;
+  membership: string;
 }
 
 export interface QuarkTVStatus {
@@ -78,6 +81,12 @@ export interface QuarkTVBindStart {
 export interface QuarkTVBindPoll {
   status: "waiting" | "success" | "failed" | "expired";
   message: string;
+}
+
+export interface QuarkTVBindingSettingsPayload {
+  account_id: number;
+  preferred_resolution: string;
+  allow_dolby: boolean;
 }
 
 export const cloudToolsApi = {
@@ -115,6 +124,8 @@ export const quarkTVApi = {
     http.post<QuarkTVBindStart>("/admin/tools/quarktv/bind/start", { account_id: accountId }),
   bindPoll: (token: string) =>
     http.post<QuarkTVBindPoll>("/admin/tools/quarktv/bind/poll", { token }),
+  updateBindingSettings: (payload: QuarkTVBindingSettingsPayload) =>
+    http.put<QuarkTVBinding>("/admin/tools/quarktv/binding/settings", payload),
   unbind: (accountId: number) =>
     http.del<{ removed: boolean }>("/admin/tools/quarktv/bind", { account_id: accountId }),
 };

@@ -302,6 +302,7 @@ func NewRouter(d Deps) http.Handler {
 					r.Get("/accounts", h.listQuarkTVAccounts)
 					r.Post("/bind/start", h.startQuarkTVBind)
 					r.Post("/bind/poll", h.pollQuarkTVBind)
+					r.Put("/binding/settings", h.updateQuarkTVBindingSettings)
 					r.Delete("/bind", h.unbindQuarkTV)
 				})
 				r.Route("/media-organize", func(r chi.Router) {
