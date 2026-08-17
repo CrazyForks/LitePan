@@ -7,6 +7,18 @@ import (
 	"strings"
 )
 
+var strmSafeNameRepl = strings.NewReplacer(
+	"/", "_",
+	"\\", "_",
+	":", "_",
+	"*", "_",
+	"?", "_",
+	"\"", "_",
+	"<", "_",
+	">", "_",
+	"|", "_",
+)
+
 func MediaStem(name string) string {
 	ext := filepath.Ext(name)
 	if ext == "" {
@@ -20,18 +32,20 @@ func SafeName(name string) string {
 	if name == "" {
 		return "_"
 	}
-	repl := strings.NewReplacer(
-		"/", "_",
-		"\\", "_",
-		":", "_",
-		"*", "_",
-		"?", "_",
-		"\"", "_",
-		"<", "_",
-		">", "_",
-		"|", "_",
-	)
-	name = repl.Replace(name)
+	name = strmSafeNameRepl.Replace(name)
+	if name == "" || name == "." || name == ".." {
+		return "_"
+	}
+	return name
+}
+
+// SafeStem 保留 STEM 前后空格，只替换非法字符；全空白 / 空串 / 点目录名兜底为 _。
+// 用于 STRM 文件名，保证「飞驰人生 .mp4」这类文件名生成的 STRM 保留扩展名前的空格。
+func SafeStem(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return "_"
+	}
+	name = strmSafeNameRepl.Replace(name)
 	if name == "" || name == "." || name == ".." {
 		return "_"
 	}
@@ -86,7 +100,7 @@ func LocalStrmFileName(fileName string, isoFilenameEnabled bool) string {
 	if isoFilenameEnabled && isISOFileName(fileName) {
 		return SafeName(fileName) + ".strm"
 	}
-	return SafeName(MediaStem(fileName)) + ".strm"
+	return SafeStem(MediaStem(fileName)) + ".strm"
 }
 
 func isISOFileName(fileName string) bool {
