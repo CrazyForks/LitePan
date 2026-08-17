@@ -114,9 +114,6 @@ func New(opts Options) *Service {
 		return http.ErrUseLastResponse
 	}
 	strmDir := strings.TrimSpace(opts.StrmDir)
-	if strmDir == "" {
-		strmDir = "/app/strm"
-	}
 	return &Service{
 		settings:       opts.Settings,
 		playback:       opts.Playback,
@@ -1061,9 +1058,6 @@ func (s *Service) readStrmURL(rawPath string, cfg Config) string {
 
 func (s *Service) resolvePathMaps(raw string) [][2]string {
 	strmDir := strings.TrimRight(strings.TrimSpace(s.strmDir), "/")
-	if strmDir == "" {
-		strmDir = "/app/strm"
-	}
 	roots := hostStrmRoots(raw)
 	out := make([][2]string, 0, len(roots))
 	for _, from := range roots {

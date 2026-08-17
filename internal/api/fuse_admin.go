@@ -30,7 +30,8 @@ type fuseMountDTO struct {
 }
 
 type fuseConfigDTO struct {
-	Enabled bool `json:"enabled"`
+	Enabled   bool    `json:"enabled"`
+	MountRoot *string `json:"mount_root,omitempty"`
 }
 
 func (h *Handler) fuseStatus(w http.ResponseWriter, r *http.Request) {
@@ -182,7 +183,7 @@ func (h *Handler) updateFuseConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	if err := h.fuse.SetEnabled(r.Context(), in.Enabled); err != nil {
+	if err := h.fuse.SetConfig(r.Context(), in.Enabled, in.MountRoot); err != nil {
 		writeErr(w, err)
 		return
 	}

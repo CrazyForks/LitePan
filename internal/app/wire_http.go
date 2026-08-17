@@ -63,6 +63,7 @@ func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core
 		AdminAuth:         adminauth.New(st.store.Configs, core.secret, logs.For(logx.ModuleAPI)),
 		Notifications:     notifySvc,
 		DataDir:           cfg.DataDir,
+		StrmDir:           cfg.StrmDir,
 		OnSettingsUpdated: cacheSettingsHook(core.cache, st.settings, cfg.DataDir),
 	})
 

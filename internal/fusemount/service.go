@@ -114,6 +114,44 @@ func (s *Service) SetEnabled(ctx context.Context, on bool) error {
 	return nil
 }
 
+// ApplyConfiguredMountRoot 在启动装配时调用：界面设置 > 环境变量 > 默认值。
+// 环境变量与默认值已在 MountRoot 初始化时解析，这里只处理界面保存的值；修改后需重启生效。
+func ApplyConfiguredMountRoot(ctx context.Context, configs domain.ConfigRepository) {
+	if configs == nil {
+		return
+	}
+	v, ok, err := configs.Get(ctx, KeyMountRoot)
+	if err != nil || !ok {
+		return
+	}
+	if root := strings.TrimSpace(v); root != "" {
+		MountRoot = root
+	}
+}
+
+// SetConfig 保存本地挂载服务配置。enabled 总是更新；mountRoot 为 nil 时不修改，
+// 非 nil 时保存（空字符串表示清空界面设置，回退到环境变量/默认值），修改后需重启生效。
+func (s *Service) SetConfig(ctx context.Context, enabled bool, mountRoot *string) error {
+	if err := s.SetEnabled(ctx, enabled); err != nil {
+		return err
+	}
+	if mountRoot == nil {
+		return nil
+	}
+	root := strings.TrimSpace(*mountRoot)
+	if root != "" && !filepath.IsAbs(root) {
+		return domain.Errorf(domain.CodeValidation, "挂载根目录必须是绝对路径")
+	}
+	if s.configs == nil {
+		return domain.Errorf(domain.CodeInternal, "配置仓储未就绪")
+	}
+	if err := s.configs.Set(ctx, KeyMountRoot, root); err != nil {
+		return err
+	}
+	s.log.Info("FUSE 挂载根目录已更新", "mount_root", root, "restart_required", true)
+	return nil
+}
+
 func (s *Service) Status(ctx context.Context) map[string]any {
 	out := map[string]any{
 		"enabled":         s.Enabled(ctx),

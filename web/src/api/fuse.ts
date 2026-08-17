@@ -56,8 +56,8 @@ export function fetchFuseStatus() {
   return http.get<FuseStatus>("/admin/fuse/status");
 }
 
-export function updateFuseConfig(enabled: boolean) {
-  return http.put<FuseStatus>("/admin/fuse/config", { enabled });
+export function updateFuseConfig(body: { enabled: boolean; mount_root?: string }) {
+  return http.put<FuseStatus>("/admin/fuse/config", body);
 }
 
 export function fetchFuseMounts() {

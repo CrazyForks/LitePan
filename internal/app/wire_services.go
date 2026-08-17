@@ -83,6 +83,7 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		Bus:      core.bus,
 		Log:      logs.For(logx.ModuleFileOp),
 	})
+	fusemount.ApplyConfiguredMountRoot(context.Background(), st.store.Configs)
 	fuseSvc := fusemount.New(fusemount.Options{
 		Repo:      st.store.FuseMounts,
 		Configs:   st.store.Configs,

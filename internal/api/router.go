@@ -80,6 +80,7 @@ type Deps struct {
 	AdminAuth         *adminauth.Service
 	Notifications     *notification.Service
 	DataDir           string
+	StrmDir           string
 	OnSettingsUpdated func(map[string]string)
 }
 
@@ -113,6 +114,8 @@ type Handler struct {
 	authSched         *auth.Scheduler
 	adminAuth         *adminauth.Service
 	notifications     *notification.Service
+	dataDir           string
+	strmDir           string
 	onSettingsUpdated func(map[string]string)
 
 	devMu       sync.Mutex
@@ -154,6 +157,8 @@ func NewRouter(d Deps) http.Handler {
 		authSched:         d.AuthSched,
 		adminAuth:         d.AdminAuth,
 		notifications:     d.Notifications,
+		dataDir:           d.DataDir,
+		strmDir:           d.StrmDir,
 		onSettingsUpdated: d.OnSettingsUpdated,
 	}
 

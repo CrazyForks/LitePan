@@ -68,6 +68,7 @@ const readCacheClearing = ref(false);
 
 type DrawerForm = {
   service_enabled: boolean;
+  mount_root: string;
   read_cache_enabled: boolean;
   max_gb: number;
   retention_days: number;
@@ -82,6 +83,7 @@ const {
   revert: revertDrawerForm,
 } = useSettingsForm<DrawerForm>({
   service_enabled: false,
+  mount_root: "",
   read_cache_enabled: false,
   max_gb: 10,
   retention_days: 7,
@@ -179,8 +181,11 @@ onDeactivated(() => {
 async function saveDrawerSettings() {
   drawerSaving.value = true;
   try {
-    if (isDrawerFieldChanged("service_enabled")) {
-      applyServiceStatus(await updateFuseConfig(drawerForm.service_enabled));
+    const mountRootChanged = isDrawerFieldChanged("mount_root");
+    if (isDrawerFieldChanged("service_enabled") || mountRootChanged) {
+      const body: { enabled: boolean; mount_root?: string } = { enabled: drawerForm.service_enabled };
+      if (mountRootChanged) body.mount_root = drawerForm.mount_root.trim();
+      applyServiceStatus(await updateFuseConfig(body), mountRootChanged);
     }
     applyReadCache(
       await updateFuseReadCache({
@@ -191,7 +196,7 @@ async function saveDrawerSettings() {
       }),
     );
     snapshotDrawerForm();
-    toast.success("设置已保存");
+    toast.success(mountRootChanged ? "设置已保存，挂载根目录将在重启后生效" : "设置已保存");
   } catch (e) {
     toast.error(`保存本地挂载设置失败：${getApiErrorMessage(e, "请稍后重试")}`);
   } finally {
@@ -304,9 +309,10 @@ function mountPointForName(name: string): string {
   return `${mountRoot.value}/${trimmed}`;
 }
 
-function applyServiceStatus(st: FuseStatus) {
+function applyServiceStatus(st: FuseStatus, keepMountRoot = false) {
   status.value = st;
   drawerForm.service_enabled = st.enabled;
+  if (!keepMountRoot) drawerForm.mount_root = st.mount_root;
 }
 
 async function loadServiceSettings(options?: { silent?: boolean }) {
@@ -733,19 +739,25 @@ defineExpose({
               <SettingsBoolSegment v-model="drawerForm.service_enabled" label="启用本地挂载" />
             </template>
           </SettingsRow>
-          <SettingsRow>
+          <SettingsRow :show-changed-badge="true" :changed="isDrawerFieldChanged('mount_root')">
             <template #info>
               <div class="settings-row__label">
                 <span>挂载根目录</span>
                 <SettingsHelpTooltip title="挂载根目录说明">
-                  <p>所有挂载点必须位于此目录之下，默认为 <code>{{ mountRoot }}</code>。</p>
-                  <p>请在 Docker Compose 中将该路径映射到宿主机目录，并建议使用 <code>:shared</code> 挂载传播，以便在 NAS 文件管理中可见。</p>
+                  <p>所有挂载点必须位于此目录之下，当前为 <code>{{ mountRoot }}</code>。</p>
+                  <p>留空则使用环境变量 <code>LITEPAN_MOUNT_ROOT</code> 或默认值；填写后以此为准。</p>
+                  <p>修改后需重启程序生效：Docker 重启容器，本机/飞牛重启进程。</p>
+                  <p>Docker 请在 Compose 中映射该路径（建议 <code>:shared</code> 挂载传播）；飞牛请在应用设置中添加文件权限。</p>
                 </SettingsHelpTooltip>
               </div>
             </template>
             <template #control>
               <InputActionField>
-                <AppInput class="fuse-mount-root-input" :model-value="mountRoot" readonly />
+                <AppInput
+                  v-model="drawerForm.mount_root"
+                  class="fuse-mount-root-input"
+                  placeholder="留空则使用环境变量或默认值"
+                />
               </InputActionField>
             </template>
           </SettingsRow>

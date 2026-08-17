@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"litepan/internal/domain"
+	"litepan/internal/fusemount"
 )
 
 type localDirEntry struct {
@@ -23,8 +24,29 @@ type localBrowseResult struct {
 	Writable bool            `json:"writable"`
 }
 
-func browseDefaultPath() string {
-	for _, candidate := range []string{"/app/strm", "/app/data", "/app/mounts", "/app", "/data", "/mnt", "/media", "/"} {
+// browseDefaultPath 返回本地目录浏览器默认落点：
+// STRM 输出目录、数据目录、FUSE 挂载根优先，再回退到常见挂载位置。
+func (h *Handler) browseDefaultPath() string {
+	seen := map[string]struct{}{}
+	var candidates []string
+	add := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		candidates = append(candidates, p)
+	}
+	add(h.strmDir)
+	add(h.dataDir)
+	add(fusemount.MountRoot)
+	for _, p := range []string{"/data", "/mnt", "/media", "/"} {
+		add(p)
+	}
+	for _, candidate := range candidates {
 		info, err := os.Stat(candidate)
 		if err == nil && info.IsDir() {
 			return candidate
@@ -36,7 +58,7 @@ func browseDefaultPath() string {
 func (h *Handler) browseLocalFS(w http.ResponseWriter, r *http.Request) {
 	raw := strings.TrimSpace(r.URL.Query().Get("path"))
 	if raw == "" {
-		raw = browseDefaultPath()
+		raw = h.browseDefaultPath()
 	}
 	if !strings.HasPrefix(raw, "/") {
 		writeJSON(w, http.StatusOK, Resp{
