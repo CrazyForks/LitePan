@@ -121,6 +121,35 @@ func TestPickUniqueTMDBAdjacentYearMatch(t *testing.T) {
 	}
 }
 
+func TestPickTMDBSearchMatchAcceptsSingleLowRiskCandidate(t *testing.T) {
+	results := RawJSONListToMaps([]json.RawMessage{
+		json.RawMessage(`{"id":220999,"name":"Chronicles of an Aristocrat Reborn in Another World","original_name":"転生貴族の異世界冒険録","first_air_date":"2023-04-03"}`),
+	})
+	selected := PickTMDBSearchMatchForYear(results, nil, "tv", "转生贵族的异世界冒险录")
+	if id, _, _, _ := ExtractTMDBDisplayFields(selected, "tv"); id != "220999" {
+		t.Fatalf("唯一且低风险候选应接受，实际 tmdb id=%q", id)
+	}
+}
+
+func TestPickTMDBSearchMatchRejectsSingleHighRiskShortTitle(t *testing.T) {
+	results := RawJSONListToMaps([]json.RawMessage{
+		json.RawMessage(`{"id":1,"title":"The Hero","original_title":"Ying xiong","release_date":"2002-01-01"}`),
+	})
+	if selected := PickTMDBSearchMatchForYear(results, nil, "movie", "英雄"); selected != nil {
+		t.Fatalf("短标题单候选仍应拒绝，实际=%v", selected)
+	}
+}
+
+func TestPickTMDBSearchMatchSingleCandidateStillRequiresExactYear(t *testing.T) {
+	results := RawJSONListToMaps([]json.RawMessage{
+		json.RawMessage(`{"id":220999,"name":"Chronicles of an Aristocrat Reborn in Another World","original_name":"転生貴族の異世界冒険録","first_air_date":"2023-04-03"}`),
+	})
+	year := 2024
+	if selected := PickTMDBSearchMatchForYear(results, &year, "tv", "转生贵族的异世界冒险录"); selected != nil {
+		t.Fatalf("明确年份冲突时不应因单候选放宽，实际=%v", selected)
+	}
+}
+
 func TestMovieMatchAttemptsKeepTitleTrailingNumber(t *testing.T) {
 	attempts := BuildTMDBMatchAttempts("赌侠1999", nil, "", nil)
 	titles := make([]string, 0, len(attempts))

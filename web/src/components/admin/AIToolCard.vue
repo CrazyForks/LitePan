@@ -142,8 +142,8 @@ async function saveConfig() {
           </svg>
         </button>
       </template>
-      提供可复用的 AI 识别能力，目前已用于目录整理。模型只返回识别结果，
-      仍由原功能生成计划并执行，后续可供其他功能接入。
+      开启后，目录整理中内置规则识别不出或低置信的作品，将批量交给 AI 模型补判标题与季集，
+      仍由原流程校验并生成计划；未配置或调用失败时自动回落内置识别，不影响整理。
       <template #actions>
         <AppButton variant="secondary" :disabled="aiSaving" @click="openSettings(false)">
           配置模型参数

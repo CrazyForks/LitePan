@@ -167,9 +167,13 @@ func PickTMDBMatchForYear(results []map[string]any, expectedYear *int, mediaType
 	return results[0]
 }
 
-// PickTMDBSearchMatchForYear 仅在明确年份相等时接受标题不一致的 TMDB 原始搜索结果。
+// PickTMDBSearchMatchForYear 先走严格标题兼容匹配；当 TMDB 只返回唯一候选且查询词本身足够可靠时，
+// 允许降级接收该唯一候选，避免中文查询被英文/日文标题误杀。明确年份冲突仍然拒绝。
 func PickTMDBSearchMatchForYear(results []map[string]any, expectedYear *int, mediaType, queryTitle string) map[string]any {
 	if selected := PickTMDBMatchForYear(results, expectedYear, mediaType, queryTitle); selected != nil {
+		return selected
+	}
+	if selected := PickSingleLowRiskTMDBMatch(results, expectedYear, mediaType, queryTitle); selected != nil {
 		return selected
 	}
 	if expectedYear == nil {
@@ -182,6 +186,47 @@ func PickTMDBSearchMatchForYear(results []map[string]any, expectedYear *int, med
 		}
 	}
 	return nil
+}
+
+func PickSingleLowRiskTMDBMatch(results []map[string]any, expectedYear *int, mediaType, queryTitle string) map[string]any {
+	if len(results) != 1 {
+		return nil
+	}
+	query := strings.TrimSpace(queryTitle)
+	if !IsSingleTMDBFallbackSafeQuery(query) {
+		return nil
+	}
+	item := results[0]
+	_, _, _, resultYear := ExtractTMDBDisplayFields(item, mediaType)
+	if expectedYear != nil && (resultYear == nil || *resultYear != *expectedYear) {
+		return nil
+	}
+	return item
+}
+
+func IsSingleTMDBFallbackSafeQuery(query string) bool {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return false
+	}
+	if ScoreTitleForTMDB(query) < 0.6 {
+		return false
+	}
+	if pureChineseTitleRe.MatchString(query) {
+		return len([]rune(query)) >= 5
+	}
+	queryKey := strongTMDBTitleKey(query)
+	if len([]rune(queryKey)) < 8 {
+		return false
+	}
+	if enWords := enWordRe.FindAllString(strings.ToLower(query), -1); len(enWords) > 0 {
+		totalLen := 0
+		for _, word := range enWords {
+			totalLen += len(word)
+		}
+		return totalLen >= 8
+	}
+	return true
 }
 
 // PickUniqueTMDBAdjacentYearMatch 仅接受唯一、片名强相等且相差一年的候选，不使用别名放宽。

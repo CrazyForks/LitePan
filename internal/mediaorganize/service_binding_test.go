@@ -1,130 +1,206 @@
 package mediaorganize
 
 import (
-	"strings"
 	"testing"
 
 	"litepan/internal/mediaorganize/moplan"
-	"litepan/internal/mediaorganize/rules"
 )
 
-func TestApplyBindingToPlanActions(t *testing.T) {
-	uid := "movie|d1|Unknowable 2020|Unknowable"
-	year := 1999
+func TestBindingReplacePlanGroupRebuildsSingleGroup(t *testing.T) {
+	uid := "tv|show1|旧目录|旧标题"
 	plan := &Plan{
-		TaskID: "t1",
+		TaskID: "task-1",
 		Actions: []moplan.PlanAction{
 			{
 				ID:         "a1",
 				Kind:       moplan.ActionKindRelocate,
-				SourceID:   "d1",
-				SourceName: "Unknowable 2020",
-				TargetName: "Unknowable (2020) {tmdb-}",
+				SourceID:   "other-file",
+				TargetName: "Other.mkv",
 				Metadata: map[string]any{
-					"kind_label": "dir_rename",
-					"group_uid":  uid,
-					"tmdb_id":    "",
-					"media_kind": "movie",
+					"group_uid": "movie|other|Other|Other",
 				},
 			},
 			{
-				ID:         "a2",
-				Kind:       moplan.ActionKindRelocate,
-				SourceID:   "f1",
-				SourceName: "Unknowable.2020.1080p.mkv",
-				TargetName: "Unknowable (2020) 1080p.mkv",
+				ID:             "a2",
+				Kind:           moplan.ActionKindEnsureDir,
+				TargetParentID: "/已整理",
+				TargetName:     "旧作品目录",
 				Metadata: map[string]any{
-					"group_uid":  uid,
-					"tmdb_id":    "",
-					"media_kind": "movie",
-					"season":     nil,
-					"episode":    nil,
+					"is_work_dir":   true,
+					"source_dir_id": "show1",
 				},
 			},
 			{
-				ID:         "a3",
-				Kind:       moplan.ActionKindRelocate,
-				SourceID:   "f2",
-				SourceName: "Other.movie.mkv",
-				TargetName: "Other.movie.mkv",
+				ID:             "a3",
+				Kind:           moplan.ActionKindEnsureDir,
+				TargetParentID: "ref:a2",
+				TargetName:     "Season 01",
+				DependsOn:      []string{"a2"},
 				Metadata: map[string]any{
-					"group_uid": "movie|d2|Other|Other",
-					"tmdb_id":   "",
+					"is_season_dir": true,
+				},
+			},
+			{
+				ID:             "a4",
+				Kind:           moplan.ActionKindRelocate,
+				SourceID:       "f1",
+				SourceName:     "old-file.mkv",
+				SourceParentID: "show1",
+				TargetParentID: "ref:a3",
+				TargetName:     "旧标题 S01E01.mkv",
+				DependsOn:      []string{"a2", "a3"},
+				Metadata: map[string]any{
+					"group_uid":  uid,
+					"media_kind": "tv",
+					"title":      "旧标题",
+				},
+			},
+		},
+		Skipped: []map[string]any{
+			{"file_id": "f1", "file_name": "old-file.mkv", "reason": "旧跳过"},
+			{"file_id": "other-file", "file_name": "Other.mkv", "reason": "保留"},
+		},
+		Diagnostics: map[string]any{
+			"needs_match": []map[string]any{
+				{"group_uid": uid, "dir_id": "show1", "dir_name": "旧目录", "title": "旧标题", "media_kind": "tv"},
+				{"group_uid": "movie|other|Other|Other", "title": "Other"},
+			},
+			"groups": []map[string]any{
+				{"group_uid": uid, "dir_id": "show1", "dir_name": "旧目录", "title": "旧标题", "media_kind": "tv"},
+				{"group_uid": "movie|other|Other|Other", "title": "Other"},
+			},
+			"meta_followers": []map[string]any{
+				{"file_id": "f1", "depend_on": "a4", "new_base": "旧标题 S01E01"},
+				{"file_id": "other-file", "depend_on": "a1", "new_base": "Other"},
+			},
+		},
+	}
+	rebuilt := &Plan{
+		TaskID: "task-1",
+		Actions: []moplan.PlanAction{
+			{
+				ID:             "a1",
+				Kind:           moplan.ActionKindEnsureDir,
+				TargetParentID: "/已整理",
+				TargetName:     "新作品目录 (2023) {tmdb-220999}",
+				Metadata: map[string]any{
+					"is_work_dir":   true,
+					"source_dir_id": "show1",
+				},
+			},
+			{
+				ID:             "a2",
+				Kind:           moplan.ActionKindEnsureDir,
+				TargetParentID: "ref:a1",
+				TargetName:     "Season 01",
+				DependsOn:      []string{"a1"},
+				Metadata: map[string]any{
+					"is_season_dir": true,
+				},
+			},
+			{
+				ID:             "a3",
+				Kind:           moplan.ActionKindRelocate,
+				SourceID:       "f1",
+				SourceName:     "old-file.mkv",
+				SourceParentID: "show1",
+				TargetParentID: "ref:a2",
+				TargetName:     "新作品目录 (2023) {tmdb-220999} S01E01.mkv",
+				DependsOn:      []string{"a1", "a2"},
+				Metadata: map[string]any{
+					"group_uid":  uid,
+					"media_kind": "tv",
+					"title":      "新标题",
+					"tmdb_id":    "220999",
 				},
 			},
 		},
 		Diagnostics: map[string]any{
-			"needs_match": []any{
-				map[string]any{"group_uid": uid, "title": "Unknowable"},
-				map[string]any{"group_uid": "tv|x|Y|Z", "title": "Z"},
+			"groups": []map[string]any{
+				{"group_uid": uid, "dir_id": "show1", "dir_name": "旧目录", "title": "新标题", "media_kind": "tv"},
+			},
+			"meta_followers": []map[string]any{
+				{"file_id": "f1", "depend_on": "a3", "new_base": "新标题 S01E01"},
 			},
 		},
 	}
 
-	applyBindingToPlanActions(plan, uid, "603", "The Matrix", "The Matrix", &year, "tmdb", rules.DefaultMediaTagOrder, "zh-CN")
-
-	dir := plan.Actions[0]
-	if dir.TargetName != "The Matrix (1999) {tmdb-603}" {
-		t.Fatalf("目录目标名错误: %q", dir.TargetName)
+	got := bindingReplacePlanGroup(plan, uid, rebuilt)
+	if len(got.Actions) != 4 {
+		t.Fatalf("动作数不对: %d", len(got.Actions))
 	}
-	if dir.Metadata["tmdb_id"] != "603" {
-		t.Fatalf("目录 tmdb_id 未更新: %v", dir.Metadata["tmdb_id"])
-	}
-	if dir.Metadata["group_new_dir_name"] != "The Matrix (1999) {tmdb-603}" {
-		t.Fatalf("group_new_dir_name 未更新: %v", dir.Metadata["group_new_dir_name"])
-	}
-	if dir.Confidence != 0.99 {
-		t.Fatalf("置信度应为 0.99: %v", dir.Confidence)
+	if got.Actions[0].SourceID != "other-file" {
+		t.Fatalf("其他组动作不应被删除: %+v", got.Actions[0])
 	}
 
-	file := plan.Actions[1]
-	if !strings.Contains(file.TargetName, "The Matrix (1999) {tmdb-603}") || !strings.HasSuffix(file.TargetName, "[1080p].mkv") {
-		t.Fatalf("文件目标名错误: %q", file.TargetName)
+	workDir := got.Actions[1]
+	if workDir.ID != "a2" || workDir.TargetName != "新作品目录 (2023) {tmdb-220999}" {
+		t.Fatalf("作品目录动作未正确替换: %+v", workDir)
 	}
-	if file.Metadata["tmdb_id"] != "603" {
-		t.Fatalf("文件 tmdb_id 未更新: %v", file.Metadata["tmdb_id"])
+	seasonDir := got.Actions[2]
+	if seasonDir.ID != "a3" || seasonDir.TargetParentID != "ref:a2" {
+		t.Fatalf("季目录动作引用未重写: %+v", seasonDir)
+	}
+	fileAction := got.Actions[3]
+	if fileAction.ID != "a4" || fileAction.TargetParentID != "ref:a3" {
+		t.Fatalf("文件动作引用未重写: %+v", fileAction)
+	}
+	if len(fileAction.DependsOn) != 2 || fileAction.DependsOn[0] != "a2" || fileAction.DependsOn[1] != "a3" {
+		t.Fatalf("文件动作 DependsOn 未重写: %+v", fileAction.DependsOn)
 	}
 
-	if plan.Actions[2].TargetName != "Other.movie.mkv" {
-		t.Fatalf("其他组动作被误改: %+v", plan.Actions[2])
+	if len(got.Skipped) != 1 || got.Skipped[0]["file_id"] != "other-file" {
+		t.Fatalf("旧组 skipped 未被清理: %+v", got.Skipped)
 	}
 
-	needs, ok := plan.Diagnostics["needs_match"].([]map[string]any)
-	if !ok || len(needs) != 1 || needs[0]["group_uid"] != "tv|x|Y|Z" {
-		t.Fatalf("needs_match 未正确过滤: %#v (ok=%v)", plan.Diagnostics["needs_match"], ok)
+	needs := bindingMapSlice(got.Diagnostics["needs_match"])
+	if len(needs) != 1 || needs[0]["group_uid"] != "movie|other|Other|Other" {
+		t.Fatalf("needs_match 未正确替换: %+v", needs)
+	}
+	groups := bindingMapSlice(got.Diagnostics["groups"])
+	if len(groups) != 2 {
+		t.Fatalf("groups 数量不对: %+v", groups)
+	}
+	var matchedGroup map[string]any
+	for _, entry := range groups {
+		if entry["group_uid"] == uid {
+			matchedGroup = entry
+			break
+		}
+	}
+	if matchedGroup == nil || matchedGroup["title"] != "新标题" {
+		t.Fatalf("groups 未替换成新组信息: %+v", groups)
+	}
+
+	followers := bindingMapSlice(got.Diagnostics["meta_followers"])
+	if len(followers) != 2 {
+		t.Fatalf("meta_followers 数量不对: %+v", followers)
+	}
+	for _, entry := range followers {
+		if entry["file_id"] == "f1" && entry["depend_on"] != "a4" {
+			t.Fatalf("meta_followers depend_on 未重写: %+v", entry)
+		}
 	}
 }
 
-func TestApplyBindingToPlanActionsTVEpisode(t *testing.T) {
-	uid := "tv|d1|灵笼 第2季|灵笼"
-	year := 2019
+func TestBindingFindManualMatchGroupPrefersNeedsMatch(t *testing.T) {
+	uid := "movie|d1|Unknowable 2020|Unknowable"
 	plan := &Plan{
-		TaskID: "t2",
-		Actions: []moplan.PlanAction{
-			{
-				ID:         "b1",
-				Kind:       moplan.ActionKindRelocate,
-				SourceID:   "f1",
-				SourceName: "[BeanSub&FZSD][灵笼][01][1080P][x264].mkv",
-				TargetName: "灵笼 1080P.mkv",
-				Metadata: map[string]any{
+		Diagnostics: map[string]any{
+			"needs_match": []any{
+				map[string]any{
 					"group_uid":  uid,
-					"media_kind": "tv",
-					"tmdb_id":    "",
-					"season":     float64(2),
-					"episode":    float64(1),
+					"media_kind": "movie",
+					"dir_id":     "d1",
+					"dir_name":   "Unknowable 2020",
+					"title":      "Unknowable",
 				},
 			},
 		},
 	}
 
-	applyBindingToPlanActions(plan, uid, "91557", "灵笼", "灵笼 - Ling Long", &year, "tmdb", rules.DefaultMediaTagOrder, "zh-CN")
-
-	ep := plan.Actions[0]
-	if !strings.Contains(ep.TargetName, "灵笼 - Ling Long (2019) {tmdb-91557} S02E01") {
-		t.Fatalf("剧集目标名错误: %q", ep.TargetName)
-	}
-	if ep.Metadata["tmdb_id"] != "91557" {
-		t.Fatalf("剧集 tmdb_id 未更新: %v", ep.Metadata["tmdb_id"])
+	group := bindingFindManualMatchGroup(plan, uid, "")
+	if group.GroupUID != uid || group.MediaKind != "movie" || group.DirID != "d1" || group.DirName != "Unknowable 2020" || group.Title != "Unknowable" {
+		t.Fatalf("手动匹配组信息提取错误: %+v", group)
 	}
 }
