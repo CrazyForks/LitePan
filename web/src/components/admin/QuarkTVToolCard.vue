@@ -27,13 +27,13 @@ const qtvUnbindingID = ref<number | null>(null);
 const qtvSettingsOpen = ref(false);
 const qtvSettingsSaving = ref(false);
 const qtvEditingBinding = ref<QuarkTVBinding | null>(null);
-const qtvResolution = ref("auto");
+const qtvResolution = ref("4k");
 const qtvAllowDolby = ref(false);
 
 const settingsChanged = computed(
   () =>
     !!qtvEditingBinding.value &&
-    (qtvResolution.value !== (qtvEditingBinding.value.preferred_resolution || "auto") ||
+    (qtvResolution.value !== normalizeResolutionForUI(qtvEditingBinding.value.preferred_resolution || "auto") ||
       qtvAllowDolby.value !== !!qtvEditingBinding.value.allow_dolby),
 );
 
@@ -41,13 +41,10 @@ const settingsResolutionOptions = computed(() => {
   const binding = qtvEditingBinding.value;
   const advancedDisabled = binding ? !supportsAdvancedQuality(binding.membership) : false;
   return [
-    { value: "auto", label: "自动（最高可用）" },
     { value: "4k", label: "4K", disabled: advancedDisabled, tag: "SVIP" },
-    { value: "2k", label: "2K", disabled: advancedDisabled, tag: "SVIP" },
-    { value: "super", label: "超清 1080P", disabled: advancedDisabled, tag: "SVIP" },
-    { value: "high", label: "高清 720P", disabled: advancedDisabled, tag: "SVIP" },
-    { value: "normal", label: "标清 480P", disabled: advancedDisabled, tag: "SVIP" },
-    { value: "low", label: "流畅 360P" },
+    { value: "super", label: "超清", disabled: advancedDisabled, tag: "SVIP" },
+    { value: "high", label: "高清", disabled: advancedDisabled, tag: "SVIP" },
+    { value: "low", label: "流畅" },
   ];
 });
 
@@ -99,7 +96,7 @@ function closeManage() {
 
 function openSettings(binding: QuarkTVBinding) {
   qtvEditingBinding.value = binding;
-  qtvResolution.value = binding.preferred_resolution || "auto";
+  qtvResolution.value = normalizeResolutionForUI(binding.preferred_resolution || "auto");
   qtvAllowDolby.value = !!binding.allow_dolby;
   qtvSettingsOpen.value = true;
 }
@@ -111,12 +108,8 @@ function closeSettings() {
 }
 
 function resolutionLabel(value: string) {
-  return settingsResolutionOptions.value.find((item) => item.value === value)?.label || "自动（最高可用）";
-}
-
-function bindingSummary(binding: QuarkTVBinding) {
-  const base = resolutionLabel(binding.preferred_resolution || "auto");
-  return `${base} · 杜比${binding.allow_dolby ? "已开启" : "已关闭"}`;
+  const normalized = normalizeResolutionForUI(value);
+  return settingsResolutionOptions.value.find((item) => item.value === normalized)?.label || "4K";
 }
 
 function displayMembership(binding: QuarkTVBinding | null) {
@@ -127,6 +120,23 @@ function displayMembership(binding: QuarkTVBinding | null) {
 function supportsAdvancedQuality(membership: string) {
   const value = membership.trim().toUpperCase();
   return value === "SVIP" || value === "SVIP+" || value === "88VIP";
+}
+
+function normalizeResolutionForUI(value: string) {
+  switch ((value || "").trim().toLowerCase()) {
+    case "4k":
+    case "auto":
+      return "4k";
+    case "2k":
+    case "super":
+      return "super";
+    case "high":
+      return "high";
+    case "normal":
+    case "low":
+    default:
+      return "low";
+  }
 }
 
 async function openBind() {
@@ -261,8 +271,12 @@ async function saveSettings() {
         <div v-for="b in qtvStatus.bindings" :key="b.account_id" class="qtv-item">
           <div class="qtv-item__main">
             <strong>{{ b.account_name }}</strong>
-            <span>TV 账号：{{ b.tv_nickname || "未知" }}</span>
-            <span>播放设置：{{ bindingSummary(b) }}</span>
+            <div class="qtv-item__meta">
+              <span class="qtv-item__meta-text">
+                TV · {{ b.tv_nickname || "未知" }} · {{ resolutionLabel(b.preferred_resolution || "auto") }} ·
+                {{ b.allow_dolby ? "杜比开启" : "杜比关闭" }}
+              </span>
+            </div>
           </div>
           <div class="qtv-item__actions">
             <AppButton variant="secondary" @click="openSettings(b)">播放设置</AppButton>
@@ -291,13 +305,11 @@ async function saveSettings() {
       <div v-if="qtvEditingBinding" class="qtv-settings">
         <div class="qtv-settings__hint">
           <strong>{{ qtvEditingBinding.account_name }}</strong>
-          <span>TV 账号：{{ qtvEditingBinding.tv_nickname || "未知" }}</span>
-          <span>当前会员：{{ displayMembership(qtvEditingBinding) }}</span>
+          <span>TV 账号：{{ qtvEditingBinding.tv_nickname || "未知" }} · 当前会员：{{ displayMembership(qtvEditingBinding) }}</span>
         </div>
         <label class="qtv-settings__field">
           <span>清晰度偏好</span>
           <AppSelect v-model="qtvResolution" :options="settingsResolutionOptions" />
-          <small>自动模式会在非杜比范围内选择当前账号可访问的最高画质。</small>
         </label>
         <label class="qtv-settings__field">
           <div class="qtv-settings__field-head">
@@ -387,20 +399,29 @@ async function saveSettings() {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 6px;
 }
 
 .qtv-item__main strong {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.qtv-item__main span {
+.qtv-item__meta {
+  display: block;
+  min-width: 0;
+}
+
+.qtv-item__meta-text {
+  display: block;
   font-size: 12px;
   color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .qtv-item__actions {

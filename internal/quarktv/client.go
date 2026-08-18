@@ -667,10 +667,10 @@ func preferredResolutionRank(preferred string, allowDolby bool) int {
 	switch domain.NormalizeQuarkTVResolution(preferred) {
 	case domain.QuarkTVResolution4K:
 		return 6
+	case domain.QuarkTVResolutionSuper:
+		return 5
 	case domain.QuarkTVResolution2K:
 		return 5
-	case domain.QuarkTVResolutionSuper:
-		return 4
 	case domain.QuarkTVResolutionHigh:
 		return 3
 	case domain.QuarkTVResolutionNormal:
