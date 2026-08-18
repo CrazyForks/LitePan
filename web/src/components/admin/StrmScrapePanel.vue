@@ -114,6 +114,9 @@ const taskOptions = computed(() =>
     label: t.name || `任务 #${t.id}`,
   })),
 );
+const selectedTask = computed(() =>
+  tasks.value.find((t) => Number(t.id) === Number(selectedTaskId.value)) || null,
+);
 
 const sortOptions: { value: SortKey; label: string }[] = [
   { value: "added_desc", label: "添加时间 · 新→旧" },
@@ -472,6 +475,21 @@ function statusMarkTitle(item: StrmScrapeItem) {
   if (item.tv_state === "updating") return "已刮削 · 追更中";
   return statusTitle(item.status);
 }
+
+function trimSlashes(input: string) {
+  return String(input || "").replace(/^\/+|\/+$/g, "");
+}
+
+const rematchSourceDir = computed(() => {
+  const item = matchItem.value;
+  if (!item) return "";
+  const taskBase = trimSlashes(
+    [selectedTask.value?.group_dir || "", selectedTask.value?.output_folder || ""].filter(Boolean).join("/"),
+  );
+  const relDir = trimSlashes(item.rel_dir || "");
+  const parts = [taskBase, relDir].filter(Boolean);
+  return parts.length ? `/${parts.join("/")}` : "/";
+});
 
 function openRematch(item: StrmScrapeItem) {
   matchItem.value = item;
@@ -1055,6 +1073,10 @@ defineExpose({
 
     <AppModal :open="matchOpen" title="重新匹配元数据" size="account" @close="closeRematch">
       <div v-if="matchItem" class="scrape-match">
+        <div v-if="rematchSourceDir" class="scrape-match__source">
+          <div class="scrape-match__source-label">作品目录</div>
+          <div class="scrape-match__source-path" :title="rematchSourceDir">{{ rematchSourceDir }}</div>
+        </div>
         <div class="scrape-match__row">
           <div class="scrape-match__type">
             <AppSelect v-model="matchSearchType" :options="matchTypeOptions" />
@@ -1687,6 +1709,31 @@ defineExpose({
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+.scrape-match__source {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: linear-gradient(
+    180deg,
+    var(--tab-active-bg) 0%,
+    color-mix(in srgb, var(--surface) 88%, var(--brand) 12%) 100%
+  );
+}
+.scrape-match__source-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+.scrape-match__source-path {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  word-break: break-all;
 }
 .scrape-match__row {
   display: flex;
