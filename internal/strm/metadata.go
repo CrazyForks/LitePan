@@ -491,8 +491,8 @@ func isIntegrityMetadataErr(err error) bool {
 }
 
 func metadataRelPath(outputFolder string, relDirs []string, fileName string) string {
-	parts := make([]string, 0, len(relDirs)+2)
-	parts = append(parts, SafeName(outputFolder))
+	parts := make([]string, 0, len(relDirs)+len(SafeDirSegments(outputFolder))+1)
+	parts = append(parts, SafeDirSegments(outputFolder)...)
 	for _, dir := range relDirs {
 		parts = append(parts, SafeName(dir))
 	}

@@ -46,6 +46,18 @@ func TestTaskRelDirAndLocalRelPathWithGroup(t *testing.T) {
 	}
 }
 
+func TestMetadataRelPathAndLocalTaskDirKeepGroupSegments(t *testing.T) {
+	if got := metadataRelPath("电影/光鸭测试", []string{"Season 1"}, "poster.jpg"); got != filepath.Join("电影", "光鸭测试", "Season 1", "poster.jpg") {
+		t.Fatalf("metadataRelPath 多级 = %q", got)
+	}
+	if got := localTaskDir("/tmp/root", "电影/光鸭测试", []string{"Season 1"}); got != filepath.Join("/tmp/root", "电影", "光鸭测试", "Season 1") {
+		t.Fatalf("localTaskDir 多级 = %q", got)
+	}
+	if got := TaskOutputDir("/tmp/root", "电影/光鸭测试"); got != filepath.Join("/tmp/root", "电影", "光鸭测试") {
+		t.Fatalf("TaskOutputDir 多级 = %q", got)
+	}
+}
+
 func TestLocalRelPathUsesISOSuffixWhenCompatibilityEnabled(t *testing.T) {
 	got := LocalRelPath("影音库", []string{"电影"}, "电影.iso", true)
 	want := "影音库/电影/电影.iso.strm"

@@ -833,7 +833,12 @@ func relDirsFromDirKey(key string) []string {
 }
 
 func localTaskDir(root, outputFolder string, relDirs []string) string {
-	local := filepath.Join(root, SafeName(outputFolder))
+	parts := make([]string, 0, 1+len(SafeDirSegments(outputFolder))+len(relDirs))
+	if strings.TrimSpace(root) != "" {
+		parts = append(parts, root)
+	}
+	parts = append(parts, SafeDirSegments(outputFolder)...)
+	local := filepath.Join(parts...)
 	for _, dir := range relDirs {
 		local = filepath.Join(local, SafeName(dir))
 	}
@@ -879,7 +884,7 @@ func removeStaleStrmAndSameStemSidecars(strmPath string) error {
 
 // cleanupScopedStaleFiles 清理过期 .strm，并顺带删除同主干旁路元数据。
 func cleanupScopedStaleFiles(root, outputFolder string, seen map[string]struct{}, scopes []cleanupScope, skipped map[string]struct{}, failures *FailureCollector) (int64, error) {
-	taskFolder := SafeName(outputFolder)
+	taskFolder := localTaskDir("", outputFolder, nil)
 	var removed int64
 	for _, sc := range scopes {
 		cleanupRoot := filepath.Join(root, taskFolder)
@@ -971,7 +976,7 @@ func cleanupScopedStaleFiles(root, outputFolder string, seen map[string]struct{}
 }
 
 func countScopedStrmFiles(root, outputFolder string, scopes []cleanupScope, skipped map[string]struct{}) (int64, error) {
-	taskFolder := SafeName(outputFolder)
+	taskFolder := localTaskDir("", outputFolder, nil)
 	found := make(map[string]struct{})
 	record := func(path string) error {
 		rel, err := filepath.Rel(root, path)
@@ -1036,7 +1041,7 @@ func cleanupMissingRemoteChildDirs(root, outputFolder string, remoteChildren map
 	if len(remoteChildren) == 0 {
 		return 0, nil
 	}
-	taskFolder := SafeName(outputFolder)
+	taskFolder := localTaskDir("", outputFolder, nil)
 	var removed int64
 	for parentKey, remoteNames := range remoteChildren {
 		relDirs := relDirsFromDirKey(parentKey)
@@ -1154,7 +1159,10 @@ func isStrmUnderSkipped(strmRel, taskFolder string, skipped map[string]struct{})
 		return false
 	}
 	rel := filepath.ToSlash(strmRel)
-	prefix := SafeName(taskFolder)
+	prefix := filepath.ToSlash(filepath.Clean(strings.TrimSpace(taskFolder)))
+	if prefix == "." || prefix == "" {
+		return false
+	}
 	if !strings.HasPrefix(rel, prefix+"/") && rel != prefix {
 		return false
 	}

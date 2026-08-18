@@ -363,10 +363,7 @@ func matchTaskForDisplayPath(tasks []*domain.StrmTask, currentPath string) (*dom
 }
 
 func cleanupCurrentDirectoryStrm(root, outputFolder string, relDirs []string, seen map[string]struct{}, remoteDirNames map[string]struct{}) (int64, error) {
-	currentLocalDir := filepath.Join(root, SafeName(outputFolder))
-	for _, dir := range relDirs {
-		currentLocalDir = filepath.Join(currentLocalDir, SafeName(dir))
-	}
+	currentLocalDir := localTaskDir(root, outputFolder, relDirs)
 	if pathHasOversizedComponent(currentLocalDir) {
 		return 0, nil
 	}

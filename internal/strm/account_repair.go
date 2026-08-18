@@ -248,7 +248,7 @@ func probeLocalStrmForRepair(strmDir, outputFolder string, currentAccountID int6
 	if outputFolder == "" {
 		return false, nil, 0, domain.Errorf(domain.CodeValidation, "请填写输出目录")
 	}
-	root := filepath.Join(strmDir, SafeName(outputFolder))
+	root := TaskOutputDir(strmDir, outputFolder)
 	info, statErr := os.Stat(root)
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
@@ -318,7 +318,7 @@ func RepairAccountReferences(ctx context.Context, files accountRepairFiles, strm
 		}
 		return out, domain.Errorf(domain.CodeValidation, "%s", msg)
 	}
-	root := filepath.Join(strmDir, SafeName(outputFolder))
+	root := TaskOutputDir(strmDir, outputFolder)
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
