@@ -116,6 +116,10 @@ type uploadTaskInfoData struct {
 	FileID string `json:"fileId"`
 }
 
+type flashUploadData struct {
+	CanFlashUpload bool `json:"canFlashUpload"`
+}
+
 type createDirData struct {
 	FileID   string `json:"fileId"`
 	FileName string `json:"fileName"`

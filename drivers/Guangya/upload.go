@@ -120,19 +120,6 @@ func (d *Driver) requestUploadToken(ctx context.Context, parentID, name string, 
 	return d.requestUploadTokenWithBody(ctx, pathUploadToken, body, true)
 }
 
-func (d *Driver) requestRapidUploadToken(ctx context.Context, parentID, name string, size int64, md5 string) (*uploadTokenData, int, error) {
-	body := map[string]any{
-		"capacity": 1,
-		"name":     name,
-		"parentId": parentID,
-		"res": map[string]any{
-			"fileSize": size,
-			"md5":      md5,
-		},
-	}
-	return d.requestUploadTokenWithBody(ctx, pathRapidUploadToken, body, false)
-}
-
 func (d *Driver) requestUploadTokenWithBody(ctx context.Context, path string, body map[string]any, requireTaskID bool) (*uploadTokenData, int, error) {
 	if err := d.waitOperationDelay(ctx); err != nil {
 		return nil, 0, err
@@ -871,27 +858,41 @@ func (d *Driver) RapidUploadByHash(ctx context.Context, req driver.RapidUploadRe
 	if fileName == "" {
 		return nil, domain.Errorf(domain.CodeValidation, "文件名不能为空")
 	}
-
-	tokenData, code, err := d.requestRapidUploadToken(ctx, parentID, fileName, req.Size, md5)
+	tokenData, code, err := d.requestUploadToken(ctx, parentID, fileName, req.Size)
 	if err != nil {
 		return nil, err
 	}
 	taskID := strings.TrimSpace(tokenData.TaskID)
+	if taskID == "" {
+		return nil, domain.Errorf(domain.CodeDriverError, "未获取到上传任务ID")
+	}
 	if code == 156 {
-		if taskID == "" {
-			fileID, _ := d.findUploadedFile(ctx, parentID, fileName, req.Size)
-			return &driver.RapidUploadResult{Reuse: true, FileID: fileID, ParentID: parentID, Message: "秒传命中"}, nil
-		}
 		fileID, err := d.waitUploadTaskInfo(ctx, taskID, parentID, fileName, req.Size)
 		if err != nil {
 			return nil, err
 		}
 		return &driver.RapidUploadResult{Reuse: true, FileID: fileID, ParentID: parentID, Message: "秒传命中"}, nil
 	}
-	if taskID != "" {
-		_ = d.apiRequest(ctx, pathDeleteUploadTask, map[string]any{"taskIds": []string{taskID}}, nil)
+	canFlash, err := d.checkCanFlashUpload(ctx, taskID, md5)
+	if err != nil {
+		return nil, err
 	}
-	return &driver.RapidUploadResult{Reuse: false, ParentID: parentID, Message: "未命中秒传"}, nil
+	if !canFlash {
+		return &driver.RapidUploadResult{Reuse: false, ParentID: parentID, Message: "未命中秒传"}, nil
+	}
+	fileID, err := d.waitUploadTaskInfo(ctx, taskID, parentID, fileName, req.Size)
+	if err != nil {
+		return nil, err
+	}
+	return &driver.RapidUploadResult{Reuse: true, FileID: fileID, ParentID: parentID, Message: "秒传命中"}, nil
+}
+
+func (d *Driver) checkCanFlashUpload(ctx context.Context, taskID, md5 string) (bool, error) {
+	var out flashUploadData
+	if err := d.apiRequest(ctx, pathCheckFlashUpload, map[string]any{"taskId": taskID, "md5": md5}, &out); err != nil {
+		return false, err
+	}
+	return out.CanFlashUpload, nil
 }
 
 var (
