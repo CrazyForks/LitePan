@@ -76,3 +76,61 @@ func TestSystemJunkFilter(t *testing.T) {
 		t.Error("普通目录不应被判定为垃圾目录")
 	}
 }
+
+func TestBuildLocalUploadSourcesForSelectedFolderKeepsOnlySelectedFolderAsRoot(t *testing.T) {
+	base := t.TempDir()
+	selectedDir := filepath.Join(base, "资料", "个人资料", "工作", "A项目")
+	nestedDir := filepath.Join(selectedDir, "子目录")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rootFile := filepath.Join(selectedDir, "根文件.txt")
+	childFile := filepath.Join(nestedDir, "子文件.txt")
+	if err := os.WriteFile(rootFile, []byte("root"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(childFile, []byte("child"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sources, err := buildLocalUploadSources(selectedDir, "资料/个人资料/工作/A项目", true)
+	if err != nil {
+		t.Fatalf("buildLocalUploadSources error = %v", err)
+	}
+	if len(sources) != 2 {
+		t.Fatalf("len(sources) = %d, want 2", len(sources))
+	}
+
+	got := map[string]string{}
+	for _, item := range sources {
+		got[filepath.Base(item.abs)] = item.relDir
+	}
+	if got["根文件.txt"] != "A项目" {
+		t.Fatalf("root file relDir = %q, want %q", got["根文件.txt"], "A项目")
+	}
+	if got["子文件.txt"] != "A项目/子目录" {
+		t.Fatalf("child file relDir = %q, want %q", got["子文件.txt"], "A项目/子目录")
+	}
+}
+
+func TestBuildLocalUploadSourcesForSingleFileKeepsRootTarget(t *testing.T) {
+	base := t.TempDir()
+	filePath := filepath.Join(base, "单文件.txt")
+	if err := os.WriteFile(filePath, []byte("demo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sources, err := buildLocalUploadSources(filePath, "资料/个人资料/工作/单文件.txt", false)
+	if err != nil {
+		t.Fatalf("buildLocalUploadSources error = %v", err)
+	}
+	if len(sources) != 1 {
+		t.Fatalf("len(sources) = %d, want 1", len(sources))
+	}
+	if sources[0].relDir != "" {
+		t.Fatalf("file relDir = %q, want empty", sources[0].relDir)
+	}
+	if sources[0].abs != filePath {
+		t.Fatalf("file abs = %q, want %q", sources[0].abs, filePath)
+	}
+}

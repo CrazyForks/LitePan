@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -272,43 +273,12 @@ func (h *Handler) createLocalUploadTasks(w http.ResponseWriter, r *http.Request)
 			writeErr(w, domain.Errorf(domain.CodeValidation, "路径超出映射目录范围：%s", item.RelPath))
 			return
 		}
-		if item.IsDir {
-			folderRel := strings.Trim(rel, "/")
-			if err := filepath.WalkDir(abs, func(p string, d fs.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
-				if d.IsDir() {
-					if isSystemJunkDir(d.Name()) {
-						return filepath.SkipDir
-					}
-					return nil
-				}
-				if isSystemJunkFile(d.Name()) {
-					return nil
-				}
-				relDir := folderRel
-				if dir := filepath.Dir(p); dir != abs {
-					inner, rerr := filepath.Rel(abs, dir)
-					if rerr != nil {
-						return rerr
-					}
-					if inner != "." {
-						relDir = filepath.ToSlash(filepath.Join(relDir, inner))
-					}
-				}
-				sources = append(sources, localUploadSource{abs: p, relDir: relDir})
-				return nil
-			}); err != nil {
-				writeErr(w, domain.Errorf(domain.CodeDriverError, "遍历目录失败：%v", err))
-				return
-			}
-			continue
+		collected, err := buildLocalUploadSources(abs, rel, item.IsDir)
+		if err != nil {
+			writeErr(w, domain.Errorf(domain.CodeDriverError, "遍历目录失败：%v", err))
+			return
 		}
-		if isSystemJunkFile(filepath.Base(abs)) {
-			continue
-		}
-		sources = append(sources, localUploadSource{abs: abs})
+		sources = append(sources, collected...)
 	}
 	if len(sources) == 0 {
 		writeErr(w, domain.Errorf(domain.CodeValidation, "未找到可上传的文件"))
@@ -438,6 +408,49 @@ func (h *Handler) createLocalUploadTasksSync(
 type localUploadSource struct {
 	abs    string
 	relDir string
+}
+
+func buildLocalUploadSources(abs, rel string, isDir bool) ([]localUploadSource, error) {
+	if !isDir {
+		if isSystemJunkFile(filepath.Base(abs)) {
+			return nil, nil
+		}
+		return []localUploadSource{{abs: abs}}, nil
+	}
+	rootName := strings.Trim(path.Base(strings.Trim(rel, "/")), "/")
+	if rootName == "" || rootName == "." {
+		rootName = strings.Trim(filepath.Base(abs), string(filepath.Separator))
+	}
+	sources := make([]localUploadSource, 0)
+	if err := filepath.WalkDir(abs, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if isSystemJunkDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if isSystemJunkFile(d.Name()) {
+			return nil
+		}
+		relDir := rootName
+		if dir := filepath.Dir(p); dir != abs {
+			inner, rerr := filepath.Rel(abs, dir)
+			if rerr != nil {
+				return rerr
+			}
+			if inner != "." {
+				relDir = filepath.ToSlash(filepath.Join(rootName, inner))
+			}
+		}
+		sources = append(sources, localUploadSource{abs: p, relDir: relDir})
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return sources, nil
 }
 
 func statLocalFile(abs string) (fs.FileInfo, error) {
