@@ -424,11 +424,13 @@ func (s *Service) newTMDBClient() *tmdb.Client {
 		Password: cfg.ProxyPassword,
 	})
 	return tmdb.NewClient(tmdb.Options{
-		APIKey:         apiKey,
-		Language:       cfg.TmdbLanguage,
-		ProxyURL:       proxy,
-		Timeout:        20 * time.Second,
-		MaxRetries:     2,
+		APIKey:        apiKey,
+		Language:      cfg.TmdbLanguage,
+		ProxyURL:      proxy,
+		Timeout:       20 * time.Second,
+		MaxRetries:    2,
 		RetryBaseDelay: time.Second,
+		APIBaseHost:   cfg.TmdbAPIHost,
+		ImageBaseHost: cfg.TmdbImageHost,
 	})
 }

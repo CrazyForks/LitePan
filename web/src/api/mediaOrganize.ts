@@ -92,6 +92,8 @@ export interface MediaOrganizeSettings {
   proxy_password: string;
   tmdb_api_key: string;
   tmdb_language: string;
+  tmdb_api_host: string;
+  tmdb_image_host: string;
   api_request_interval_ms: number;
   tmdb_request_interval_ms: number;
   file_extensions: string;
@@ -184,10 +186,14 @@ export function batchDeleteMediaOrganizePlanActions(taskId: string, actionIds: s
 }
 
 export function testMediaOrganizeTmdb(payload?: Partial<MediaOrganizeSettings>) {
-  return http.post<{ ok: boolean; language?: string; proxy_used?: boolean }>(
-    "/admin/media-organize/test-tmdb",
-    payload ?? {},
-  );
+  return http.post<{
+    ok: boolean;
+    api_ok?: boolean;
+    image_ok?: boolean;
+    image_status?: number;
+    language?: string;
+    proxy_used?: boolean;
+  }>("/admin/media-organize/test-tmdb", payload ?? {});
 }
 
 export interface MediaOrganizeTmdbSearchHit {

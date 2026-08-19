@@ -92,8 +92,6 @@ services:
       - "42069:42069/udp"
     environment:
       - TZ=Asia/Shanghai
-      # 可选：大陆网络下 TMDB 官方域名不稳定时，可覆盖为可访问的 API 域名
-      # - TMDB_API_BASE_URL=https://api.tmdb.org/3
     volumes:
       - ./data:/app/data
       - ./strm:/app/strm
@@ -108,9 +106,8 @@ services:
     # 没有代理环境的，可以在下方配置tmdb的hosts
     # extra_hosts:
       # - "api.themoviedb.org:这里填写对应的ip"
-      # 如果上方 TMDB_API_BASE_URL 改成了 https://api.tmdb.org/3
-      # 这里也要对应改成 "api.tmdb.org:这里填写对应的ip"
       # - "image.tmdb.org:这里填写对应的ip"
+    # 注意：也可以在程序内「目录整理 → TMDB 设置」填写反代主域名（自动补 /3 与 /t/p），与 hosts 二选一即可
 ```
 
 打开 `http://你的IP:5211`，默认管理员密码均为admin。  

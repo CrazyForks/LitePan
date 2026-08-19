@@ -23,9 +23,11 @@ func (s *Service) SearchTMDB(ctx context.Context, query string, year *int, langu
 		language = stringFromAny(settingsDict["tmdb_language"])
 	}
 	client := tmdb.NewClient(tmdb.Options{
-		APIKey:   apiKey,
-		Language: language,
-		ProxyURL: buildProxyURL(settingsDict),
+		APIKey:        apiKey,
+		Language:      language,
+		ProxyURL:      buildProxyURL(settingsDict),
+		APIBaseHost:   stringFromAny(settingsDict["tmdb_api_host"]),
+		ImageBaseHost: stringFromAny(settingsDict["tmdb_image_host"]),
 	})
 
 	query = strings.TrimSpace(query)

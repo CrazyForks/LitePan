@@ -18,6 +18,8 @@ var moSettingFieldToKey = map[string]string{
 	"proxy_password":           settings.KeyMOProxyPassword,
 	"tmdb_api_key":             settings.KeyMOTmdbAPIKey,
 	"tmdb_language":            settings.KeyMOTmdbLanguage,
+	"tmdb_api_host":            settings.KeyMOTmdbAPIHost,
+	"tmdb_image_host":          settings.KeyMOTmdbImageHost,
 	"api_request_interval_ms":  settings.KeyMOAPIRequestIntervalMS,
 	"tmdb_request_interval_ms": settings.KeyMOTmdbRequestIntervalMS,
 	"file_extensions":          settings.KeyMOFileExtensions,

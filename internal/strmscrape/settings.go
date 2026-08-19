@@ -23,6 +23,8 @@ func (s *Service) GetSettings() Settings {
 	enriched := mediaorganize.EnrichPlannerSettings(s.settings, nil)
 	out.TmdbAPIKey = mediaorganize.PlannerTMDBAPIKey(enriched)
 	out.TmdbLanguage = mediaorganize.PlannerTMDBLanguage(enriched)
+	out.TmdbAPIHost = mediaorganize.PlannerTMDBAPIHost(enriched)
+	out.TmdbImageHost = mediaorganize.PlannerTMDBImageHost(enriched)
 	out.TmdbRequestIntervalMS = s.settings.Int(settings.KeyMOTmdbRequestIntervalMS)
 	proxy := mediaorganize.TmdbProxyFromSettings(enriched)
 	out.ProxyEnabled = proxy.Enabled
@@ -45,6 +47,8 @@ func (s *Service) UpdateSettings(ctx context.Context, in Settings) error {
 	if key := strings.TrimSpace(in.TmdbAPIKey); key != "" {
 		payload[settings.KeyMOTmdbAPIKey] = key
 	}
+	payload[settings.KeyMOTmdbAPIHost] = strings.TrimSpace(in.TmdbAPIHost)
+	payload[settings.KeyMOTmdbImageHost] = strings.TrimSpace(in.TmdbImageHost)
 	if in.TmdbRequestIntervalMS > 0 {
 		payload[settings.KeyMOTmdbRequestIntervalMS] = strconv.Itoa(in.TmdbRequestIntervalMS)
 	}

@@ -56,6 +56,8 @@ func EnrichPlannerSettings(svc *settings.Service, api map[string]any) map[string
 	if lang := strings.TrimSpace(svc.String(settings.KeyMOTmdbLanguage)); lang != "" {
 		out["mo_tmdb_language"] = lang
 	}
+	out["mo_tmdb_api_host"] = svc.String(settings.KeyMOTmdbAPIHost)
+	out["mo_tmdb_image_host"] = svc.String(settings.KeyMOTmdbImageHost)
 	out["mo_api_request_interval_ms"] = svc.Int(settings.KeyMOAPIRequestIntervalMS)
 	out["mo_tmdb_request_interval_ms"] = svc.Int(settings.KeyMOTmdbRequestIntervalMS)
 	out["mo_file_extensions"] = svc.String(settings.KeyMOFileExtensions)
@@ -82,6 +84,16 @@ func PlannerTMDBLanguage(plannerSettings map[string]any) string {
 		return lang
 	}
 	return "zh-CN"
+}
+
+// PlannerTMDBAPIHost 返回 TMDB API 反代主域名（未配置返回空，由 tmdb.Client 回落环境变量/官方默认）。
+func PlannerTMDBAPIHost(plannerSettings map[string]any) string {
+	return strings.TrimSpace(stringFromAny(plannerSettings["mo_tmdb_api_host"]))
+}
+
+// PlannerTMDBImageHost 返回 TMDB 图片反代主域名（未配置返回空，由 tmdb.Client 回落官方默认）。
+func PlannerTMDBImageHost(plannerSettings map[string]any) string {
+	return strings.TrimSpace(stringFromAny(plannerSettings["mo_tmdb_image_host"]))
 }
 
 func TmdbProxyFromSettings(settings map[string]any) tmdb.ProxyConfig {

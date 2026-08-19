@@ -527,18 +527,21 @@ func (s *Service) ValidateTMDB(ctx context.Context, overrides map[string]any) (m
 		language = "zh-CN"
 	}
 	client := tmdb.NewClient(tmdb.Options{
-		APIKey:   apiKey,
-		Language: language,
-		ProxyURL: buildProxyURL(merged),
+		APIKey:        apiKey,
+		Language:      language,
+		ProxyURL:      buildProxyURL(merged),
+		APIBaseHost:   stringFromAny(merged["tmdb_api_host"]),
+		ImageBaseHost: stringFromAny(merged["tmdb_image_host"]),
 	})
-	ok := client.ValidateConnection(ctx)
-	if !ok {
-		return nil, domain.Errorf(domain.CodeValidation, "TMDB 不可达，请检查 API Key、网络或代理配置")
-	}
+	apiOK := client.ValidateConnection(ctx)
+	image := client.ValidateImageConnection(ctx)
 	return map[string]any{
-		"ok":         true,
-		"language":   language,
-		"proxy_used": buildProxyURL(merged) != "",
+		"ok":           apiOK && image.OK,
+		"api_ok":       apiOK,
+		"image_ok":     image.OK,
+		"image_status": image.StatusCode,
+		"language":     language,
+		"proxy_used":   buildProxyURL(merged) != "",
 	}, nil
 }
 

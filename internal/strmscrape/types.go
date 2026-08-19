@@ -91,6 +91,8 @@ type Settings struct {
 
 	TmdbAPIKey            string `json:"tmdb_api_key"`
 	TmdbLanguage          string `json:"tmdb_language"`
+	TmdbAPIHost           string `json:"tmdb_api_host"`
+	TmdbImageHost         string `json:"tmdb_image_host"`
 	TmdbRequestIntervalMS int    `json:"tmdb_request_interval_ms"`
 	ProxyEnabled          bool   `json:"proxy_enabled"`
 	ProxyURL              string `json:"proxy_url"`

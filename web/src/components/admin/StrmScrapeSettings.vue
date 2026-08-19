@@ -50,6 +50,8 @@ const {
   write_mode: "missing_only",
   tmdb_api_key: "",
   tmdb_language: "zh-CN",
+  tmdb_api_host: "https://api.themoviedb.org",
+  tmdb_image_host: "https://image.tmdb.org",
   tmdb_request_interval_ms: 300,
   proxy_enabled: false,
   proxy_url: "",
@@ -65,6 +67,8 @@ async function loadSettings(opts?: { silent?: boolean }) {
         write_mode: (data.write_mode as StrmScrapeWriteMode) || "missing_only",
         tmdb_api_key: data.tmdb_api_key || "",
         tmdb_language: data.tmdb_language || "zh-CN",
+        tmdb_api_host: data.tmdb_api_host || "https://api.themoviedb.org",
+        tmdb_image_host: data.tmdb_image_host || "https://image.tmdb.org",
         tmdb_request_interval_ms: Number(data.tmdb_request_interval_ms) || 300,
         proxy_enabled: Boolean(data.proxy_enabled),
         proxy_url: data.proxy_url || "",
@@ -107,16 +111,24 @@ async function testTmdb() {
     const result = await testMediaOrganizeTmdb({
       tmdb_api_key: settings.tmdb_api_key,
       tmdb_language: settings.tmdb_language,
+      tmdb_api_host: settings.tmdb_api_host,
+      tmdb_image_host: settings.tmdb_image_host,
       proxy_enabled: settings.proxy_enabled,
       proxy_url: settings.proxy_url,
       proxy_username: settings.proxy_username,
       proxy_password: settings.proxy_password,
       tmdb_request_interval_ms: Number(settings.tmdb_request_interval_ms),
     });
-    if (result.ok) {
-      toast.success(result.proxy_used ? "TMDB 连通（已走代理）" : "TMDB 连通正常");
+    const apiOK = result.api_ok ?? result.ok;
+    const imageOK = result.image_ok ?? true;
+    if (apiOK && imageOK) {
+      toast.success("TMDB 连通正常：API ✓ 图片 ✓");
+    } else if (apiOK && !imageOK) {
+      toast.error("TMDB 部分异常：API ✓ 图片 ×");
+    } else if (!apiOK && imageOK) {
+      toast.error("TMDB 部分异常：API × 图片 ✓");
     } else {
-      toast.error("TMDB 测试未通过");
+      toast.error("TMDB 全部异常：API × 图片 ×");
     }
   } catch (e) {
     toast.error(getApiErrorMessage(e, "TMDB 测试失败"));
@@ -183,6 +195,33 @@ defineExpose(
           </template>
           <template #control>
             <AppSelect v-model="settings.tmdb_language" :options="tmdbLanguageOptions" />
+          </template>
+        </SettingsRow>
+        <SettingsRow :show-changed-badge="true" :changed="isFieldChanged('tmdb_api_host')">
+          <template #info>
+            <div class="settings-row__label">
+              <span>TMDB API 主域名</span>
+              <SettingsHelpTooltip title="TMDB API 主域名说明">
+                <p>自建反代时填写主域名，程序自动补 /3；默认使用官方地址。</p>
+                <p>国内网络可尝试填写 https://api.tmdb.org（与官方域名解析到不同节点，部分地区可直连，效果因网络环境而异）。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <AppInput v-model="settings.tmdb_api_host" placeholder="https://api.themoviedb.org" />
+          </template>
+        </SettingsRow>
+        <SettingsRow :show-changed-badge="true" :changed="isFieldChanged('tmdb_image_host')">
+          <template #info>
+            <div class="settings-row__label">
+              <span>TMDB 图片主域名</span>
+              <SettingsHelpTooltip title="TMDB 图片主域名说明">
+                <p>自建反代时填写主域名，程序自动补 /t/p；默认使用官方地址。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <AppInput v-model="settings.tmdb_image_host" placeholder="https://image.tmdb.org" />
           </template>
         </SettingsRow>
         <SettingsRow :show-changed-badge="true" :changed="isFieldChanged('tmdb_request_interval_ms')">

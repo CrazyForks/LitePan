@@ -48,9 +48,11 @@ func (a plannerAdapter) Build(
 	plannerSettings := mediaorganize.EnrichPlannerSettings(a.settings, settings)
 	apiKey := mediaorganize.PlannerTMDBAPIKey(plannerSettings)
 	tmdbClient := tmdb.NewClient(tmdb.Options{
-		APIKey:   apiKey,
-		Language: mediaorganize.PlannerTMDBLanguage(plannerSettings),
-		ProxyURL: tmdb.BuildProxyURL(mediaorganize.TmdbProxyFromSettings(plannerSettings)),
+		APIKey:        apiKey,
+		Language:      mediaorganize.PlannerTMDBLanguage(plannerSettings),
+		ProxyURL:      tmdb.BuildProxyURL(mediaorganize.TmdbProxyFromSettings(plannerSettings)),
+		APIBaseHost:   mediaorganize.PlannerTMDBAPIHost(plannerSettings),
+		ImageBaseHost: mediaorganize.PlannerTMDBImageHost(plannerSettings),
 	})
 
 	var progressFn planner.ProgressFunc

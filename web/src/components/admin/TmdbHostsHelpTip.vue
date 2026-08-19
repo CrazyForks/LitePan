@@ -28,8 +28,8 @@ const open = ref(false);
           解析到你能访问的 IP（IP 请自行查找可用值，会随网络环境变化）。
         </p>
         <p class="tmdb-hosts-panel__foot">
-          如果你通过环境变量把 <code>TMDB_API_BASE_URL</code> 改成了
-          <code>https://api.tmdb.org/3</code>，那下面的 API hosts 也要改成
+          如果你在程序内「目录整理 → TMDB 设置」把 API 主域名改成了
+          <code>https://api.tmdb.org</code>，那下面的 API hosts 也要对应改成
           <code>api.tmdb.org</code>，否则不会生效。
         </p>
         <div class="tmdb-hosts-panel__subtitle">docker run</div>
