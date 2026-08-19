@@ -3,6 +3,8 @@ package file
 import (
 	"path"
 	"testing"
+
+	"litepan/internal/domain"
 )
 
 // 对齐时只替换目标集号，其余样本文字保持不变。
@@ -95,5 +97,48 @@ func TestAlignStackedEpisodeMarkersShareSignature(t *testing.T) {
 	if got6 != "中国奇谭.S01E06.2023.1080p.BluRay.H.264.DTS-HD MA 5.1.mkv" ||
 		got7 != "中国奇谭.S01E07.2023.1080p.BluRay.H.264.DTS-HD MA 5.1.mkv" {
 		t.Fatalf("对齐结果异常：got6=%q got7=%q", got6, got7)
+	}
+}
+
+func TestUniqueNameAlignSampleCandidatesPreferHigherEpisodeInDisplayOrder(t *testing.T) {
+	items := []alignAnalyzedFile{
+		{
+			item:      domain.FileItem{ID: "sig-a-03", Name: "Alpha.S01E03.mkv"},
+			meta:      alignMeta{episode: 3},
+			signature: "sig-a",
+			score:     500,
+		},
+		{
+			item:      domain.FileItem{ID: "sig-a-12", Name: "Alpha.S01E12.mkv"},
+			meta:      alignMeta{episode: 12},
+			signature: "sig-a",
+			score:     500,
+		},
+		{
+			item:      domain.FileItem{ID: "sig-b-09", Name: "Bravo 第9集.mkv"},
+			meta:      alignMeta{episode: 9},
+			signature: "sig-b",
+			score:     500,
+		},
+		{
+			item:      domain.FileItem{ID: "sig-c-02", Name: "Charlie EP02.mkv"},
+			meta:      alignMeta{episode: 2},
+			signature: "sig-c",
+			score:     620,
+		},
+	}
+
+	got := uniqueNameAlignSampleCandidates(items)
+	if len(got) != 3 {
+		t.Fatalf("候选数 = %d，期望 3", len(got))
+	}
+	if got[0].item.ID != "sig-a-12" {
+		t.Fatalf("第 1 个候选 = %s，期望 sig-a-12（更大集数应优先）", got[0].item.ID)
+	}
+	if got[1].item.ID != "sig-b-09" {
+		t.Fatalf("第 2 个候选 = %s，期望 sig-b-09", got[1].item.ID)
+	}
+	if got[2].item.ID != "sig-c-02" {
+		t.Fatalf("第 3 个候选 = %s，期望 sig-c-02（更低集数即使分高也应排后）", got[2].item.ID)
 	}
 }

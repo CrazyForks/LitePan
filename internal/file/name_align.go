@@ -267,10 +267,7 @@ func (s *Service) buildNameAlignPreview(ctx context.Context, in NameAlignPreview
 	}
 
 	sort.Slice(sampleCandidates, func(i, j int) bool {
-		if sampleCandidates[i].score != sampleCandidates[j].score {
-			return sampleCandidates[i].score > sampleCandidates[j].score
-		}
-		return strings.ToLower(sampleCandidates[i].item.Name) < strings.ToLower(sampleCandidates[j].item.Name)
+		return betterNameAlignSampleOrder(sampleCandidates[i], sampleCandidates[j])
 	})
 	sampleCandidates = uniqueNameAlignSampleCandidates(sampleCandidates)
 
@@ -362,12 +359,19 @@ func uniqueNameAlignSampleCandidates(items []alignAnalyzedFile) []alignAnalyzedF
 		out = append(out, item)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].score != out[j].score {
-			return out[i].score > out[j].score
-		}
-		return strings.ToLower(out[i].item.Name) < strings.ToLower(out[j].item.Name)
+		return betterNameAlignSampleOrder(out[i], out[j])
 	})
 	return out
+}
+
+func betterNameAlignSampleOrder(candidate, current alignAnalyzedFile) bool {
+	if candidate.meta.episode != current.meta.episode {
+		return candidate.meta.episode > current.meta.episode
+	}
+	if candidate.score != current.score {
+		return candidate.score > current.score
+	}
+	return strings.ToLower(candidate.item.Name) < strings.ToLower(current.item.Name)
 }
 
 func betterNameAlignSample(candidate, current alignAnalyzedFile) bool {
