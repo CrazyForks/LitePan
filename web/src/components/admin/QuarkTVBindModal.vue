@@ -30,6 +30,20 @@ let errorStreak = 0;
 
 const canStart = computed(() => accountId.value !== null && !binding.value);
 const accountOptions = computed(() => props.accounts.map((a) => ({ value: a.id, label: a.name })));
+const displayMessage = computed(() => message.value.replace(/^DRIVER_ERROR:\s*/i, "").trim());
+const showDeviceLimitNotice = computed(() => displayMessage.value.includes("设备数超限"));
+const failedTitle = computed(() => {
+  const base = phase.value === "expired" ? "二维码已过期" : phase.value === "failed" ? "绑定失败" : "获取二维码失败";
+  if (!displayMessage.value || displayMessage.value === base) return base;
+  return `${base}：${displayMessage.value}`;
+});
+const primaryButtonText = computed(() => {
+  if (binding.value) return "绑定中…";
+  if (phase.value === "failed" || phase.value === "expired" || phase.value === "error") {
+    return "重新获取二维码";
+  }
+  return "获取二维码";
+});
 
 const expireText = computed(() => {
   if (phase.value === "expired") return "二维码已过期";
@@ -171,7 +185,7 @@ onUnmounted(clearTimers);
       />
     </label>
 
-    <div class="qtv-body">
+    <div class="qtv-body" :class="{ 'qtv-body--failed': phase === 'failed' || phase === 'expired' || phase === 'error' }">
       <div v-if="phase === 'loading'" class="qtv-state qtv-state--loading">
         <BusySpinner :size="28" color="var(--brand)" />
         <span>正在生成二维码...</span>
@@ -185,17 +199,35 @@ onUnmounted(clearTimers);
       </div>
 
       <div v-else class="qtv-state qtv-state--failed">
-        <i class="fas fa-circle-exclamation"></i>
-        <div class="qtv-result-title">{{ phase === "expired" ? "二维码已过期" : phase === "failed" ? "绑定失败" : "获取二维码失败" }}</div>
-        <div class="qtv-hint">{{ message || "请关闭后重试" }}</div>
-        <AppButton variant="secondary" @click="start">重新获取</AppButton>
+        <div class="qtv-failed-panel">
+          <div class="qtv-failed-panel__header">
+            <div class="qtv-failed-panel__icon-wrap">
+              <i class="fas fa-circle-exclamation"></i>
+            </div>
+            <div class="qtv-failed-panel__meta">
+              <div class="qtv-result-title">{{ failedTitle }}</div>
+            </div>
+          </div>
+          <div v-if="showDeviceLimitNotice" class="qtv-notice-card">
+            <div class="qtv-notice-card__title">处理建议</div>
+            <div class="qtv-notice-card__text">
+              单个夸克账号最多绑定 2 个终端。
+            </div>
+            <div class="qtv-notice-card__text">
+              请在夸克 App 中进入「头像 > 登录设备」，退出或解绑不用的 TV 端。
+            </div>
+            <div class="qtv-notice-card__text qtv-notice-card__text--warn">
+              解绑操作每 7 天仅可执行一次。
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
     <template #footer>
       <AppButton variant="secondary" :disabled="binding" @click="handleClose">取消</AppButton>
       <AppButton variant="primary" :disabled="!canStart" @click="start">
-        {{ binding ? "绑定中…" : "获取二维码" }}
+        {{ primaryButtonText }}
       </AppButton>
     </template>
   </AppModal>
@@ -216,6 +248,12 @@ onUnmounted(clearTimers);
   min-height: 300px;
   margin-top: 14px;
 }
+.qtv-body--failed {
+  align-items: flex-start;
+  min-height: auto;
+  margin-top: 10px;
+  padding-top: 4px;
+}
 .qtv-state {
   width: 100%;
   display: flex;
@@ -231,10 +269,9 @@ onUnmounted(clearTimers);
   color: var(--text-muted);
 }
 .qtv-state--failed {
-  color: #b91c1c;
-}
-.qtv-state i {
-  font-size: 40px;
+  align-items: stretch;
+  justify-content: flex-start;
+  color: var(--text);
 }
 .qtv-image {
   width: 220px;
@@ -262,8 +299,84 @@ onUnmounted(clearTimers);
   font-weight: 600;
 }
 .qtv-result-title {
-  color: var(--text);
-  font-size: 15px;
+  color: #1f2937;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.qtv-failed-panel {
+  width: min(100%, 560px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0 auto;
+}
+.qtv-failed-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+.qtv-failed-panel__icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background: linear-gradient(180deg, #ef4444, #dc2626);
+  box-shadow: 0 12px 24px rgba(220, 38, 38, 0.18);
+  color: #fff;
+}
+.qtv-failed-panel__icon-wrap i {
+  font-size: 18px;
+}
+.qtv-failed-panel__meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.qtv-notice-card {
+  width: 100%;
+  padding: 16px 18px;
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 251, 235, 0.96), rgba(255, 247, 237, 0.92));
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+  text-align: left;
+}
+.qtv-notice-card__title {
+  margin-bottom: 9px;
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.qtv-notice-card__text {
+  color: #7c5a10;
+  font-size: 13px;
+  line-height: 1.78;
+}
+.qtv-notice-card__text + .qtv-notice-card__text {
+  margin-top: 8px;
+}
+.qtv-notice-card__text--warn {
+  color: #92400e;
   font-weight: 600;
+}
+@media (max-width: 640px) {
+  .qtv-failed-panel__header {
+    gap: 10px;
+  }
+  .qtv-failed-panel__icon-wrap {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+  }
+  .qtv-result-title {
+    font-size: 16px;
+  }
 }
 </style>

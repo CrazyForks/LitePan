@@ -1,6 +1,10 @@
 package quarktv
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"litepan/internal/domain"
@@ -90,4 +94,71 @@ func TestPickStreamingCandidateFallsBackFrom4KTo2K(t *testing.T) {
 	if got.Resolution != "2k" {
 		t.Fatalf("4k 档缺失时应回落到 2k，实际为 %q", got.Resolution)
 	}
+}
+
+func TestParseQuarkTVHTTPErrorMessageMapsDeviceLimit(t *testing.T) {
+	body := []byte(`{"code":400,"message":"device limit exceeded"}`)
+	got := parseQuarkTVHTTPErrorMessage(body)
+	want := "设备数超限"
+	if got != want {
+		t.Fatalf("parseQuarkTVHTTPErrorMessage() = %q, want %q", got, want)
+	}
+}
+
+func TestExchangeTokenReturnsBodyMessageOnHTTP400(t *testing.T) {
+	client := NewClient("device-id", "", "", tokenExpiresAt(3600))
+	client.http = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.String() != codeAPI+"/token" {
+				t.Fatalf("unexpected url: %s", req.URL.String())
+			}
+			return &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"code":400,"message":"device limit exceeded"}`)),
+				Request:    req,
+			}, nil
+		}),
+	}
+
+	_, err := client.exchangeToken(context.Background(), "device-id", "bind-code", false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	want := "DRIVER_ERROR: 设备数超限"
+	if err.Error() != want {
+		t.Fatalf("exchangeToken error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestDoOnceReturnsBodyErrorMessageOnHTTP400(t *testing.T) {
+	client := NewClient("device-id", "refresh-token", "access-token", tokenExpiresAt(3600))
+	client.http = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path != "/user" {
+				t.Fatalf("unexpected path: %s", req.URL.Path)
+			}
+			return &http.Response{
+				StatusCode: http.StatusBadRequest,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"status":-1,"errno":32009,"error_info":"设备数超限"}`)),
+				Request:    req,
+			}, nil
+		}),
+	}
+
+	_, err := client.doOnce(context.Background(), http.MethodGet, "/user", nil, nil, false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	want := "DRIVER_ERROR: 设备数超限"
+	if err.Error() != want {
+		t.Fatalf("doOnce error = %q, want %q", err.Error(), want)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

@@ -185,6 +185,10 @@ func (c *Client) doOnce(ctx context.Context, method, pathname string, extra url.
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		c.logError("夸克 TV 接口请求失败", method, pathname, resp.StatusCode, body)
+		msg := parseQuarkTVHTTPErrorMessage(body)
+		if msg != "" {
+			return nil, domain.Errorf(domain.CodeDriverError, "%s", msg)
+		}
 		return nil, domain.Errorf(domain.CodeDriverError, "夸克 TV 接口请求失败：HTTP %d", resp.StatusCode)
 	}
 
@@ -199,8 +203,9 @@ func (c *Client) doOnce(ctx context.Context, method, pathname string, extra url.
 		if msg == "" {
 			msg = "夸克 TV 接口返回错误"
 		}
+		msg = normalizeQuarkTVBindErrorMessage(msg)
 		c.logError("夸克 TV 接口返回错误", method, pathname, env.Status, body)
-		return nil, domain.Errorf(domain.CodeDriverError, "夸克 TV 接口错误：%s", msg)
+		return nil, domain.Errorf(domain.CodeDriverError, "%s", msg)
 	}
 	if out != nil {
 		if err := json.Unmarshal(body, out); err != nil {
@@ -305,6 +310,41 @@ type tokenAuthResp struct {
 	} `json:"data"`
 }
 
+func parseQuarkTVHTTPErrorMessage(body []byte) string {
+	msg := strings.TrimSpace(string(body))
+
+	var tokenResp tokenAuthResp
+	if err := json.Unmarshal(body, &tokenResp); err == nil {
+		if dataMsg := strings.TrimSpace(tokenResp.Data.ErrorInfo); dataMsg != "" {
+			msg = dataMsg
+		} else if topMsg := strings.TrimSpace(tokenResp.Message); topMsg != "" {
+			msg = topMsg
+		}
+	}
+
+	var env errEnvelope
+	if err := json.Unmarshal(body, &env); err == nil {
+		if errInfo := strings.TrimSpace(env.ErrorInfo); errInfo != "" {
+			msg = errInfo
+		}
+	}
+
+	return normalizeQuarkTVBindErrorMessage(msg)
+}
+
+func normalizeQuarkTVBindErrorMessage(msg string) string {
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		return ""
+	}
+	lower := strings.ToLower(msg)
+	if (strings.Contains(lower, "device") && (strings.Contains(lower, "limit") || strings.Contains(lower, "full") || strings.Contains(lower, "max") || strings.Contains(lower, "exceed"))) ||
+		(strings.Contains(msg, "设备") && (strings.Contains(msg, "上限") || strings.Contains(msg, "已满") || strings.Contains(msg, "超限") || strings.Contains(msg, "超过限制") || strings.Contains(msg, "数量限制"))) {
+		return "设备数超限"
+	}
+	return msg
+}
+
 // exchangeToken 用 code（首次）或 refresh_token（续期）交换 TV 凭证。
 func (c *Client) exchangeToken(ctx context.Context, deviceID, secret string, isRefresh bool) (*tokenResult, error) {
 	_, _, reqID := c.sign(http.MethodPost, "/token")
@@ -346,6 +386,10 @@ func (c *Client) exchangeToken(ctx context.Context, deviceID, secret string, isR
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		c.logError("夸克 TV 换取凭证失败", http.MethodPost, "/token", resp.StatusCode, data)
+		msg := parseQuarkTVHTTPErrorMessage(data)
+		if msg != "" {
+			return nil, domain.Errorf(domain.CodeDriverError, "%s", msg)
+		}
 		return nil, domain.Errorf(domain.CodeDriverError, "夸克 TV 换取凭证失败：HTTP %d", resp.StatusCode)
 	}
 	var out tokenAuthResp
@@ -357,8 +401,9 @@ func (c *Client) exchangeToken(ctx context.Context, deviceID, secret string, isR
 		if msg == "" {
 			msg = fmt.Sprintf("code %d", out.Code)
 		}
+		msg = normalizeQuarkTVBindErrorMessage(msg)
 		c.logError("夸克 TV 换取凭证失败", http.MethodPost, "/token", out.Code, data)
-		return nil, domain.Errorf(domain.CodeDriverError, "夸克 TV 换取凭证失败：%s", msg)
+		return nil, domain.Errorf(domain.CodeDriverError, "%s", msg)
 	}
 	if out.Data.RefreshToken == "" {
 		return nil, domain.Errorf(domain.CodeDriverError, "夸克 TV 未返回刷新凭证")
