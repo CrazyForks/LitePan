@@ -439,7 +439,9 @@ onBeforeUnmount(() => {
   grid-column: 1 / -1;
   grid-row: 1;
   position: relative;
-  z-index: 1;
+  /* 顶栏（含铃铛下拉面板）必须高于内容区里 position+z-index 的元素（如账号卡片的菜单/色条 z-index:2），
+     否则通知面板会被内容覆盖；sidebar(z:120) 与移动端遮罩(z:110) 仍在其上。 */
+  z-index: 50;
   height: var(--admin-chrome-h);
   display: flex;
   align-items: center;

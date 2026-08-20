@@ -19,6 +19,7 @@ import (
 	"litepan/internal/account"
 	"litepan/internal/accountprofile"
 	"litepan/internal/adminauth"
+	"litepan/internal/announcement"
 	"litepan/internal/aiorganize"
 	"litepan/internal/apikey"
 	"litepan/internal/auth"
@@ -79,6 +80,7 @@ type Deps struct {
 	AuthSched         *auth.Scheduler
 	AdminAuth         *adminauth.Service
 	Notifications     *notification.Service
+	Announcement      *announcement.Service
 	DataDir           string
 	StrmDir           string
 	OnSettingsUpdated func(map[string]string)
@@ -114,6 +116,7 @@ type Handler struct {
 	authSched         *auth.Scheduler
 	adminAuth         *adminauth.Service
 	notifications     *notification.Service
+	announcement      *announcement.Service
 	dataDir           string
 	strmDir           string
 	onSettingsUpdated func(map[string]string)
@@ -157,6 +160,7 @@ func NewRouter(d Deps) http.Handler {
 		authSched:         d.AuthSched,
 		adminAuth:         d.AdminAuth,
 		notifications:     d.Notifications,
+		announcement:      d.Announcement,
 		dataDir:           d.DataDir,
 		strmDir:           d.StrmDir,
 		onSettingsUpdated: d.OnSettingsUpdated,
@@ -259,6 +263,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Delete("/notifications", h.deleteAllNotifications)
 				r.Post("/notifications/{id}/read", h.markNotificationRead)
 				r.Delete("/notifications/{id}", h.deleteNotification)
+				r.Get("/announcement", h.getAnnouncement)
 				r.Route("/strm", func(r chi.Router) {
 					r.Get("/startup", h.strmStartupRemaining)
 					r.Get("/tasks", h.listStrmTasks)

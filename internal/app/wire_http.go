@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"litepan/internal/adminauth"
+	"litepan/internal/announcement"
 	"litepan/internal/api"
 	"litepan/internal/apikey"
 	"litepan/internal/cache"
@@ -62,6 +63,7 @@ func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core
 		AuthSched:         core.sched,
 		AdminAuth:         adminauth.New(st.store.Configs, core.secret, logs.For(logx.ModuleAPI)),
 		Notifications:     notifySvc,
+		Announcement:      announcement.New(announcement.DefaultURL, logs.For(logx.ModuleAPI)),
 		DataDir:           cfg.DataDir,
 		StrmDir:           cfg.StrmDir,
 		OnSettingsUpdated: cacheSettingsHook(core.cache, st.settings, cfg.DataDir),

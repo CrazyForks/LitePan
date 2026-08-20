@@ -195,7 +195,7 @@ async function loadOverview() {
       fetchFuseMounts(),
       fetchMediaOrganizeTasks(),
       fetchCacheStats(),
-      fetchNotifications({ limit: 3, offset: 0 }),
+      fetchNotifications({ limit: 1, offset: 0 }),
       fetchUnreadCount(),
       logsApi().stats(),
     ] as const;
@@ -618,17 +618,19 @@ onMounted(() => {
               </div>
             </div>
 
-            <div v-if="notifications.length" class="notice-list">
+            <!-- 多条未读通知聚合为一张卡片，避免面板被逐条渲染拉长；仅最新一条做摘要。 -->
+            <div v-if="unreadCount > 0" class="notice-list">
               <div
-                v-for="item in notifications"
-                :key="item.id"
                 class="notice-row"
-                :class="notificationLevelClass(item.level)"
+                :class="notificationLevelClass(notifications[0]?.level ?? 'info')"
               >
                 <i class="fas fa-bell" />
                 <div>
-                  <strong>{{ item.title }}</strong>
-                  <small>{{ formatRelativeTimeAgo(item.created_at, "") }}</small>
+                  <strong>有 {{ unreadCount }} 条未读通知</strong>
+                  <small v-if="notifications.length">
+                    {{ notifications[0].title }} · {{ formatRelativeTimeAgo(notifications[0].created_at, "") }}
+                  </small>
+                  <small v-else>点击右上角铃铛查看</small>
                 </div>
               </div>
             </div>
