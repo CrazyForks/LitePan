@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"litepan/internal/mediaorganize/classification"
 	"litepan/internal/mediaorganize/moplan"
 	"litepan/internal/mediaorganize/rules"
 )
@@ -70,15 +71,26 @@ func (p *Planner) resolveTargetParentForMove(workDirRef string, isTV bool, seaso
 	return seasonRef, deps
 }
 
-func (p *Planner) ensureWorkDirAction(key groupKey, workDirName string, items []batchEntry, promotedMoveRef string) string {
+func (p *Planner) ensureWorkDirAction(
+	key groupKey,
+	workDirName string,
+	items []batchEntry,
+	promotedMoveRef string,
+	classificationDecision classification.Decision,
+) string {
 	if p.actionType != "move" || workDirName == "" {
 		return ""
 	}
 	if promotedMoveRef != "" {
 		return promotedMoveRef
 	}
-	categoryAncestors := p.categoryAncestors(key, items)
-	parentRef := p.buildTargetCategoryParentRef(categoryAncestors)
+	parentRef := ""
+	if classificationDecision.Applied {
+		parentRef = p.classificationParentRef(classificationDecision)
+	} else {
+		categoryAncestors := p.categoryAncestors(key, items)
+		parentRef = p.buildTargetCategoryParentRef(categoryAncestors)
+	}
 	ref := p.ensureDirAction(parentRef, workDirName)
 	srcDirID := key.dirID
 	if strings.HasPrefix(ref, "ref:") {
@@ -91,6 +103,9 @@ func (p *Planner) ensureWorkDirAction(key groupKey, workDirName string, items []
 				a.Metadata["is_work_dir"] = true
 				if srcDirID != "" && srcDirID != p.parentID {
 					a.Metadata["source_dir_id"] = srcDirID
+				}
+				for metaKey, metaValue := range classificationMetadata(classificationDecision) {
+					a.Metadata[metaKey] = metaValue
 				}
 				break
 			}
@@ -187,6 +202,7 @@ func (p *Planner) resolvePromotedMovieTargetParent(ancestors []rules.Ancestor, m
 func (p *Planner) ensurePromotedMovieMoveAction(
 	dirID, dirName, targetParent, targetName, tmdbID string,
 	confidence float64,
+	classificationMeta map[string]any,
 ) string {
 	for i := range p.actions {
 		a := &p.actions[i]
@@ -211,12 +227,12 @@ func (p *Planner) ensurePromotedMovieMoveAction(
 			dirName, targetName, tmdbSuffix(tmdbID),
 		),
 		Confidence: confidence,
-		Metadata: map[string]any{
+		Metadata: mergeMeta(map[string]any{
 			"is_work_dir":           true,
 			"source_dir_id":         dirID,
 			"promoted_from_tv_tree": true,
 			"tmdb_id":               tmdbID,
-		},
+		}, classificationMeta),
 	})
 	return "ref:" + action.ID
 }

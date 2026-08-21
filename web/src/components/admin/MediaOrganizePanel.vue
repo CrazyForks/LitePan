@@ -1190,6 +1190,11 @@ defineExpose({
                 <span class="organize-plan-group-right">
                   <span class="organize-plan-group-badges">
                     <span v-if="group.aiAssisted" class="organize-plan-group-ai">AI 介入</span>
+                    <span
+                      v-if="group.classificationLabel"
+                      class="organize-plan-group-classification"
+                      :class="{ 'organize-plan-group-classification--degraded': group.classificationDegraded }"
+                    >分类：{{ group.classificationLabel }}</span>
                     <span v-if="group.tmdbId" class="organize-plan-group-tmdb">tmdb-{{ group.tmdbId }}</span>
                     <span v-else class="organize-plan-group-notmdb">无 TMDB</span>
                     <span class="organize-plan-group-count">{{ group.actionCount }} 项</span>
@@ -2149,6 +2154,21 @@ defineExpose({
   padding: 2px 8px;
   border: 1px solid color-mix(in srgb, #d5a72b 32%, transparent);
   border-radius: 999px;
+}
+
+.organize-plan-group-classification {
+  font-size: 12px;
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 11%, var(--surface));
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--success) 28%, transparent);
+  border-radius: 999px;
+}
+
+.organize-plan-group-classification--degraded {
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+  border-color: var(--border);
 }
 
 .organize-plan-group-notmdb {

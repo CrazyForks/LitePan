@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"litepan/internal/domain"
+	"litepan/internal/mediaorganize/classification"
 	"litepan/internal/mediaorganize/moplan"
 	"litepan/internal/mediaorganize/recognition"
 	"litepan/internal/mediaorganize/rules"
@@ -60,12 +61,17 @@ type Planner struct {
 	seasonFolderTpl   string
 	tvSeasonsCache    map[string][]map[string]any
 	recognition       recognition.Enhancer
+	classification    classification.Enhancer
 	deferred          []deferredGroup
 	applyingAI        bool
 }
 
 func (p *Planner) SetRecognitionEnhancer(enhancer recognition.Enhancer) {
 	p.recognition = enhancer
+}
+
+func (p *Planner) SetClassificationEnhancer(enhancer classification.Enhancer) {
+	p.classification = enhancer
 }
 
 func New(

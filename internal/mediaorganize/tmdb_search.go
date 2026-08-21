@@ -14,21 +14,10 @@ import (
 var tmdbQueryIDRe = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])tmdb(?:id)?\s*[=:\-_]?\s*(\d{1,10})(?:$|[^0-9])`)
 
 func (s *Service) SearchTMDB(ctx context.Context, query string, year *int, language, mediaType string) ([]json.RawMessage, error) {
-	settingsDict := SettingsDict(s.settings)
-	apiKey := strings.TrimSpace(stringFromAny(settingsDict["tmdb_api_key"]))
-	if apiKey == "" {
-		return nil, domain.Errorf(domain.CodeValidation, "未配置 TMDB API Key")
+	client, err := s.newTMDBClient(language)
+	if err != nil {
+		return nil, err
 	}
-	if language == "" {
-		language = stringFromAny(settingsDict["tmdb_language"])
-	}
-	client := tmdb.NewClient(tmdb.Options{
-		APIKey:        apiKey,
-		Language:      language,
-		ProxyURL:      buildProxyURL(settingsDict),
-		APIBaseHost:   stringFromAny(settingsDict["tmdb_api_host"]),
-		ImageBaseHost: stringFromAny(settingsDict["tmdb_image_host"]),
-	})
 
 	query = strings.TrimSpace(query)
 	mt := strings.ToLower(strings.TrimSpace(mediaType))
@@ -61,6 +50,50 @@ func (s *Service) SearchTMDB(ctx context.Context, query string, year *int, langu
 		return nil, err
 	}
 	return injectMediaType(results, mt), nil
+}
+
+// LookupTMDBDetail 按明确的电影/剧集类型读取完整 detail，供分类条件查询等只读工具复用。
+func (s *Service) LookupTMDBDetail(ctx context.Context, id, mediaType, language string) (json.RawMessage, error) {
+	id, err := normalizeTMDBDetailID(id)
+	if err != nil {
+		return nil, err
+	}
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	if mediaType != "movie" && mediaType != "tv" {
+		return nil, domain.Errorf(domain.CodeValidation, "媒体类型必须为 movie 或 tv")
+	}
+	client, err := s.newTMDBClient(language)
+	if err != nil {
+		return nil, err
+	}
+	return client.Lookup(ctx, id, mediaType)
+}
+
+func normalizeTMDBDetailID(id string) (string, error) {
+	id = strings.TrimSpace(id)
+	numericID, err := strconv.ParseUint(id, 10, 64)
+	if err != nil || numericID == 0 || len(id) > 10 {
+		return "", domain.Errorf(domain.CodeValidation, "TMDB ID 必须为 1～10 位正整数")
+	}
+	return strconv.FormatUint(numericID, 10), nil
+}
+
+func (s *Service) newTMDBClient(language string) (*tmdb.Client, error) {
+	settingsDict := SettingsDict(s.settings)
+	apiKey := strings.TrimSpace(stringFromAny(settingsDict["tmdb_api_key"]))
+	if apiKey == "" {
+		return nil, domain.Errorf(domain.CodeValidation, "未配置 TMDB API Key")
+	}
+	if language == "" {
+		language = stringFromAny(settingsDict["tmdb_language"])
+	}
+	return tmdb.NewClient(tmdb.Options{
+		APIKey:        apiKey,
+		Language:      language,
+		ProxyURL:      buildProxyURL(settingsDict),
+		APIBaseHost:   stringFromAny(settingsDict["tmdb_api_host"]),
+		ImageBaseHost: stringFromAny(settingsDict["tmdb_image_host"]),
+	}), nil
 }
 
 func parseTMDBQueryID(query string) string {

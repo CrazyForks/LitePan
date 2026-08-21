@@ -10,6 +10,7 @@ import { toast } from "@/composables/useToast";
 import { useSettingsLoad } from "@/composables/useSettingsLoad";
 import AppButton from "@/components/base/AppButton.vue";
 import AIToolCard from "@/components/admin/AIToolCard.vue";
+import ClassificationToolCard from "@/components/admin/ClassificationToolCard.vue";
 import CloudToolCard from "@/components/admin/CloudToolCard.vue";
 import LocalUploadToolCard from "@/components/admin/LocalUploadToolCard.vue";
 import ProxyToolsPanel from "@/components/admin/ProxyToolsPanel.vue";
@@ -22,7 +23,7 @@ const emit = defineEmits<{ "update:searchOpen": [boolean] }>();
 const { runLoad } = useSettingsLoad();
 
 const searchQuery = ref("");
-const cardTitles = ["Emby 反代", "飞牛影视反代", "115 网盘 STRM 增强方案", "从服务器上传", "AI 辅助增强工具", "夸克 STRM 播放接管"];
+const cardTitles = ["分类整理", "Emby 反代", "飞牛影视反代", "115 网盘 STRM 增强", "从服务器上传", "AI 辅助增强工具", "夸克 STRM 播放接管"];
 
 function matches(title: string) {
   const q = searchQuery.value.trim().toLowerCase();
@@ -108,9 +109,9 @@ async function clearCache() {
     <div class="cloud-tools__grid">
       <ProxyToolsPanel :search-query="searchQuery" />
       <CloudToolCard
-        v-show="matches('115 网盘 STRM 增强方案')"
+        v-show="matches('115 网盘 STRM 增强')"
         :enabled="status.enabled"
-        name="115 网盘 STRM 增强方案"
+        name="115 网盘 STRM 增强"
         driver="作用于 STRM 任务 · 全量清单 + 增量对账"
         logo-src="/logos/115.png"
         logo-alt="115"
@@ -155,6 +156,8 @@ async function clearCache() {
       <LocalUploadToolCard :search-query="searchQuery" />
 
       <AIToolCard :search-query="searchQuery" />
+
+      <ClassificationToolCard :search-query="searchQuery" />
 
       <QuarkTVToolCard :search-query="searchQuery" />
     </div>

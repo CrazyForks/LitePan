@@ -145,6 +145,8 @@ func (p *Planner) planGroupWithMatch(
 		groupDirMeta["group_old_dir_name"] = key.dirName
 		groupDirMeta["group_new_dir_name"] = newFolderName
 	}
+	classificationDecision := p.classifyGroup(key.mediaKind, tmdbID, tmdbInfo.raw)
+	groupDirMeta = mergeMeta(groupDirMeta, classificationMetadata(classificationDecision))
 
 	parentOfDir := p.parentID
 	if key.dirID != "" && len(items) > 0 {
@@ -168,7 +170,11 @@ func (p *Planner) planGroupWithMatch(
 	if key.mediaKind == "movie" && len(items) > 0 {
 		sampleAncestors := items[0].ancestors
 		promotedMovieParent = rules.GetPromotedMovieParentID(sampleAncestors, key.dirID, p.parentID, p.scannedDirParents)
-		promotedMoveTarget = p.resolvePromotedMovieTargetParent(sampleAncestors, key.dirID)
+		if classificationDecision.Applied {
+			promotedMoveTarget = p.classificationParentRef(classificationDecision)
+		} else {
+			promotedMoveTarget = p.resolvePromotedMovieTargetParent(sampleAncestors, key.dirID)
+		}
 	}
 
 	promotedMoveRef := ""
@@ -180,6 +186,7 @@ func (p *Planner) planGroupWithMatch(
 			newFolderName,
 			tmdbID,
 			tmdbInfo.confidenceOr(0.6, tmdbID),
+			classificationMetadata(classificationDecision),
 		)
 	}
 
@@ -224,7 +231,7 @@ func (p *Planner) planGroupWithMatch(
 
 	targetWorkRef := ""
 	if p.actionType == "move" {
-		targetWorkRef = p.ensureWorkDirAction(key, newFolderName, items, promotedMoveRef)
+		targetWorkRef = p.ensureWorkDirAction(key, newFolderName, items, promotedMoveRef, classificationDecision)
 	}
 
 	seasonDirCache := map[int]string{}

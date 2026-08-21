@@ -32,6 +32,8 @@ export interface PlanGroup {
   tmdbId: string;
   tmdbUrl: string;
   aiAssisted: boolean;
+  classificationLabel: string;
+  classificationDegraded: boolean;
   dirAction: MediaOrganizePlanAction | null;
   virtualDir: boolean;
   hasDirInfo: boolean;
@@ -295,6 +297,21 @@ export function useOrganizePlanPreview() {
           : "",
         aiAssisted: [g.dirAction, ...g.actions].some(
           (action) => action?.metadata?.recognition_source === "ai",
+        ),
+        classificationLabel: (() => {
+          const action = [g.dirAction, ...g.actions].find(
+            (item) => item?.metadata?.classification_applied === true,
+          );
+          if (!action) return "";
+          if (action.metadata?.classification_matched !== true) return "目标根";
+          return String(
+            action.metadata?.classification_relative_path ?? action.metadata?.classification_category ?? "",
+          );
+        })(),
+        classificationDegraded: [g.dirAction, ...g.actions].some(
+          (action) =>
+            action?.metadata?.classification_applied === true &&
+            action?.metadata?.classification_matched !== true,
         ),
         dirAction: g.dirAction,
         virtualDir,

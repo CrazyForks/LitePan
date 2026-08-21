@@ -73,6 +73,8 @@ const (
 	KeyAIOrganizeBaseURL       = "ai_organize_base_url"
 	KeyAIOrganizeAPIKey        = "ai_organize_api_key"
 	KeyAIOrganizeModel         = "ai_organize_model"
+	KeyMOClassificationEnabled = "mo_classification_enabled"
+	KeyMOClassificationConfig  = "mo_classification_config"
 )
 
 // Type 决定后台表单控件与校验方式。
@@ -227,6 +229,18 @@ func defaultSpecs() []Spec {
 			Key:     KeyAIOrganizeModel,
 			Type:    TypeString,
 			Default: "deepseek-chat",
+			Hidden:  true,
+		},
+		{
+			Key:     KeyMOClassificationEnabled,
+			Type:    TypeBool,
+			Default: "false",
+			Hidden:  true,
+		},
+		{
+			Key:     KeyMOClassificationConfig,
+			Type:    TypeString,
+			Default: "",
 			Hidden:  true,
 		},
 		{

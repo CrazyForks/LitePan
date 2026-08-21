@@ -25,3 +25,21 @@ func TestParseTMDBQueryID(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeTMDBDetailIDAcceptsFourDigitSeriesID(t *testing.T) {
+	for in, want := range map[string]string{
+		"1396":     "1396",
+		" 281495 ": "281495",
+		"000123":   "123",
+	} {
+		got, err := normalizeTMDBDetailID(in)
+		if err != nil || got != want {
+			t.Fatalf("normalizeTMDBDetailID(%q)=%q, %v want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "0", "-1", "tmdb-123", "12345678901"} {
+		if _, err := normalizeTMDBDetailID(in); err == nil {
+			t.Fatalf("normalizeTMDBDetailID(%q) 应失败", in)
+		}
+	}
+}

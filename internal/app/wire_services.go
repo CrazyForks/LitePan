@@ -8,6 +8,7 @@ import (
 	"litepan/internal/aiorganize"
 	"litepan/internal/automation"
 	"litepan/internal/cacheretention"
+	"litepan/internal/classifyorganize"
 	"litepan/internal/config"
 	"litepan/internal/crosstransfer"
 	"litepan/internal/domain"
@@ -38,6 +39,7 @@ type servicesBundle struct {
 	strm             *strm.Service
 	mediaOrganize    *mediaorganize.Service
 	aiOrganize       *aiorganize.Service
+	classifyOrganize *classifyorganize.Service
 	strmScrape       *strmscrape.Service
 	automation       *automation.Service
 	fuse             *fusemount.Service
@@ -59,7 +61,8 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 	core.strm = coord
 	retentionSvc, retentionCoord := wireCacheRetention(st, fileSvc, core.cache, core.bus, logs)
 	aiOrganizeSvc := aiorganize.New(st.settings)
-	mediaOrganizeSvc := wireMediaOrganize(st, fileSvc, logs, cfg.DataDir, aiOrganizeSvc)
+	classifyOrganizeSvc := classifyorganize.New(st.settings)
+	mediaOrganizeSvc := wireMediaOrganize(st, fileSvc, logs, cfg.DataDir, aiOrganizeSvc, classifyOrganizeSvc)
 	strmScrapeSvc := strmscrape.New(strmscrape.Options{
 		Strm:     strmSvc,
 		Settings: st.settings,
@@ -185,6 +188,7 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		strm:             strmSvc,
 		mediaOrganize:    mediaOrganizeSvc,
 		aiOrganize:       aiOrganizeSvc,
+		classifyOrganize: classifyOrganizeSvc,
 		strmScrape:       strmScrapeSvc,
 		automation:       automationSvc,
 		fuse:             fuseSvc,

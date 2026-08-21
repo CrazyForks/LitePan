@@ -52,6 +52,44 @@ export interface AIOrganizeConfig {
   model: string;
 }
 
+export type ClassificationTemplateKind = "media" | "region" | "genre" | "custom";
+
+export interface ClassificationRule {
+  name: string;
+  condition: string;
+  fallback_to_self?: boolean;
+  children?: ClassificationRule[];
+}
+
+export interface ClassificationTemplate {
+  kind: ClassificationTemplateKind;
+  rules: ClassificationRule[];
+}
+
+export interface ClassificationConfig {
+  version: number;
+  enabled: boolean;
+  selected_template: ClassificationTemplateKind;
+  templates: ClassificationTemplate[];
+}
+
+export interface ClassificationTMDBGenre {
+  id?: number;
+  name?: string;
+}
+
+export interface ClassificationTMDBDetail extends Record<string, unknown> {
+  id?: number;
+  media_type?: "movie" | "tv";
+  title?: string;
+  name?: string;
+  original_title?: string;
+  original_name?: string;
+  origin_country?: string[];
+  original_language?: string;
+  genres?: ClassificationTMDBGenre[];
+}
+
 export interface QuarkTVBinding {
   account_id: number;
   account_name: string;
@@ -113,6 +151,14 @@ export const aiOrganizeApi = {
     http.put<AIOrganizeConfig>("/admin/tools/ai-organize/config", payload),
   testConfig: (payload: AIOrganizeConfig) =>
     http.post<{ ok: boolean }>("/admin/tools/ai-organize/test", payload),
+};
+
+export const classificationApi = {
+  getConfig: () => http.get<ClassificationConfig>("/admin/tools/classification/config"),
+  saveConfig: (payload: ClassificationConfig) =>
+    http.put<ClassificationConfig>("/admin/tools/classification/config", payload),
+  lookupTMDBDetail: (payload: { tmdb_id: string; media_type: "movie" | "tv" }) =>
+    http.post<ClassificationTMDBDetail>("/admin/tools/classification/tmdb-detail", payload),
 };
 
 export const quarkTVApi = {

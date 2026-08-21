@@ -19,13 +19,14 @@ import (
 	"litepan/internal/account"
 	"litepan/internal/accountprofile"
 	"litepan/internal/adminauth"
-	"litepan/internal/announcement"
 	"litepan/internal/aiorganize"
+	"litepan/internal/announcement"
 	"litepan/internal/apikey"
 	"litepan/internal/auth"
 	"litepan/internal/automation"
 	"litepan/internal/cache"
 	"litepan/internal/cacheretention"
+	"litepan/internal/classifyorganize"
 	"litepan/internal/crosstransfer"
 	"litepan/internal/domain"
 	"litepan/internal/embyproxy"
@@ -68,6 +69,7 @@ type Deps struct {
 	CacheRetention    *cacheretention.Service
 	MediaOrganize     *mediaorganize.Service
 	AIOrganize        *aiorganize.Service
+	ClassifyOrganize  *classifyorganize.Service
 	StrmScrape        *strmscrape.Service
 	Automation        *automation.Service
 	Fuse              *fusemount.Service
@@ -104,6 +106,7 @@ type Handler struct {
 	cacheRetention    *cacheretention.Service
 	mediaOrganize     *mediaorganize.Service
 	aiOrganize        *aiorganize.Service
+	classifyOrganize  *classifyorganize.Service
 	strmScrape        *strmscrape.Service
 	automation        *automation.Service
 	fuse              *fusemount.Service
@@ -148,6 +151,7 @@ func NewRouter(d Deps) http.Handler {
 		cacheRetention:    d.CacheRetention,
 		mediaOrganize:     d.MediaOrganize,
 		aiOrganize:        d.AIOrganize,
+		classifyOrganize:  d.ClassifyOrganize,
 		strmScrape:        d.StrmScrape,
 		automation:        d.Automation,
 		fuse:              d.Fuse,
@@ -300,6 +304,11 @@ func NewRouter(d Deps) http.Handler {
 					r.Get("/config", h.getAIOrganizeConfig)
 					r.Put("/config", h.updateAIOrganizeConfig)
 					r.Post("/test", h.testAIOrganizeConfig)
+				})
+				r.Route("/tools/classification", func(r chi.Router) {
+					r.Get("/config", h.getClassificationConfig)
+					r.Put("/config", h.updateClassificationConfig)
+					r.Post("/tmdb-detail", h.lookupClassificationTMDBDetail)
 				})
 				r.Route("/tools/quarktv", func(r chi.Router) {
 					r.Get("/status", h.getQuarkTVStatus)
