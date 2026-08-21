@@ -75,6 +75,15 @@ func ApplyEpisodeFallbacks(name string, result map[string]any) map[string]any {
 	var matchedSpan [2]int
 	hasSpan := false
 	invalidSeen := false
+	seasonOnly := false
+
+	// 拒绝视频编码数字被误判为集数（如 H.265 的 265 / x265 / HEVC / AVC 的 264）
+	if ep := asFirstInt(parsed["episode"]); ep != nil && (*ep == 264 || *ep == 265) && codecEpisodeTokenRe.MatchString(strings.ToLower(name)) {
+		delete(parsed, "episode")
+		if parsed["type"] == "episode" {
+			delete(parsed, "type")
+		}
+	}
 
 	for _, re := range seasonEpPatterns {
 		loc := re.FindStringSubmatchIndex(compact)
@@ -121,6 +130,24 @@ func ApplyEpisodeFallbacks(name string, result map[string]any) map[string]any {
 		}
 	}
 
+	// 季-only 识别：S01 / Season 1 / 第1季（无集号），如 S01.2160p.WEB-DL...
+	if season == nil && episode == nil && !invalidSeen {
+		for _, re := range seasonOnlyPatterns {
+			loc := re.FindStringSubmatchIndex(compact)
+			if loc == nil {
+				continue
+			}
+			m := re.FindStringSubmatch(compact)
+			if n, err := parseInt(m[1]); err == nil && isReasonableSeason(intPtr(n)) {
+				season = intPtr(n)
+				matchedSpan = [2]int{loc[0], loc[1]}
+				hasSpan = true
+				seasonOnly = true
+				break
+			}
+		}
+	}
+
 	if season != nil && parsed["season"] == nil {
 		parsed["season"] = *season
 	}
@@ -131,7 +158,7 @@ func ApplyEpisodeFallbacks(name string, result map[string]any) map[string]any {
 		parsed["season"] = 1
 	}
 
-	if parsed["episode"] != nil {
+	if parsed["episode"] != nil || (seasonOnly && parsed["season"] != nil) {
 		parsed["type"] = "episode"
 		title := strings.TrimSpace(strVal(parsed["title"]))
 		if hasSpan {
@@ -301,6 +328,8 @@ func FixGuessitAbsoluteEpisodeSplit(name string, parsed map[string]any) map[stri
 
 func ParseFilenameStrict(name string) ParsedMedia {
 	sanitized := StripKnownIDTags(name)
+	sanitized = StripReleaseSitePrefix(sanitized)
+	sanitized = StripChineseBracketTags(sanitized)
 	if stem, _ := splitStemExt(sanitized); yearOnlyTitleRe.MatchString(stem) {
 		return enrichParsedMediaTags(name, ParsedMedia{Title: strings.TrimSpace(stem), Type: "movie"})
 	}
@@ -366,6 +395,7 @@ func ParseDirName(name string) ParsedMedia {
 	}
 	raw = strings.TrimSpace(StripKnownIDTags(raw))
 	raw = StripReleaseSitePrefix(raw)
+	raw = StripChineseBracketTags(raw)
 
 	cleanResult := func(out ParsedMedia) ParsedMedia {
 		if out.Title != "" {
@@ -395,6 +425,20 @@ func ParseDirName(name string) ParsedMedia {
 	head, season := StripSeasonSuffix(raw)
 	if season != nil && head != "" {
 		return cleanResult(ParsedMedia{Title: head, Season: season, Type: "episode"})
+	}
+
+	// 季信息在中间（非末尾）：片名.第二季[全26集]…2024… → title=片名 season=2
+	if season == nil {
+		if best := seasonInfoStart(raw); best > 0 {
+			prefix := strings.TrimSpace(raw[:best])
+			if prefix != "" {
+				if sn := ParseSeasonDirNumber(raw); sn != nil {
+					if headTitle := strings.TrimSpace(NormalizeParsedMedia(ParseDirName(prefix)).Title); headTitle != "" {
+						return cleanResult(ParsedMedia{Title: headTitle, Season: sn, Type: "episode"})
+					}
+				}
+			}
+		}
 	}
 
 	guessName := raw

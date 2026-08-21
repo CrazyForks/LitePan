@@ -45,6 +45,16 @@ func StripReleaseSitePrefix(name string) string {
 	return raw
 }
 
+// StripChineseBracketTags 剥掉含中文关键词的方括号/中文括号标签（如 [全10集] [内封简英字幕] 【广告】），
+// 保留纯数字/字母的方括号（如 [2160p] [01]）。
+func StripChineseBracketTags(name string) string {
+	if name == "" {
+		return name
+	}
+	out := cnBracketTagRe.ReplaceAllString(name, " ")
+	return strings.TrimSpace(out)
+}
+
 func StripChineseQualityTags(title string) string {
 	raw := strings.TrimSpace(title)
 	if raw == "" {
