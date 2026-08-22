@@ -23,7 +23,7 @@ const emit = defineEmits<{ "update:searchOpen": [boolean] }>();
 const { runLoad } = useSettingsLoad();
 
 const searchQuery = ref("");
-const cardTitles = ["分类整理", "Emby 反代", "飞牛影视反代", "115 网盘 STRM 增强", "从服务器上传", "AI 辅助增强工具", "夸克 STRM 播放接管"];
+const cardTitles = ["Emby 反代", "飞牛影视反代", "115 网盘 STRM 增强", "夸克 STRM 播放接管", "AI 辅助增强工具", "分类整理", "从服务器上传"];
 
 function matches(title: string) {
   const q = searchQuery.value.trim().toLowerCase();
@@ -153,13 +153,13 @@ async function clearCache() {
         </template>
       </CloudToolCard>
 
-      <LocalUploadToolCard :search-query="searchQuery" />
+      <QuarkTVToolCard :search-query="searchQuery" />
 
       <AIToolCard :search-query="searchQuery" />
 
       <ClassificationToolCard :search-query="searchQuery" />
 
-      <QuarkTVToolCard :search-query="searchQuery" />
+      <LocalUploadToolCard :search-query="searchQuery" />
     </div>
     <div v-if="searchOpen && !hasMatch" class="tool-search__empty">没有找到相关工具</div>
   </div>

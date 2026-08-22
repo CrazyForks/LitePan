@@ -101,7 +101,7 @@ async function saveMappings() {
       :enabled="localEnabled"
       name="从服务器上传"
       driver="作用于全部网盘账号 · 上传面板双来源"
-      logo-src="/logos/local.png"
+      logo-src="/logos/localup.png"
       logo-alt="本机"
       :tags="[{ label: '通用' }]"
       :stat-value="localMappings.length"

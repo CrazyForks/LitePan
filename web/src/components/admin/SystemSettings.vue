@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { getApiErrorMessage } from "@/api/client";
 import {
   fetchSystemConfig,
@@ -28,9 +28,12 @@ import SettingsCard from "@/components/admin/SettingsCard.vue";
 import SettingsRow from "@/components/admin/SettingsRow.vue";
 import SettingsHelpTooltip from "@/components/admin/SettingsHelpTooltip.vue";
 import ApiKeySettings from "@/components/admin/ApiKeySettings.vue";
+import SvgIcon from "@/components/icons/SvgIcon.vue";
 import { isCacheSettingKey } from "@/constants/cacheSettings";
 import { getSkinPref, previewSkin, restoreSavedSkin, setSkinPref, type SkinPref } from "@/utils/theme";
 import "@/styles/admin-shared.css";
+
+const BackupRestorePanel = defineAsyncComponent(() => import("@/components/admin/BackupRestorePanel.vue"));
 
 const props = withDefaults(
   defineProps<{
@@ -82,6 +85,10 @@ const ACCENTS = ["var(--brand)", "#f59e0b", "#10b981", "#6366f1", "#ec4899"];
 
 const auth = useAuthStore();
 const accountsStore = useAccountsStore();
+const backupRestoreRef = ref<{ openImport: () => void } | null>(null);
+const canBootstrapRestore = computed(
+  () => props.forcePasswordChange && props.passwordChangeReason === "default_credentials",
+);
 
 const ACCOUNT_DISPLAY_SETTING_KEYS = new Set([
   "account_show_profile",
@@ -457,6 +464,24 @@ async function submit() {
     </SectionTabBar>
 
     <template v-if="!loading">
+      <div v-if="isSecurityTab && canBootstrapRestore" class="bootstrap-restore-card">
+        <div class="bootstrap-restore-card__icon">
+          <SvgIcon name="fa-database" :size="24" />
+        </div>
+        <div class="bootstrap-restore-card__copy">
+          <strong>已有 LitePan 备份？</strong>
+          <span>可以直接导入旧备份并恢复，无需先修改默认密码。</span>
+        </div>
+        <AppButton type="button" variant="secondary" @click="backupRestoreRef?.openImport()">
+          导入备份
+        </AppButton>
+      </div>
+      <BackupRestorePanel
+        v-if="canBootstrapRestore"
+        ref="backupRestoreRef"
+        bootstrap
+      />
+
       <SettingsCard v-if="isSecurityTab" title="账号安全" :accent="accentColor">
         <SettingsRow
           :show-changed-badge="true"
@@ -774,6 +799,45 @@ async function submit() {
   padding-bottom: 24px;
 }
 
+.bootstrap-restore-card {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--brand) 24%, var(--border-soft));
+  border-radius: var(--radius-md);
+  background: linear-gradient(115deg, color-mix(in srgb, var(--brand) 8%, var(--surface)), var(--surface));
+}
+
+.bootstrap-restore-card__icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface));
+}
+
+.bootstrap-restore-card__copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.bootstrap-restore-card__copy strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.bootstrap-restore-card__copy span {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .field-error {
   margin: 6px 0 0;
   font-size: 12px;
@@ -785,5 +849,28 @@ async function submit() {
 .field-num,
 .field-select {
   width: 100%;
+}
+
+@media (max-width: 640px) {
+  .bootstrap-restore-card {
+    grid-template-columns: 42px minmax(0, 1fr);
+    padding: 14px;
+  }
+
+  .bootstrap-restore-card__icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .bootstrap-restore-card .btn {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
+:global([data-skin="brutal"]) .bootstrap-restore-card {
+  border: var(--brutal-border-width, 2px) solid var(--text);
+  border-radius: 0;
+  box-shadow: var(--brutal-shadow, 3px 3px 0 var(--text));
 }
 </style>

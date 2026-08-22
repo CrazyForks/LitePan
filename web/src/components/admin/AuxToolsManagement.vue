@@ -13,13 +13,16 @@ import "@/styles/admin-shared.css";
 const StrmScrapePanel = defineAsyncComponent(() => import("@/components/admin/StrmScrapePanel.vue"));
 const StrmScrapeSettings = defineAsyncComponent(() => import("@/components/admin/StrmScrapeSettings.vue"));
 const CloudToolsPanel = defineAsyncComponent(() => import("@/components/admin/CloudToolsPanel.vue"));
+const BackupRestorePanel = defineAsyncComponent(() => import("@/components/admin/BackupRestorePanel.vue"));
 
 const SCRAPE_TAB = "scrape";
 const PROXY_TAB = "proxy";
 const ENHANCED_TAB = "enhanced";
+const BACKUP_TAB = "backup";
 const tabs = [
   { key: SCRAPE_TAB, label: "STRM 刮削" },
   { key: ENHANCED_TAB, label: "增强工具" },
+  { key: BACKUP_TAB, label: "备份管理" },
 ];
 
 const settingsDrawerOpen = ref(false);
@@ -45,7 +48,7 @@ const route = useRoute();
 const initialTab = String(route.query.tab ?? "") === PROXY_TAB ? ENHANCED_TAB : SCRAPE_TAB;
 const { activeTab, setActiveTab } = useSectionTabRoute(
 	initialTab,
-	[SCRAPE_TAB, ENHANCED_TAB],
+  [SCRAPE_TAB, ENHANCED_TAB, BACKUP_TAB],
   {
     beforeTabChange: async () => {
       if (!settingsDrawerOpen.value) return true;
@@ -60,6 +63,7 @@ const { activeTab, setActiveTab } = useSectionTabRoute(
 const drawerSaving = computed(() => readPanelSaving(scrapeSettingsRef.value?.saving));
 const isScrapeTab = computed(() => activeTab.value === SCRAPE_TAB);
 const isEnhancedTab = computed(() => activeTab.value === ENHANCED_TAB);
+const isBackupTab = computed(() => activeTab.value === BACKUP_TAB);
 
 async function openScrapeSettings() {
   scrapeSettingsVisited.value = true;
@@ -115,6 +119,7 @@ async function handleDrawerSave() {
       :search-open="enhancedSearchOpen"
       @update:search-open="enhancedSearchOpen = $event"
     />
+    <BackupRestorePanel v-else-if="isBackupTab" />
 
     <AdminSettingsDrawer
       :open="settingsDrawerOpen"

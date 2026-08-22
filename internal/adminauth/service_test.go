@@ -232,3 +232,56 @@ func TestUpdateCredentialsValidationFailureDoesNotPersistAnySetting(t *testing.T
 		t.Fatalf("public index changed after rejected update: got %q, ok=%v", publicIndex, ok)
 	}
 }
+
+func TestDefaultCredentialsMayOnlyUseBootstrapRestoreEndpoints(t *testing.T) {
+	svc, _, ctx := newBareTestAuth(t)
+	sess := &Session{
+		IsAdmin:              true,
+		Username:             "admin",
+		MustChangePassword:   true,
+		PasswordChangeReason: "default_credentials",
+	}
+
+	allowed := []string{
+		"/api/admin/backups/import",
+		"/api/admin/backups/11111111-1111-1111-1111-111111111111/restore",
+		"/api/admin/backups/restart",
+	}
+	for _, path := range allowed {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		if err := svc.EnsureAdminAccess(ctx, req, sess); err != nil {
+			t.Fatalf("bootstrap restore path %q rejected: %v", path, err)
+		}
+	}
+
+	blocked := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/admin/backups/"},
+		{http.MethodPost, "/api/admin/backups/"},
+		{http.MethodDelete, "/api/admin/backups/pending"},
+		{http.MethodPost, "/api/admin/accounts"},
+		{http.MethodGet, "/api/admin/backups/import"},
+	}
+	for _, item := range blocked {
+		req := httptest.NewRequest(item.method, item.path, nil)
+		if err := svc.EnsureAdminAccess(ctx, req, sess); err == nil {
+			t.Fatalf("locked default session unexpectedly accessed %s %s", item.method, item.path)
+		}
+	}
+}
+
+func TestTemporaryPasswordCannotUseBootstrapRestoreEndpoints(t *testing.T) {
+	svc, _, ctx := newTestAuth(t)
+	sess := &Session{
+		IsAdmin:              true,
+		Username:             "admin",
+		MustChangePassword:   true,
+		PasswordChangeReason: "temporary_password",
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/backups/import", nil)
+	if err := svc.EnsureAdminAccess(ctx, req, sess); err == nil {
+		t.Fatal("temporary password session must not use bootstrap restore endpoints")
+	}
+}

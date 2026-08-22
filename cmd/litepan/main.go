@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"os"
 	"os/signal"
@@ -57,6 +58,7 @@ func main() {
 	}
 
 	runErr := a.Run(ctx)
+	restarting := errors.Is(runErr, app.ErrRestartRequested)
 	stop()
 
 	shCtx, cancel := context.WithTimeout(context.Background(), shutdownBudget)
@@ -65,7 +67,7 @@ func main() {
 		logs.Root().Error("shutdown error", "err", err)
 		os.Exit(1)
 	}
-	if runErr != nil {
+	if runErr != nil && !restarting {
 		logs.Root().Error("run error", "err", runErr)
 		os.Exit(1)
 	}

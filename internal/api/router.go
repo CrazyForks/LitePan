@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 
 	"litepan/internal/account"
 	"litepan/internal/accountprofile"
@@ -24,6 +25,7 @@ import (
 	"litepan/internal/apikey"
 	"litepan/internal/auth"
 	"litepan/internal/automation"
+	"litepan/internal/backuprestore"
 	"litepan/internal/cache"
 	"litepan/internal/cacheretention"
 	"litepan/internal/classifyorganize"
@@ -83,6 +85,7 @@ type Deps struct {
 	AdminAuth         *adminauth.Service
 	Notifications     *notification.Service
 	Announcement      *announcement.Service
+	BackupRestore     *backuprestore.Service
 	DataDir           string
 	StrmDir           string
 	OnSettingsUpdated func(map[string]string)
@@ -90,6 +93,7 @@ type Deps struct {
 
 // Handler 持有处理请求所需的依赖。
 type Handler struct {
+	bootID            string
 	logs              *logx.Manager
 	log               *slog.Logger
 	accountSvc        *account.Service
@@ -120,6 +124,7 @@ type Handler struct {
 	adminAuth         *adminauth.Service
 	notifications     *notification.Service
 	announcement      *announcement.Service
+	backupRestore     *backuprestore.Service
 	dataDir           string
 	strmDir           string
 	onSettingsUpdated func(map[string]string)
@@ -135,6 +140,7 @@ func NewRouter(d Deps) http.Handler {
 		apiLog = d.Logs.For(logx.ModuleAPI)
 	}
 	h := &Handler{
+		bootID:            uuid.NewString(),
 		logs:              d.Logs,
 		log:               apiLog,
 		accountSvc:        d.AccountSvc,
@@ -165,6 +171,7 @@ func NewRouter(d Deps) http.Handler {
 		adminAuth:         d.AdminAuth,
 		notifications:     d.Notifications,
 		announcement:      d.Announcement,
+		backupRestore:     d.BackupRestore,
 		dataDir:           d.DataDir,
 		strmDir:           d.StrmDir,
 		onSettingsUpdated: d.OnSettingsUpdated,
@@ -212,6 +219,18 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/logs/cleanup/all", h.cleanupLogsAll)
 			r.Route("/admin", func(r chi.Router) {
 				r.Get("/system-config", h.adminSystemConfig)
+				r.Route("/backups", func(r chi.Router) {
+					r.Get("/", h.listBackups)
+					r.Post("/", h.createBackup)
+					r.Post("/import", h.importBackup)
+					r.Get("/status", h.backupRestoreStatus)
+					r.Post("/status/ack", h.acknowledgeRestoreStatus)
+					r.Delete("/pending", h.cancelPendingRestore)
+					r.Post("/restart", h.restartForRestore)
+					r.Get("/{id}/download", h.downloadBackup)
+					r.Post("/{id}/restore", h.prepareBackupRestore)
+					r.Delete("/{id}", h.deleteBackup)
+				})
 				r.Post("/update-credentials", h.adminUpdateCredentials)
 				r.Post("/webdav-config", h.adminWebDAVConfig)
 				r.Get("/emby/configs", h.listEmbyConfigs)

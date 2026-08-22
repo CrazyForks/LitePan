@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"litepan/internal/auth"
 	"litepan/internal/automation"
+	"litepan/internal/backuprestore"
 	"litepan/internal/cache"
 	"litepan/internal/cacheretention"
 	"litepan/internal/config"
@@ -29,6 +31,9 @@ import (
 	"litepan/internal/strm"
 	"litepan/internal/upload"
 )
+
+// ErrRestartRequested 表示管理员已从页面发起优雅重启。
+var ErrRestartRequested = errors.New("restart requested")
 
 // App 按依赖顺序构造与关闭各子系统。
 type App struct {
@@ -56,6 +61,7 @@ type App struct {
 	fnosProxy        *fnosproxy.Service
 	httpSrv          *http.Server
 	httpBaseCancel   context.CancelFunc
+	restartCh        <-chan struct{}
 }
 
 // Options 是构造 App 所需的外部依赖。
@@ -76,6 +82,15 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	if err := prepareDataDirs(cfg); err != nil {
 		return nil, err
 	}
+	if status, restoreErr := backuprestore.ApplyPending(ctx, backuprestore.ApplyOptions{
+		DataDir: cfg.DataDir,
+		DBPath:  cfg.DBPath,
+		Log:     logs.For(logx.ModuleSystem),
+	}); restoreErr != nil {
+		return nil, fmt.Errorf("apply pending restore: %w", restoreErr)
+	} else if status.State == backuprestore.StateRestoreSuccess || status.State == backuprestore.StateRestoreRollback {
+		log.Info("备份恢复启动阶段已完成", "state", status.State, "backup_id", status.BackupID)
+	}
 
 	stBundle, err := openStore(ctx, cfg, logs)
 	if err != nil {
@@ -93,7 +108,10 @@ func New(ctx context.Context, opts Options) (*App, error) {
 	}
 	svc := wireServices(cfg, logs, stBundle, core)
 
-	httpSrv, err := wireHTTPServer(cfg, logs, stBundle, core, svc)
+	restartCh := make(chan struct{})
+	var restartOnce sync.Once
+	requestRestart := func() { restartOnce.Do(func() { close(restartCh) }) }
+	httpSrv, err := wireHTTPServer(cfg, logs, stBundle, core, svc, requestRestart)
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +144,7 @@ func New(ctx context.Context, opts Options) (*App, error) {
 		fnosProxy:        svc.fnosProxy,
 		httpSrv:          httpSrv,
 		httpBaseCancel:   httpBaseCancel,
+		restartCh:        restartCh,
 	}, nil
 }
 
@@ -173,6 +192,9 @@ func (a *App) Run(ctx context.Context) error {
 	case <-ctx.Done():
 		a.log.Info("收到停止信号，准备关闭应用")
 		return nil
+	case <-a.restartCh:
+		a.log.Warn("收到备份恢复重启请求，准备关闭应用")
+		return ErrRestartRequested
 	case err := <-errCh:
 		return fmt.Errorf("http server: %w", err)
 	}

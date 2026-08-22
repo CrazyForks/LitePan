@@ -69,7 +69,7 @@ const announcement = useAnnouncement();
 
 const passwordChangeMessage = computed(() => {
   if (passwordChangeReason.value === "default_credentials") {
-    return "当前仍在使用默认管理员口令（admin/admin）。请先到系统设置 → 账号安全修改密码。";
+    return "当前仍在使用默认管理员口令（admin/admin）。请修改密码后继续，或在下方导入旧备份恢复原有设置。";
   }
   if (passwordChangeReason.value === "temporary_password") {
     return "当前会话使用临时密码登录，请先到系统设置 → 账号安全修改密码。";

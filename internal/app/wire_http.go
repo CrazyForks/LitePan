@@ -8,6 +8,8 @@ import (
 	"litepan/internal/announcement"
 	"litepan/internal/api"
 	"litepan/internal/apikey"
+	"litepan/internal/backuprestore"
+	"litepan/internal/buildinfo"
 	"litepan/internal/cache"
 	"litepan/internal/config"
 	"litepan/internal/logx"
@@ -15,7 +17,7 @@ import (
 	"litepan/internal/settings"
 )
 
-func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core *coreBundle, svc *servicesBundle) (*http.Server, error) {
+func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core *coreBundle, svc *servicesBundle, onRestart func()) (*http.Server, error) {
 	notifySvc := notification.NewService(notification.Options{
 		Repo:     st.store.Notifications,
 		Accounts: st.store.Accounts,
@@ -32,6 +34,19 @@ func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core
 	})
 	if svc.automation != nil {
 		svc.automation.SetApiKeys(apiKeySvc)
+	}
+	backupRestoreSvc, err := backuprestore.New(backuprestore.Options{
+		DataDir:   cfg.DataDir,
+		DBPath:    cfg.DBPath,
+		Version:   buildinfo.Version,
+		DB:        st.db,
+		Configs:   st.store.Configs,
+		Secret:    core.secret,
+		Log:       logs.For(logx.ModuleSystem),
+		OnRestart: onRestart,
+	})
+	if err != nil {
+		return nil, err
 	}
 	router := api.NewRouter(api.Deps{
 		Logs:              logs,
@@ -65,6 +80,7 @@ func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core
 		AdminAuth:         adminauth.New(st.store.Configs, core.secret, logs.For(logx.ModuleAPI)),
 		Notifications:     notifySvc,
 		Announcement:      announcement.New(announcement.DefaultURL, logs.For(logx.ModuleAPI)),
+		BackupRestore:     backupRestoreSvc,
 		DataDir:           cfg.DataDir,
 		StrmDir:           cfg.StrmDir,
 		OnSettingsUpdated: cacheSettingsHook(core.cache, st.settings, cfg.DataDir),
