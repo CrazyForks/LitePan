@@ -277,10 +277,17 @@ func (s *Service) CreateTask(ctx context.Context, task *domain.StrmTask) (*domai
 }
 
 func (s *Service) UpdateTask(ctx context.Context, id int64, task *domain.StrmTask) (*domain.StrmTask, error) {
+	releaseFiles, ok := s.TryBeginTaskFileOperation(id)
+	if !ok {
+		return nil, domain.Errorf(domain.CodeValidation, "当前任务正在进行，请停止后再修改设置")
+	}
+	defer releaseFiles()
+
 	existing, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	oldTaskRelDir := TaskRelDir(existing.GroupDir, existing.OutputFolder)
 	automationManaged, err := s.IsAutomationManaged(ctx, id)
 	if err != nil {
 		return nil, err
@@ -307,13 +314,29 @@ func (s *Service) UpdateTask(ctx context.Context, id int64, task *domain.StrmTas
 		task.ScheduleMode = domain.StrmScheduleManual
 	}
 	existing.ScheduleMode = task.ScheduleMode
-	existing.Status = task.Status
-	existing.PausedReason = task.PausedReason
-	existing.ErrorMessage = task.ErrorMessage
 	norm := s.normalizeTask(*existing)
 	norm.ID = id
-	if err := s.repo.Update(ctx, &norm); err != nil {
+	newTaskRelDir := TaskRelDir(norm.GroupDir, norm.OutputFolder)
+	outputMove, err := moveTaskOutputDirectory(s.strmDir, oldTaskRelDir, newTaskRelDir)
+	if err != nil {
 		return nil, err
+	}
+	if err := s.repo.Update(ctx, &norm); err != nil {
+		if rollbackErr := outputMove.Rollback(); rollbackErr != nil {
+			return nil, domain.Errorf(
+				domain.CodeInternal,
+				"保存任务失败，且 STRM 目录回滚失败：保存错误：%v；回滚错误：%v",
+				err,
+				rollbackErr,
+			)
+		}
+		return nil, err
+	}
+	if outputMove.Changed() {
+		if cleanupErr := outputMove.CleanupOldParents(); cleanupErr != nil {
+			s.log.Warn("strm 旧分组空目录清理失败", "task_id", id, "err", cleanupErr)
+		}
+		removeStrmScrapeIndex(s.dataDir, id)
 	}
 	return s.repo.Get(ctx, id)
 }

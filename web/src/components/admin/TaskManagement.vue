@@ -612,6 +612,10 @@ function openCreate() {
 }
 
 function openEdit(task: StrmTask) {
+  if (isTaskScanning(task)) {
+    toast.info("当前任务正在进行，请停止后再修改设置");
+    return;
+  }
   editingId.value = task.id ?? null;
   form.name = task.name;
   form.account_id = task.account_id;
