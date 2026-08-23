@@ -19,7 +19,7 @@ func TestPickStreamingCandidatePrefersDolbyOnlyWhenEnabled(t *testing.T) {
 	gotOff, ok := pickStreamingCandidate("fid", infos, StreamingPreference{
 		PreferredResolution: domain.QuarkTVResolutionAuto,
 		AllowDolby:          false,
-	}, nil)
+	})
 	if !ok {
 		t.Fatal("dolby 关闭时未选出候选")
 	}
@@ -30,7 +30,7 @@ func TestPickStreamingCandidatePrefersDolbyOnlyWhenEnabled(t *testing.T) {
 	gotOn, ok := pickStreamingCandidate("fid", infos, StreamingPreference{
 		PreferredResolution: domain.QuarkTVResolutionAuto,
 		AllowDolby:          true,
-	}, nil)
+	})
 	if !ok {
 		t.Fatal("dolby 开启时未选出候选")
 	}
@@ -49,7 +49,7 @@ func TestPickStreamingCandidateRespectsResolutionCap(t *testing.T) {
 	got, ok := pickStreamingCandidate("fid", infos, StreamingPreference{
 		PreferredResolution: domain.QuarkTVResolutionHigh,
 		AllowDolby:          false,
-	}, nil)
+	})
 	if !ok {
 		t.Fatal("受限清晰度下未选出候选")
 	}
@@ -69,7 +69,7 @@ func TestPickStreamingCandidateTreats2KAsSuperBucket(t *testing.T) {
 	got, ok := pickStreamingCandidate("fid", infos, StreamingPreference{
 		PreferredResolution: domain.QuarkTVResolutionSuper,
 		AllowDolby:          false,
-	}, nil)
+	})
 	if !ok {
 		t.Fatal("超清档未选出候选")
 	}
@@ -87,7 +87,7 @@ func TestPickStreamingCandidateFallsBackFrom4KTo2K(t *testing.T) {
 	got, ok := pickStreamingCandidate("fid", infos, StreamingPreference{
 		PreferredResolution: domain.QuarkTVResolution4K,
 		AllowDolby:          false,
-	}, nil)
+	})
 	if !ok {
 		t.Fatal("4k 档未选出候选")
 	}
@@ -161,4 +161,46 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+// 覆盖 2026-08-24 修复：片源只有 m3u8 档位（无 mp4）时，负分 m3u8 也要兜底选中最高档，
+// 而不是报"未返回符合播放偏好的档位"。
+func TestPickStreamingCandidateAllM3U8FallsBackToBest(t *testing.T) {
+	infos := []streamingVideoInfo{
+		{Resolution: "4k", Accessable: 1, Format: "m3u8", URL: "https://example/4k.m3u8"},
+		{Resolution: "super", Accessable: 1, Format: "m3u8", URL: "https://example/super.m3u8"},
+		{Resolution: "high", Accessable: 1, Format: "m3u8", URL: "https://example/high.m3u8"},
+		{Resolution: "low", Accessable: 1, Format: "m3u8", URL: "https://example/low.m3u8"},
+	}
+	got, ok := pickStreamingCandidate("fid", infos, StreamingPreference{
+		PreferredResolution: domain.QuarkTVResolutionAuto,
+		AllowDolby:          false,
+	})
+	if !ok {
+		t.Fatal("全 m3u8 档位应兜底选中最高档，实际未选中")
+	}
+	if got.Resolution != "4k" {
+		t.Fatalf("全 m3u8 应选 4k，实际为 %q", got.Resolution)
+	}
+}
+
+func TestPickStreamingCandidatePrefersMP4OverM3U8(t *testing.T) {
+	infos := []streamingVideoInfo{
+		{Resolution: "4k", Accessable: 1, Format: "m3u8", URL: "https://example/4k.m3u8"},
+		{Resolution: "super", Accessable: 1, Format: "mp4", URL: "https://example/super.mp4"},
+		{Resolution: "4k", Accessable: 1, Format: "mp4", URL: "https://example/4k.mp4"},
+	}
+	got, ok := pickStreamingCandidate("fid", infos, StreamingPreference{
+		PreferredResolution: domain.QuarkTVResolutionAuto,
+		AllowDolby:          false,
+	})
+	if !ok {
+		t.Fatal("应选中档位")
+	}
+	if got.Format != "mp4" {
+		t.Fatalf("有 mp4 时应优先 mp4，实际选 %q(%s)", got.Resolution, got.Format)
+	}
+	if got.Resolution != "4k" {
+		t.Fatalf("mp4 中应选 4k，实际为 %q", got.Resolution)
+	}
 }
