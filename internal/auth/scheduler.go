@@ -14,14 +14,16 @@ import (
 
 // Scheduler 主动刷新调度器：按时间窗口批量检查到期账号。
 type Scheduler struct {
-	svc       *Service
-	log       *slog.Logger
-	mu        sync.Mutex
-	stop      chan struct{}
-	done      chan struct{}
-	appCtx    context.Context
-	running   bool
-	firstExec bool
+	svc              *Service
+	log              *slog.Logger
+	mu               sync.Mutex
+	stop             chan struct{}
+	done             chan struct{}
+	appCtx           context.Context
+	running          bool
+	firstExec        bool
+	startupReady     chan struct{}
+	startupReadyOnce sync.Once
 
 	lastLoggedNext time.Time
 }
@@ -31,7 +33,30 @@ func NewScheduler(svc *Service, log *slog.Logger) *Scheduler {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Scheduler{svc: svc, log: log, firstExec: true}
+	return &Scheduler{
+		svc:          svc,
+		log:          log,
+		firstExec:    true,
+		startupReady: make(chan struct{}),
+	}
+}
+
+// StartupReady 在开机首次认证巡检结束后关闭。窗口期内账号的刷新尝试
+// 无论成功或失败都视为本轮结束；各业务模块再按账号认证状态决定是否放行。
+func (sch *Scheduler) StartupReady() <-chan struct{} {
+	if sch == nil {
+		ready := make(chan struct{})
+		close(ready)
+		return ready
+	}
+	return sch.startupReady
+}
+
+func (sch *Scheduler) markStartupReady() {
+	if sch == nil {
+		return
+	}
+	sch.startupReadyOnce.Do(func() { close(sch.startupReady) })
 }
 
 // InitActiveRefresh 进程启动时按设置启停调度器；关闭时不启动后台循环。
@@ -41,6 +66,7 @@ func (sch *Scheduler) InitActiveRefresh(ctx context.Context, enabled bool) {
 	sch.mu.Unlock()
 	if !enabled {
 		sch.log.Info("已关闭主动认证刷新")
+		sch.markStartupReady()
 		return
 	}
 	sch.startLoop(true)
@@ -102,10 +128,16 @@ func (sch *Scheduler) startLoop(startupJitter bool) {
 			select {
 			case <-time.After(activeAuthStartupDelay):
 			case <-sch.stop:
+				sch.markStartupReady()
 				return
 			case <-ctx.Done():
+				sch.markStartupReady()
 				return
 			}
+			// 首轮必须在业务模块放行前完成：遍历全部托管账号，
+			// 仅对已进入刷新窗口的账号执行真实刷新。
+			sch.executeCheck(ctx)
+			sch.markStartupReady()
 		}
 		sch.mainLoop(ctx)
 	}()
@@ -305,7 +337,7 @@ func (sch *Scheduler) executeCheck(ctx context.Context) {
 	success := 0
 	attempted := 0
 	skipped := 0
-	for i, id := range due {
+	for _, id := range due {
 		name := sch.svc.accountName(ctx, id)
 		next := sch.svc.calcNextCheck(ctx, id, time.Now(), false)
 		if next.After(time.Now().Add(checkTolerance)) {
@@ -314,6 +346,15 @@ func (sch *Scheduler) executeCheck(ctx context.Context) {
 			sch.log.Debug(fmt.Sprintf("账号 %s 当前未到期，跳过主动刷新", name),
 				"account_id", id, "account", name, "next_check", formatSchedTime(next))
 			continue
+		}
+		if attempted > 0 {
+			select {
+			case <-time.After(betweenAccountRefresh):
+			case <-sch.stop:
+				return
+			case <-ctx.Done():
+				return
+			}
 		}
 		attempted++
 		outcome, err := sch.svc.Refresh(ctx, id, driver.CallerActive)
@@ -327,15 +368,6 @@ func (sch *Scheduler) executeCheck(ctx context.Context) {
 		default:
 			sch.log.Warn(fmt.Sprintf("账号 %s 主动认证刷新失败: %s", name, outcome.String()),
 				"account_id", id, "account", name, "outcome", outcome.String())
-		}
-		if i < len(due)-1 {
-			select {
-			case <-time.After(betweenAccountRefresh):
-			case <-sch.stop:
-				return
-			case <-ctx.Done():
-				return
-			}
 		}
 	}
 	if attempted == 0 {

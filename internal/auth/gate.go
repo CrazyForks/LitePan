@@ -33,9 +33,6 @@ func (g *Gate) Check(ctx context.Context, accountID int64) error {
 		}
 		return nil
 	case domain.AuthCooldown:
-		if passiveBypassesCooldown(st) {
-			return g.HandlePassiveError(ctx, accountID)
-		}
 		if !st.NextRetryAt.IsZero() && now.Before(st.NextRetryAt) {
 			return authBlocked(st, now)
 		}
@@ -64,9 +61,7 @@ func (g *Gate) HandlePassiveError(ctx context.Context, accountID int64) error {
 		}
 	}
 	if st.Status == domain.AuthCooldown && !st.NextRetryAt.IsZero() && now.Before(st.NextRetryAt) {
-		if !passiveBypassesCooldown(st) {
-			return authBlocked(st, now)
-		}
+		return authBlocked(st, now)
 	}
 	if st.Status == domain.AuthFailed || st.Status == domain.AuthTokenExpired {
 		return authBlocked(st, now)

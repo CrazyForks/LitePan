@@ -507,6 +507,12 @@ func (s *Service) submitRun(ruleID int64, triggerSource string, dedupe bool) sub
 		s.mu.Unlock()
 		return submitRunResult{queued: true}
 	}
+	if s.startupGate != nil && !s.startupReady {
+		s.pendingRuns = append(s.pendingRuns, queuedRun{ruleID: ruleID, triggerSource: triggerSource})
+		s.pendingCount[ruleID]++
+		s.mu.Unlock()
+		return submitRunResult{queued: true}
+	}
 	if s.runningRuleID != 0 {
 		s.pendingRuns = append(s.pendingRuns, queuedRun{ruleID: ruleID, triggerSource: triggerSource})
 		s.pendingCount[ruleID]++
@@ -519,20 +525,43 @@ func (s *Service) submitRun(ruleID int64, triggerSource string, dedupe bool) sub
 	return submitRunResult{queued: false}
 }
 
+func (s *Service) releaseStartupQueue() {
+	var next *queuedRun
+	s.mu.Lock()
+	s.startupReady = true
+	if s.runningRuleID == 0 {
+		next = s.takePendingRunLocked()
+		if next != nil {
+			s.runningRuleID = next.ruleID
+		}
+	}
+	s.mu.Unlock()
+	if next != nil {
+		go s.runRule(next.ruleID, next.triggerSource)
+	}
+}
+
+func (s *Service) takePendingRunLocked() *queuedRun {
+	if len(s.pendingRuns) == 0 {
+		return nil
+	}
+	queued := s.pendingRuns[0]
+	s.pendingRuns = s.pendingRuns[1:]
+	if s.pendingCount[queued.ruleID] > 1 {
+		s.pendingCount[queued.ruleID]--
+	} else {
+		delete(s.pendingCount, queued.ruleID)
+	}
+	return &queued
+}
+
 func (s *Service) endRun(ruleID int64) {
 	var next *queuedRun
 	s.mu.Lock()
 	if s.runningRuleID == ruleID {
-		if len(s.pendingRuns) > 0 {
-			queued := s.pendingRuns[0]
-			s.pendingRuns = s.pendingRuns[1:]
-			if s.pendingCount[queued.ruleID] > 1 {
-				s.pendingCount[queued.ruleID]--
-			} else {
-				delete(s.pendingCount, queued.ruleID)
-			}
+		if queued := s.takePendingRunLocked(); queued != nil {
 			s.runningRuleID = queued.ruleID
-			next = &queued
+			next = queued
 		} else {
 			s.runningRuleID = 0
 		}

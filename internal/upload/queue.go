@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"litepan/internal/settings"
+	"litepan/internal/startupwait"
 	"litepan/pkg/timeutil"
 )
 
@@ -192,6 +193,9 @@ func (m *Manager) runTask(taskID string) {
 
 	runCtx, cancel := context.WithCancel(rootCtx)
 	defer cancel()
+	if !startupwait.Ready(runCtx, m.startupGate) {
+		return
+	}
 
 	for {
 		slotKind, ok := m.acquireRunSlot(taskID, done, cancel)

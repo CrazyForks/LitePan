@@ -33,6 +33,8 @@ type Service struct {
 	runningStep   map[int64]map[string]any
 	pendingRuns   []queuedRun
 	pendingCount  map[int64]int
+	startupGate   <-chan struct{}
+	startupReady  bool
 }
 
 type Options struct {
@@ -140,7 +142,19 @@ func New(opts Options) *Service {
 		log:          log,
 		runningStep:  make(map[int64]map[string]any),
 		pendingCount: make(map[int64]int),
+		startupReady: true,
 	}
+}
+
+// SetStartupGate 设置开机认证闸门；闸门放行前的自动触发只入队。
+func (s *Service) SetStartupGate(gate <-chan struct{}) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.startupGate = gate
+	s.startupReady = gate == nil
+	s.mu.Unlock()
 }
 
 func (s *Service) SetApiKeys(apiKeys *apikey.Service) {

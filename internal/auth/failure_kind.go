@@ -14,7 +14,3 @@ func classifyFailureKind(outcome driver.RefreshOutcome, cause error) domain.Auth
 	}
 	return domain.AuthFailureAuth
 }
-
-func passiveBypassesCooldown(st *domain.AuthState) bool {
-	return st != nil && st.LastFailureKind == domain.AuthFailureNetwork
-}

@@ -11,6 +11,7 @@ import (
 	"litepan/internal/eventbus"
 	"litepan/internal/file"
 	"litepan/internal/settings"
+	"litepan/internal/startupwait"
 )
 
 type RunningAccountLister interface {
@@ -38,6 +39,8 @@ type Service struct {
 	strmBusy        RunningAccountLister
 	organizeBusy    RunningAccountLister
 	startupReadyAt  time.Time
+	startupGate     <-chan struct{}
+	startupPending  bool
 	appCtx          context.Context
 	started         bool
 }
@@ -84,6 +87,16 @@ func (s *Service) SetOrganizeBusyChecker(checker RunningAccountLister) {
 	s.organizeBusy = checker
 }
 
+// SetStartupGate 设置开机认证闸门；缓存保持只在首次认证巡检完成后派发。
+func (s *Service) SetStartupGate(gate <-chan struct{}) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.startupGate = gate
+	s.mu.Unlock()
+}
+
 func (s *Service) Start(ctx context.Context) {
 	if s == nil {
 		return
@@ -95,7 +108,10 @@ func (s *Service) Start(ctx context.Context) {
 	}
 	s.started = true
 	s.appCtx = ctx
-	s.startupReadyAt = time.Now().Add(startupDelay)
+	s.startupPending = s.startupGate != nil
+	if !s.startupPending {
+		s.startupReadyAt = time.Now().Add(startupDelay)
+	}
 	s.mu.Unlock()
 	s.loadNextRuns(ctx)
 	go s.schedulerLoop(ctx)
@@ -107,6 +123,9 @@ func (s *Service) StartupRemaining() int {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.startupPending {
+		return max(1, int(startupDelay.Seconds()+0.999))
+	}
 	if s.startupReadyAt.IsZero() {
 		return 0
 	}
@@ -115,6 +134,20 @@ func (s *Service) StartupRemaining() int {
 		return 0
 	}
 	return int(rem.Seconds() + 0.999)
+}
+
+func (s *Service) awaitStartup(ctx context.Context) bool {
+	s.mu.Lock()
+	gate := s.startupGate
+	s.mu.Unlock()
+	if !startupwait.Ready(ctx, gate) {
+		return false
+	}
+	s.mu.Lock()
+	s.startupPending = false
+	s.startupReadyAt = time.Now().Add(startupDelay)
+	s.mu.Unlock()
+	return startupwait.Delay(ctx, startupDelay)
 }
 
 func (s *Service) GetRunningAccountIDs() []int64 {

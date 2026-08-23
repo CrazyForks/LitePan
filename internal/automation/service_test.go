@@ -18,6 +18,16 @@ import (
 	"litepan/internal/strmscrape"
 )
 
+func TestSubmitRunQueuesWhileStartupGateBlocked(t *testing.T) {
+	service := New(Options{})
+	service.SetStartupGate(make(chan struct{}))
+	result := service.submitRun(7, "schedule", true)
+	if !result.queued || service.runningRuleID != 0 || len(service.pendingRuns) != 1 {
+		t.Fatalf("认证闸门放行前规则应只入队: result=%+v running=%d pending=%d",
+			result, service.runningRuleID, len(service.pendingRuns))
+	}
+}
+
 func TestTriggerWebhookQueuesEveryMatchedRule(t *testing.T) {
 	t.Parallel()
 

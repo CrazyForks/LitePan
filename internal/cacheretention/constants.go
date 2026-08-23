@@ -4,7 +4,7 @@ import "time"
 
 const (
 	maxTasks              = 6
-	startupDelay          = 45 * time.Second
+	startupDelay          = 0 * time.Second
 	defaultScanDepth      = 4
 	defaultAPIInterval    = 200
 	maxAPIInterval        = 5000

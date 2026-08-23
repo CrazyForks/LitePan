@@ -6,9 +6,11 @@ import (
 	"time"
 
 	"litepan/internal/domain"
+	"litepan/internal/startupwait"
 )
 
 const schedulerInterval = 10 * time.Second
+const startupDelayAfterAuth = 15 * time.Second
 
 func (s *Service) Start(ctx context.Context) {
 	if s == nil || s.rules == nil {
@@ -22,7 +24,19 @@ func (s *Service) Start(ctx context.Context) {
 	s.started = true
 	s.appCtx = ctx
 	s.mu.Unlock()
-	go s.schedulerLoop(ctx)
+	go func() {
+		s.mu.Lock()
+		gate := s.startupGate
+		s.mu.Unlock()
+		if !startupwait.Ready(ctx, gate) {
+			return
+		}
+		if gate != nil && !startupwait.Delay(ctx, startupDelayAfterAuth) {
+			return
+		}
+		s.releaseStartupQueue()
+		s.schedulerLoop(ctx)
+	}()
 }
 
 func (s *Service) schedulerLoop(ctx context.Context) {

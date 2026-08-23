@@ -16,6 +16,7 @@ import (
 	"litepan/internal/fusereadcache"
 	"litepan/internal/playback"
 	sharefuse "litepan/internal/share/fuse"
+	"litepan/internal/startupwait"
 	"litepan/internal/upload"
 )
 
@@ -33,17 +34,21 @@ type Options struct {
 }
 
 type Service struct {
-	repo      domain.FuseMountRepository
-	configs   domain.ConfigRepository
-	accounts  domain.AccountRepository
-	notify    domain.NotificationRepository
-	files     *file.Service
-	playback  *playback.Service
-	uploads   *upload.Manager
-	readCache *fusereadcache.Service
-	bus       *eventbus.Bus
-	log       *slog.Logger
-	mgr       sharefuse.Manager
+	repo                 domain.FuseMountRepository
+	configs              domain.ConfigRepository
+	accounts             domain.AccountRepository
+	notify               domain.NotificationRepository
+	files                *file.Service
+	playback             *playback.Service
+	uploads              *upload.Manager
+	readCache            *fusereadcache.Service
+	bus                  *eventbus.Bus
+	log                  *slog.Logger
+	mgr                  sharefuse.Manager
+	startupGate          <-chan struct{}
+	appCtx               context.Context
+	startupMountDone     chan struct{}
+	startupMountDoneOnce sync.Once
 }
 
 func New(opts Options) *Service {
@@ -52,16 +57,17 @@ func New(opts Options) *Service {
 		log = slog.Default()
 	}
 	s := &Service{
-		repo:      opts.Repo,
-		configs:   opts.Configs,
-		accounts:  opts.Accounts,
-		notify:    opts.Notify,
-		files:     opts.Files,
-		playback:  opts.Playback,
-		uploads:   opts.Uploads,
-		readCache: opts.ReadCache,
-		bus:       opts.Bus,
-		log:       log,
+		repo:             opts.Repo,
+		configs:          opts.Configs,
+		accounts:         opts.Accounts,
+		notify:           opts.Notify,
+		files:            opts.Files,
+		playback:         opts.Playback,
+		uploads:          opts.Uploads,
+		readCache:        opts.ReadCache,
+		bus:              opts.Bus,
+		log:              log,
+		startupMountDone: make(chan struct{}),
 	}
 	s.rebuildManager()
 	return s
@@ -81,6 +87,68 @@ func (s *Service) rebuildManager() {
 func (s *Service) SetUploads(uploads *upload.Manager) {
 	s.uploads = uploads
 	s.rebuildManager()
+}
+
+// SetStartupGate 设置开机认证闸门，仅限制启动时的自动挂载。
+func (s *Service) SetStartupGate(gate <-chan struct{}) {
+	if s == nil {
+		return
+	}
+	s.startupGate = gate
+}
+
+// Register 注册认证恢复后的有界补挂；每次恢复事件每个挂载点最多尝试一次。
+func (s *Service) Register(bus *eventbus.Bus) {
+	if s == nil || bus == nil {
+		return
+	}
+	eventbus.Subscribe(bus, s.onAuthRecovered)
+}
+
+func (s *Service) onAuthRecovered(_ context.Context, event eventbus.AccountAuthRecovered) {
+	if event.AccountID <= 0 || !s.Enabled(context.Background()) || !s.Compiled() {
+		return
+	}
+	go func() {
+		waitCtx := s.appCtx
+		if waitCtx == nil {
+			waitCtx = context.Background()
+		}
+		select {
+		case <-s.startupMountDone:
+		case <-waitCtx.Done():
+			return
+		}
+		s.remountRecoveredAccount(event.AccountID)
+	}()
+}
+
+func (s *Service) markStartupMountDone() {
+	if s == nil {
+		return
+	}
+	s.startupMountDoneOnce.Do(func() { close(s.startupMountDone) })
+}
+
+func (s *Service) remountRecoveredAccount(accountID int64) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	list, err := s.repo.List(ctx)
+	if err != nil {
+		s.log.Warn("认证恢复后读取 FUSE 挂载列表失败", "account_id", accountID, "err", err)
+		return
+	}
+	for _, m := range list {
+		if m == nil || m.AccountID != accountID || !m.Enabled || !m.AutoMount {
+			continue
+		}
+		if m.State == domain.FuseStateMounted || m.State == domain.FuseStateMounting {
+			continue
+		}
+		if err := s.mount(ctx, m.ID, "auth_recovered", true); err != nil {
+			s.log.Warn("认证恢复后 FUSE 补挂失败", append(s.mountFields(m), "err", err)...)
+		}
+	}
 }
 
 func (s *Service) Compiled() bool { return sharefuse.Compiled() }
@@ -390,9 +458,17 @@ func (s *Service) UnmountAll(ctx context.Context) error {
 
 func (s *Service) Start(ctx context.Context) {
 	if !s.Enabled(ctx) || !s.Compiled() {
+		s.markStartupMountDone()
 		return
 	}
-	go s.startAutoMount(ctx)
+	s.appCtx = ctx
+	go func() {
+		defer s.markStartupMountDone()
+		if !startupwait.Ready(ctx, s.startupGate) {
+			return
+		}
+		s.startAutoMount(ctx)
+	}()
 }
 
 func (s *Service) startAutoMount(ctx context.Context) {

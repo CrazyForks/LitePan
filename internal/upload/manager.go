@@ -24,27 +24,29 @@ type AccountLookup interface {
 }
 
 type Options struct {
-	Exec     *driverexec.Executor
-	Files    *file.Service
-	Playback *playback.Service
-	Accounts AccountLookup
-	Repo     domain.UploadTaskRepository
-	Settings *settings.Service
-	Bus      *eventbus.Bus
-	DataDir  string
-	Log      *slog.Logger
+	Exec        *driverexec.Executor
+	Files       *file.Service
+	Playback    *playback.Service
+	Accounts    AccountLookup
+	Repo        domain.UploadTaskRepository
+	Settings    *settings.Service
+	Bus         *eventbus.Bus
+	DataDir     string
+	Log         *slog.Logger
+	StartupGate <-chan struct{}
 }
 
 type Manager struct {
-	exec     *driverexec.Executor
-	files    *file.Service
-	playback *playback.Service
-	accounts AccountLookup
-	repo     domain.UploadTaskRepository
-	settings *settings.Service
-	bus      *eventbus.Bus
-	dataDir  string
-	log      *slog.Logger
+	exec        *driverexec.Executor
+	files       *file.Service
+	playback    *playback.Service
+	accounts    AccountLookup
+	repo        domain.UploadTaskRepository
+	settings    *settings.Service
+	bus         *eventbus.Bus
+	dataDir     string
+	log         *slog.Logger
+	startupGate <-chan struct{}
 
 	mu                     sync.Mutex
 	tasks                  map[string]*taskState
@@ -81,6 +83,7 @@ func NewManager(opts Options) *Manager {
 		bus:                    opts.Bus,
 		dataDir:                opts.DataDir,
 		log:                    opts.Log,
+		startupGate:            opts.StartupGate,
 		tasks:                  make(map[string]*taskState),
 		limit:                  defaultLimit,
 		subs:                   make(map[chan []byte]struct{}),

@@ -79,6 +79,28 @@ func TestScheduleOnceCrossBusyCheckNoDeadlock(t *testing.T) {
 	}
 }
 
+func TestAwaitStartupWaitsForAuthGate(t *testing.T) {
+	gate := make(chan struct{})
+	svc := &Service{startupGate: gate, startupPending: true}
+	done := make(chan bool, 1)
+	go func() { done <- svc.awaitStartup(context.Background()) }()
+
+	select {
+	case <-done:
+		t.Fatal("认证闸门放行前缓存保持不应就绪")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(gate)
+	select {
+	case ready := <-done:
+		if !ready {
+			t.Fatal("认证闸门放行后缓存保持应就绪")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("缓存保持等待认证闸门超时")
+	}
+}
+
 func TestNotifyLargeScopeThresholdAndMessage(t *testing.T) {
 	bus := eventbus.New(nil)
 	defer func() {

@@ -10,7 +10,7 @@ const (
 	passiveReuseWindow     = 20 * time.Second
 	checkTolerance         = 30 * time.Second
 	betweenAccountRefresh  = 2 * time.Second
-	activeAuthStartupDelay = 30 * time.Second
+	activeAuthStartupDelay = 5 * time.Second
 )
 
 var activeCooldownSteps = []struct {

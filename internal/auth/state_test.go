@@ -140,6 +140,16 @@ func TestSchedulerRefreshesExpiringTokenAccount(t *testing.T) {
 	}
 }
 
+func TestDisabledSchedulerReleasesStartupGate(t *testing.T) {
+	scheduler := NewScheduler(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	scheduler.InitActiveRefresh(context.Background(), false)
+	select {
+	case <-scheduler.StartupReady():
+	default:
+		t.Fatal("关闭主动刷新时不应阻塞其他启动模块")
+	}
+}
+
 func TestActiveRefreshRetryableEntersSteppedCooldown(t *testing.T) {
 	now := time.Date(2026, 6, 25, 10, 0, 0, 0, time.UTC)
 	svc, repo, _, bus := newTestService(now, driver.RefreshRetryable)
@@ -224,7 +234,7 @@ func TestCheckBlocksDuringCooldown(t *testing.T) {
 	}
 }
 
-func TestCheckBypassesNetworkCooldown(t *testing.T) {
+func TestCheckBlocksNetworkCooldown(t *testing.T) {
 	now := time.Date(2026, 6, 25, 10, 0, 0, 0, time.UTC)
 	svc, repo, drv, bus := newTestService(now, driver.RefreshSuccess)
 	defer bus.Close(context.Background())
@@ -236,15 +246,16 @@ func TestCheckBypassesNetworkCooldown(t *testing.T) {
 		LastFailureKind: domain.AuthFailureNetwork,
 		LastError:       "dial tcp: i/o timeout",
 	}
-	if err := svc.Gate().Check(context.Background(), 1); err != nil {
-		t.Fatalf("network cooldown should allow passive refresh: %v", err)
+	err := svc.Gate().Check(context.Background(), 1)
+	if ae, ok := domain.AsAppError(err); !ok || ae.Code != domain.CodeAuthExpired {
+		t.Fatalf("network cooldown should block automatic refresh: %v", err)
 	}
-	if drv.calls != 1 {
-		t.Fatalf("expected one refresh, got %d", drv.calls)
+	if drv.calls != 0 {
+		t.Fatalf("network cooldown should not refresh, calls=%d", drv.calls)
 	}
 	st, _ := repo.Get(context.Background(), 1)
-	if st.Status != domain.AuthActive {
-		t.Fatalf("expected active after refresh, got %+v", st)
+	if st.Status != domain.AuthCooldown {
+		t.Fatalf("expected cooldown to remain, got %+v", st)
 	}
 }
 
@@ -273,7 +284,7 @@ func TestNetworkFailureDoesNotIncrementAttempts(t *testing.T) {
 	}
 }
 
-func TestNetworkOutageThenUserAccessRecovers(t *testing.T) {
+func TestNetworkOutageRecoversAfterCooldown(t *testing.T) {
 	now := time.Date(2026, 6, 25, 10, 0, 0, 0, time.UTC)
 	svc, repo, drv, bus := newTestService(now, driver.RefreshSuccess)
 	defer bus.Close(context.Background())
@@ -286,8 +297,12 @@ func TestNetworkOutageThenUserAccessRecovers(t *testing.T) {
 	}
 
 	drv.err = nil
+	st.NextRetryAt = now.Add(-time.Second)
+	if err := repo.Upsert(context.Background(), st); err != nil {
+		t.Fatal(err)
+	}
 	if err := svc.Gate().Check(context.Background(), 1); err != nil {
-		t.Fatalf("user access should bypass network cooldown: %v", err)
+		t.Fatalf("user access should recover after network cooldown: %v", err)
 	}
 	st, _ = repo.Get(context.Background(), 1)
 	if st.Status != domain.AuthActive || st.LastFailureKind != "" {
@@ -295,7 +310,7 @@ func TestNetworkOutageThenUserAccessRecovers(t *testing.T) {
 	}
 }
 
-func TestPassiveBypassUpdatesKindOnAuthFailure(t *testing.T) {
+func TestNetworkCooldownDoesNotRetryWithAnotherFailureKind(t *testing.T) {
 	now := time.Date(2026, 6, 25, 10, 0, 0, 0, time.UTC)
 	svc, repo, drv, bus := newTestService(now, driver.RefreshRetryable)
 	defer bus.Close(context.Background())
@@ -309,14 +324,14 @@ func TestPassiveBypassUpdatesKindOnAuthFailure(t *testing.T) {
 	}
 	err := svc.Gate().Check(context.Background(), 1)
 	if err == nil {
-		t.Fatal("expected auth error after bypass refresh")
+		t.Fatal("expected cooldown error")
 	}
 	st, _ := repo.Get(context.Background(), 1)
-	if st.LastFailureKind != domain.AuthFailureAuth {
-		t.Fatalf("expected auth failure kind after non-network refresh fail, got %+v", st)
+	if st.LastFailureKind != domain.AuthFailureNetwork {
+		t.Fatalf("cooldown should preserve the original failure kind, got %+v", st)
 	}
-	if drv.calls != 1 {
-		t.Fatalf("expected one bypass refresh attempt, got %d", drv.calls)
+	if drv.calls != 0 {
+		t.Fatalf("cooldown should prevent another refresh attempt, got %d", drv.calls)
 	}
 }
 

@@ -79,6 +79,14 @@ func TestShouldRunCrossBusyCheckNoDeadlock(t *testing.T) {
 	}
 }
 
+func TestStartupRemainingIncludesPostAuthDelayWhileGateBlocked(t *testing.T) {
+	svc, _ := testService(t)
+	svc.startupPending = true
+	if got := svc.StartupRemaining(); got != int(strmStartupDelay.Seconds()) {
+		t.Fatalf("startup remaining=%d want=%d", got, int(strmStartupDelay.Seconds()))
+	}
+}
+
 func TestTaskRunContextHasNoFixedDeadline(t *testing.T) {
 	ctx, cancel := taskRunContext(context.Background())
 	if _, ok := ctx.Deadline(); ok {

@@ -10,6 +10,10 @@ import (
 )
 
 func (s *Service) schedulerLoop(ctx context.Context) {
+	if !s.awaitStartup(ctx) {
+		return
+	}
+	s.scheduleOnce(ctx)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
