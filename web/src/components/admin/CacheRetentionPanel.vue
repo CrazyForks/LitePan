@@ -49,6 +49,7 @@ import FolderPickerModal from "@/components/file/FolderPickerModal.vue";
 import { useAccountPathLabel } from "@/composables/useAccountPathLabel";
 import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { useConditionalPolling } from "@/composables/useConditionalPolling";
+import { findDustTarget, useDustRemoval } from "@/composables/useDustRemoval";
 import { liveElapsedMs, useLiveElapsedClock } from "@/composables/useLiveElapsedClock";
 import {
   applyTimeWindowFromTask,
@@ -75,6 +76,8 @@ const accountsStore = useAccountsStore();
 const { accounts } = storeToRefs(accountsStore);
 
 const tasks = ref<CacheRetentionTask[]>([]);
+const retentionTaskList = ref<HTMLElement | null>(null);
+const { removeWithDust } = useDustRemoval();
 const refreshing = ref(false);
 const listReady = ref(false);
 useAdminPageLoading(
@@ -471,6 +474,7 @@ async function handleForceStop(task: CacheRetentionTask) {
 
 async function handleDelete(task: CacheRetentionTask) {
   if (!task.id) return;
+  const taskID = task.id;
   try {
     await confirm({
       title: "确认删除",
@@ -482,9 +486,18 @@ async function handleDelete(task: CacheRetentionTask) {
     return;
   }
   try {
-    await deleteCacheRetentionTask(task.id);
+    await removeWithDust({
+      target: findDustTarget(retentionTaskList.value, `retention-task-${taskID}`),
+      container: retentionTaskList.value,
+      remove: async () => {
+        await deleteCacheRetentionTask(taskID);
+        tasks.value = tasks.value.filter((item) => item.id !== taskID);
+        executingIds.value = executingIds.value.filter((id) => id !== taskID);
+        pendingIds.value = pendingIds.value.filter((id) => id !== taskID);
+      },
+    });
     toast.success("配置已删除");
-    await refreshAll();
+    syncPolling();
   } catch (e) {
     toast.error(getApiErrorMessage(e, "删除失败"));
   }
@@ -566,8 +579,8 @@ defineExpose({
               <th class="retention-table__actions">操作</th>
             </tr>
           </thead>
-          <tbody>
-            <tr v-for="task in tasks" :key="task.id" class="retention-row">
+          <tbody ref="retentionTaskList">
+            <tr v-for="task in tasks" :key="task.id" class="retention-row" :data-dust-key="`retention-task-${task.id}`">
               <td>
                 <div class="retention-main" :title="taskMeta(task)">
                   <div class="retention-name">

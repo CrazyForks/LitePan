@@ -42,6 +42,7 @@ import AdminRowActions from "@/components/admin/AdminRowActions.vue";
 import FolderPickerModal from "@/components/file/FolderPickerModal.vue";
 import { useAccountPathLabel } from "@/composables/useAccountPathLabel";
 import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
+import { findDustTarget, useDustRemoval } from "@/composables/useDustRemoval";
 import { confirm } from "@/composables/useConfirm";
 import { useSettingsForm } from "@/composables/useSettingsForm";
 import { useSettingsPageDirty } from "@/composables/useSettingsPageDirty";
@@ -60,6 +61,8 @@ const listLoading = ref(false);
 const submitting = ref(false);
 const togglingAutoMountId = ref<number | null>(null);
 const mounts = ref<FuseMount[]>([]);
+const fuseMountList = ref<HTMLElement | null>(null);
+const { removeWithDust } = useDustRemoval();
 useAdminPageLoading("share", computed(() => listLoading.value && !mounts.value.length));
 const status = ref<FuseStatus | null>(null);
 const settingsDrawerOpen = ref(false);
@@ -461,6 +464,7 @@ async function setAutoMount(row: FuseMount, autoMount: boolean) {
 
 async function doDelete(row: FuseMount) {
   if (!row.id) return;
+  const mountID = row.id;
   if (!canDeleteMount(row)) {
     toast.error("请先卸载后再删除");
     return;
@@ -473,9 +477,15 @@ async function doDelete(row: FuseMount) {
     danger: true,
   }))) return;
   try {
-    await deleteFuseMount(row.id);
+    await removeWithDust({
+      target: findDustTarget(fuseMountList.value, `fuse-mount-${mountID}`),
+      container: fuseMountList.value,
+      remove: async () => {
+        await deleteFuseMount(mountID);
+        mounts.value = mounts.value.filter((item) => item.id !== mountID);
+      },
+    });
     toast.success(`挂载点「${row.name}」已删除`);
-    await loadMounts({ silent: true });
   } catch (e) {
     toast.error(fuseActionErrorMessage("删除挂载点", e, row.name));
   }
@@ -555,8 +565,8 @@ defineExpose({
             <th class="fuse-mount-table__actions">操作</th>
           </tr>
         </thead>
-        <tbody>
-          <tr v-for="row in mounts" :key="row.id" class="fuse-mount-row">
+        <tbody ref="fuseMountList">
+          <tr v-for="row in mounts" :key="row.id" class="fuse-mount-row" :data-dust-key="`fuse-mount-${row.id}`">
             <td>
               <div class="fuse-mount-main">
                 <div class="fuse-mount-name">

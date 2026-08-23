@@ -8,6 +8,7 @@ import type { Account } from "@/api/types";
 import { toast } from "@/composables/useToast";
 import { confirm } from "@/composables/useConfirm";
 import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
+import { findDustTarget, useDustRemoval } from "@/composables/useDustRemoval";
 import AccountCard from "./AccountCard.vue";
 import AddAccountDialog from "./AddAccountDialog.vue";
 
@@ -16,6 +17,8 @@ const { accounts, loading } = storeToRefs(store);
 
 const dialogOpen = ref(false);
 const editing = ref<Account | null>(null);
+const accountsGrid = ref<HTMLElement | null>(null);
+const { removeWithDust } = useDustRemoval();
 const initialLoading = computed(() => loading.value && !accounts.value.length);
 useAdminPageLoading("accounts", initialLoading);
 
@@ -43,7 +46,11 @@ async function remove(account: Account) {
     return;
   }
   try {
-    await store.remove(account.id);
+    await removeWithDust({
+      target: findDustTarget(accountsGrid.value, `account-${account.id}`),
+      container: accountsGrid.value,
+      remove: () => store.remove(account.id),
+    });
     toast.success("账号已删除");
   } catch (e) {
     toast.error(getApiErrorMessage(e, "删除失败"));
@@ -90,10 +97,11 @@ onBeforeUnmount(() => window.clearTimeout(refreshTimer));
 
 <template>
   <section class="accounts">
-    <div v-if="!initialLoading" class="accounts__grid">
+    <div v-if="!initialLoading" ref="accountsGrid" class="accounts__grid">
       <AccountCard
         v-for="acc in accounts"
         :key="acc.id"
+        :data-dust-key="`account-${acc.id}`"
         :account="acc"
         :driver="store.driverOf(acc.driver_type)"
         @edit="openEdit"
@@ -103,7 +111,7 @@ onBeforeUnmount(() => window.clearTimeout(refreshTimer));
         @refresh-profile="refreshProfile"
       />
 
-      <button class="add-card" @click="openCreate">
+      <button class="add-card" data-dust-key="account-add" @click="openCreate">
         <span class="add-card__plus">＋</span>
         <span>添加账号</span>
       </button>

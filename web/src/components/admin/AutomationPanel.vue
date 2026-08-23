@@ -26,14 +26,14 @@
                 <th class="col-op">操作</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody ref="automationRuleList">
               <tr v-if="loading">
                 <td colspan="5" class="empty-cell">加载中...</td>
               </tr>
               <tr v-else-if="rules.length === 0">
                 <td colspan="5" class="empty-cell">还没有自动联动，点右上角「新增联动」创建第一条规则</td>
               </tr>
-              <tr v-for="rule in rules" v-else :key="rule.id" class="automation-row" :class="{ 'is-running': rule.is_running }">
+              <tr v-for="rule in rules" v-else :key="rule.id" class="automation-row" :class="{ 'is-running': rule.is_running }" :data-dust-key="`automation-rule-${rule.id}`">
                 <td>
                   <div class="rule-name">{{ rule.name }}</div>
                   <div class="rule-desc">{{ triggerLabel(rule) }}</div>
@@ -575,6 +575,7 @@ import AdminRunStatusCell from '@/components/admin/AdminRunStatusCell.vue'
 import AdminTableActionBtn from '@/components/admin/AdminTableActionBtn.vue'
 import TimeWheelPicker from '../base/TimeWheelPicker.vue'
 import { confirm } from '../../composables/useConfirm'
+import { findDustTarget, useDustRemoval } from '../../composables/useDustRemoval'
 import { toast } from '../../composables/useToast'
 import { getApiErrorMessage } from '../../api/client'
 import { accountsApi } from '../../api/accounts'
@@ -601,6 +602,8 @@ const loading = ref(false)
 const saving = ref(false)
 const editingRule = ref(null)
 const rules = ref([])
+const automationRuleList = ref(null)
+const { removeWithDust } = useDustRemoval()
 const runs = ref([])
 const expandedRunIds = ref(new Set())
 const runsDrawerVisible = ref(false)
@@ -1610,9 +1613,17 @@ const deleteRule = async (rule) => {
       danger: true,
       icon: 'trash'
     })
-    await deleteAutomationRule(rule.id)
+    await removeWithDust({
+      target: findDustTarget(automationRuleList.value, `automation-rule-${rule.id}`),
+      container: automationRuleList.value,
+      remove: async () => {
+        await deleteAutomationRule(rule.id)
+        rules.value = rules.value.filter(item => item.id !== rule.id)
+        runs.value = runs.value.filter(item => item.rule_id !== rule.id)
+      }
+    })
     toast.success('自动联动已删除')
-    await loadAll()
+    scheduleCenterRunningFlowSteps('auto')
   } catch (error) {
     if (error?.message !== 'Modal closed') {
       toast.error('删除失败: ' + getApiErrorMessage(error, '请稍后重试'))

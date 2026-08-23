@@ -23,6 +23,7 @@ import AdminRowActions from "@/components/admin/AdminRowActions.vue";
 import AdminTableActionBtn from "@/components/admin/AdminTableActionBtn.vue";
 import SettingsCard from "@/components/admin/SettingsCard.vue";
 import { useConfirm } from "@/composables/useConfirm";
+import { findDustTarget, useDustRemoval } from "@/composables/useDustRemoval";
 import { toast, copyTextToClipboard } from "@/composables/useToast";
 import "@/styles/admin-table.css";
 
@@ -47,6 +48,8 @@ const createdKeyValue = ref("");
 const createdKeyRecord = ref<ApiKeyRecord | null>(null);
 const editingKey = ref<ApiKeyRecord | null>(null);
 const keys = ref<ApiKeyRecord[]>([]);
+const apiKeyList = ref<HTMLElement | null>(null);
+const { removeWithDust } = useDustRemoval();
 const maxKeys = ref(10);
 const strmKey = reactive<StrmKeyInfo>({
   name: "STRM 媒体访问",
@@ -222,6 +225,7 @@ async function handleToggle(key: ApiKeyRecord) {
 
 async function handleDelete(key: ApiKeyRecord) {
   if (!key.id) return;
+  const keyID = key.id;
   try {
     await showConfirm({
       title: "删除 API 秘钥",
@@ -234,9 +238,15 @@ async function handleDelete(key: ApiKeyRecord) {
     return;
   }
   try {
-    await deleteApiKey(key.id);
+    await removeWithDust({
+      target: findDustTarget(apiKeyList.value, `api-key-${keyID}`),
+      container: apiKeyList.value,
+      remove: async () => {
+        await deleteApiKey(keyID);
+        keys.value = keys.value.filter((item) => item.id !== keyID);
+      },
+    });
     toast.success("秘钥已删除");
-    await load();
   } catch (e) {
     toast.error(getApiErrorMessage(e, "删除失败"));
   }
@@ -299,7 +309,7 @@ defineExpose({ openCreate });
             <th>操作</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody ref="apiKeyList">
           <tr class="api-keys__row">
             <td>
               <div class="api-keys__name">
@@ -336,7 +346,7 @@ defineExpose({ openCreate });
               </AdminRowActions>
             </td>
           </tr>
-          <tr v-for="key in keys" :key="key.id" class="api-keys__row">
+          <tr v-for="key in keys" :key="key.id" class="api-keys__row" :data-dust-key="`api-key-${key.id}`">
             <td>
               <span class="api-keys__name-text">{{ key.name }}</span>
             </td>

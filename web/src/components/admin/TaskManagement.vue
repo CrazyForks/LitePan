@@ -74,6 +74,7 @@ import AdminSettingsDrawer from "@/components/admin/AdminSettingsDrawer.vue";
 import { useAccountPathLabel } from "@/composables/useAccountPathLabel";
 import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { useConditionalPolling } from "@/composables/useConditionalPolling";
+import { findDustTarget, useDustRemoval } from "@/composables/useDustRemoval";
 import { liveElapsedMs, useLiveElapsedClock } from "@/composables/useLiveElapsedClock";
 import {
   applyTimeWindowFromTask,
@@ -128,6 +129,8 @@ const { accounts } = storeToRefs(accountsStore);
 const tasks = ref<StrmTask[]>([]);
 const refreshing = ref(false);
 const strmListReady = ref(false);
+const strmTaskList = ref<HTMLElement | null>(null);
+const { removeWithDust } = useDustRemoval();
 const { remainingDisplay: startupRemainingDisplay, applyStartupRemaining } = useStartupCountdown();
 
 const strmPanelDirty = ref(false);
@@ -844,6 +847,7 @@ async function handleForceStop(task: StrmTask) {
 
 async function handleDelete(task: StrmTask) {
   if (!task.id) return;
+  const taskID = task.id;
   const result = await showConfirm({
     title: "删除 STRM 任务",
     message: `确定删除任务「${task.name}」吗？`,
@@ -856,8 +860,15 @@ async function handleDelete(task: StrmTask) {
   if (!result || result.action !== "confirm") return;
   const deleteStrmFiles = !!result.checked;
   try {
-    await deleteStrmTask(task.id, deleteStrmFiles);
-    tasks.value = tasks.value.filter((t) => t.id !== task.id);
+    await removeWithDust({
+      target: findDustTarget(strmTaskList.value, `strm-task-${taskID}`),
+      container: strmTaskList.value,
+      remove: async () => {
+        await deleteStrmTask(taskID, deleteStrmFiles);
+        tasks.value = tasks.value.filter((t) => t.id !== taskID);
+      },
+    });
+    syncTasksPolling();
     toast.success(deleteStrmFiles ? "任务和 STRM 文件已删除" : "任务已删除");
   } catch (e) {
     toast.error(getApiErrorMessage(e, "删除失败"));
@@ -1105,8 +1116,8 @@ watch(activeTab, (tab) => {
               <th class="strm-task-table__actions">操作</th>
             </tr>
           </thead>
-          <tbody>
-            <tr v-for="task in tasks" :key="task.id" class="strm-task-row">
+          <tbody ref="strmTaskList">
+            <tr v-for="task in tasks" :key="task.id" class="strm-task-row" :data-dust-key="`strm-task-${task.id}`">
               <td>
                 <div class="strm-task-main" :title="task.name">
                   <div class="strm-task-name">

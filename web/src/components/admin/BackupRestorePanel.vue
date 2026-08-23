@@ -14,6 +14,7 @@ import AppStateBlock from "@/components/base/AppStateBlock.vue";
 import FormField from "@/components/base/FormField.vue";
 import SvgIcon from "@/components/icons/SvgIcon.vue";
 import { useConfirm } from "@/composables/useConfirm";
+import { findDustTarget, useDustRemoval } from "@/composables/useDustRemoval";
 import { toast } from "@/composables/useToast";
 import { formatSize, formatTime } from "@/utils/format";
 
@@ -25,6 +26,8 @@ const loading = ref(false);
 const records = ref<BackupRecord[]>([]);
 const restoreStatus = ref<BackupRestoreStatus>({ state: "idle" });
 const loaded = ref(false);
+const backupList = ref<HTMLElement | null>(null);
+const { removeWithDust } = useDustRemoval();
 
 const createOpen = ref(false);
 const creating = ref(false);
@@ -274,9 +277,15 @@ async function removeRecord(record: BackupRecord) {
     return;
   }
   try {
-    await backupRestoreApi.remove(record.id);
+    await removeWithDust({
+      target: findDustTarget(backupList.value, `backup-${record.id}`),
+      container: backupList.value,
+      remove: async () => {
+        await backupRestoreApi.remove(record.id);
+        records.value = records.value.filter((item) => item.id !== record.id);
+      },
+    });
     toast.success("备份已删除");
-    await load(true);
   } catch (error) {
     toast.error(getApiErrorMessage(error, "删除备份失败"));
   }
@@ -368,8 +377,8 @@ onActivated(() => {
     <AppStateBlock v-if="loading && !loaded" message="正在加载备份列表……" loading min-height="220px" />
     <AppStateBlock v-else-if="records.length === 0" message="暂无备份" min-height="220px" />
 
-    <div v-else class="backup-list">
-      <article v-for="record in records" :key="record.id" class="backup-card">
+    <div v-else ref="backupList" class="backup-list">
+      <article v-for="record in records" :key="record.id" class="backup-card" :data-dust-key="`backup-${record.id}`">
         <div class="backup-card__main">
           <strong>{{ record.note || "未填写备注" }}</strong>
           <span>创建时版本：{{ record.app_version }}</span>

@@ -57,6 +57,7 @@ import FolderPickerModal from "@/components/file/FolderPickerModal.vue";
 import { useAccountPathLabel } from "@/composables/useAccountPathLabel";
 import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { useConditionalPolling } from "@/composables/useConditionalPolling";
+import { findDustTarget, useDustRemoval } from "@/composables/useDustRemoval";
 import {
   useOrganizePlanPreview,
   planActionMeta,
@@ -129,6 +130,8 @@ const emptyForm = (): TaskForm => ({
 });
 
 const tasks = ref<MediaOrganizeTask[]>([]);
+const organizeTaskList = ref<HTMLElement | null>(null);
+const { removeWithDust } = useDustRemoval();
 const refreshing = ref(false);
 const listReady = ref(false);
 useAdminPageLoading(
@@ -481,16 +484,25 @@ async function handleDelete(task: MediaOrganizeTask) {
     return;
   }
   try {
-    const result = await deleteMediaOrganizeTask(task.id);
-    if (result.stopping) {
-      toast.info("任务正在执行，已请求停止");
-      if (logTaskId.value === task.id) startLogPolling(task.id);
-      await loadTasks();
-      return;
-    }
+    const removed = await removeWithDust({
+      target: findDustTarget(organizeTaskList.value, `organize-task-${task.id}`),
+      container: organizeTaskList.value,
+      remove: async () => {
+        const result = await deleteMediaOrganizeTask(task.id);
+        if (result.stopping) {
+          toast.info("任务正在执行，已请求停止");
+          if (logTaskId.value === task.id) startLogPolling(task.id);
+          await loadTasks();
+          return false;
+        }
+        if (logTaskId.value === task.id) closeLogPanel();
+        tasks.value = tasks.value.filter((item) => item.id !== task.id);
+        return true;
+      },
+    });
+    if (!removed) return;
     toast.success("任务已删除");
-    if (logTaskId.value === task.id) closeLogPanel();
-    await loadTasks();
+    syncTaskListPolling();
   } catch (e) {
     toast.error(getApiErrorMessage(e, "删除失败"));
   }
@@ -893,8 +905,8 @@ defineExpose({
             <th class="admin-table__actions">操作</th>
           </tr>
         </thead>
-        <tbody>
-          <tr v-for="task in tasks" :key="task.id" class="organize-task-row">
+        <tbody ref="organizeTaskList">
+          <tr v-for="task in tasks" :key="task.id" class="organize-task-row" :data-dust-key="`organize-task-${task.id}`">
             <td>
               <div class="organize-task-main" :title="`${task.task_name} · ${accountName(task.account_id)}`">
                 <div class="organize-task-name">{{ task.task_name }}</div>
