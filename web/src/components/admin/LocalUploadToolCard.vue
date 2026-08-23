@@ -100,10 +100,9 @@ async function saveMappings() {
     <CloudToolCard
       :enabled="localEnabled"
       name="从服务器上传"
-      driver="作用于全部网盘账号 · 上传面板双来源"
+      driver="全部网盘 · 服务器目录上传"
       logo-src="/logos/localup.png"
       logo-alt="本机"
-      :tags="[{ label: '通用' }]"
       :stat-value="localMappings.length"
       stat-label="映射目录"
     >
@@ -129,11 +128,10 @@ async function saveMappings() {
           </svg>
         </button>
       </template>
-      开启后，前台「新建 → 上传」面板提供<strong>从服务器上传</strong>：
-      选择服务器映射目录中的文件或文件夹，上传到当前网盘目录并保留文件夹结构；从访问机上传保持不变。
+      从服务器映射目录选择文件或文件夹上传到网盘，并保留原文件夹结构，不影响从本机上传。
       <template #actions>
-        <AppButton variant="secondary" :disabled="localSaving" @click="openMappings">
-          目录映射设置
+        <AppButton size="sm" variant="secondary" :disabled="localSaving" @click="openMappings">
+          目录映射
         </AppButton>
       </template>
     </CloudToolCard>

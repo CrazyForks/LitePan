@@ -556,7 +556,7 @@ func (s *Service) credentialState(ctx context.Context) security.CredentialState 
 }
 
 func (s *Service) publicIndexEnabled(ctx context.Context) bool {
-	return s.configBool(ctx, KeyPublicIndexEnabled, true)
+	return s.configBool(ctx, KeyPublicIndexEnabled, false)
 }
 
 func (s *Service) webdavEnabled(ctx context.Context) bool {

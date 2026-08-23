@@ -23,7 +23,7 @@ const emit = defineEmits<{ "update:searchOpen": [boolean] }>();
 const { runLoad } = useSettingsLoad();
 
 const searchQuery = ref("");
-const cardTitles = ["Emby 反代", "飞牛影视反代", "115 网盘 STRM 增强", "夸克 STRM 播放接管", "AI 辅助增强工具", "分类整理", "从服务器上传"];
+const cardTitles = ["Emby 反代", "飞牛影视反代", "115 STRM 增强", "夸克 STRM 接管", "AI 辅助识别", "目录整理分类", "从服务器上传"];
 
 function matches(title: string) {
   const q = searchQuery.value.trim().toLowerCase();
@@ -109,16 +109,13 @@ async function clearCache() {
     <div class="cloud-tools__grid">
       <ProxyToolsPanel :search-query="searchQuery" />
       <CloudToolCard
-        v-show="matches('115 网盘 STRM 增强')"
+        v-show="matches('115 STRM 增强')"
         :enabled="status.enabled"
-        name="115 网盘 STRM 增强"
-        driver="作用于 STRM 任务 · 全量清单 + 增量对账"
+        name="115 STRM 增强"
+        driver="115Open · STRM 全量清单扫描"
         logo-src="/logos/115.png"
         logo-alt="115"
-        :tags="[
-          { label: '115Open' },
-          { label: '实验性', variant: 'warn' },
-        ]"
+        :tags="[{ label: '实验性', variant: 'warn' }]"
         :stat-value="status.cache_count.toLocaleString('zh-CN')"
         stat-label="条路径映射关系"
       >
@@ -127,7 +124,7 @@ async function clearCache() {
             class="check-toggle"
             type="button"
             :class="{ on: status.enabled }"
-            :aria-label="status.enabled ? '停用 115 网盘 STRM 增强' : '启用 115 网盘 STRM 增强'"
+            :aria-label="status.enabled ? '停用 115 STRM 增强' : '启用 115 STRM 增强'"
             :disabled="saving || !status.available"
             title="启用 / 停用"
             @click="toggleEnabled"
@@ -144,11 +141,10 @@ async function clearCache() {
             </svg>
           </button>
         </template>
-        开启后，<code>115Open</code> 账号的 STRM 任务扫描更快：一次性获取整个目录的文件清单，
-        不用一层层翻目录，请求更少、更不容易触发限制。分支的任务仍按分支的方式执行。
+        使用全量清单扫描方式，减少逐层目录请求，减少网盘风控几率，还可加速 STRM 生成。
         <template #actions>
-          <AppButton variant="danger" :disabled="clearing" @click="clearCache">
-            {{ clearing ? "清空中…" : "清空映射数据" }}
+          <AppButton size="sm" variant="danger" :disabled="clearing" @click="clearCache">
+            {{ clearing ? "清空中…" : "清空映射" }}
           </AppButton>
         </template>
       </CloudToolCard>
@@ -218,8 +214,9 @@ async function clearCache() {
 
 .cloud-tools__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  align-items: start;
+  gap: 16px;
 }
 
 .check-toggle {

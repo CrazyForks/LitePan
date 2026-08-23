@@ -188,14 +188,13 @@ async function saveSettings() {
 </script>
 
 <template>
-  <div v-show="matches('目录整理分类工具')">
+  <div v-show="matches('目录整理分类')">
     <CloudToolCard
       :enabled="config.enabled"
-      name="目录整理分类工具"
-      driver="分类目录仅在「移动到新目录」整理方式下生效"
+      name="目录整理分类"
+      driver="移动整理 · 按模板生成分类目录"
       logo-src="/logos/classification.png"
-      logo-alt="目录整理分类工具"
-      :tags="[{ label: '通用' }]"
+      logo-alt="目录整理分类"
       :stat-value="templateLabel(config.selected_template)"
       :compact-stat="true"
     >
@@ -212,9 +211,9 @@ async function saveSettings() {
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
         </button>
       </template>
-      移动到新目录整理时按选中模板将影片放入分类目录；无法归类的影片放入任务的目标根目录（无法归类可通过 TMDB ID 查询返回数据补充匹配条件），本地重命名模式不生效。
+      移动整理时按所选模板放入分类目录；无法归类时放入目标根目录，本地重命名模式不受影响。
       <template #actions>
-        <AppButton variant="secondary" :disabled="saving" @click="openSettings">分类设置</AppButton>
+        <AppButton size="sm" variant="secondary" :disabled="saving" @click="openSettings">分类设置</AppButton>
       </template>
     </CloudToolCard>
 

@@ -244,22 +244,22 @@ async function testFnos() {
       <span class="tool-card__bar" :class="embyEnabled ? 'is-enabled' : 'is-disabled'" />
       <div class="tool-card__head">
         <img class="tool-card__logo" :src="embyLogo" alt="Emby" />
-        <div class="tool-card__meta"><h3 class="tool-card__name">Emby 反代 <span class="tool-card__tag">Emby专用</span><SettingsHelpTooltip title="Emby 反代说明"><p>在播放器和 Emby 之间加一层：播放 STRM 时，把真实的网盘播放地址直接交给播放器。</p></SettingsHelpTooltip></h3><p class="tool-card__driver">STRM 播放直连 · 支持多个 Emby 服务</p></div>
+        <div class="tool-card__meta"><h3 class="tool-card__name">Emby 反代</h3><p class="tool-card__driver">STRM 直连 · 多 Emby 服务</p></div>
         <button class="check-toggle" type="button" :class="{ on: embyEnabled }" :disabled="embySaving" title="启用 / 停用" @click="setEmbyEnabled(!embyEnabled)"><svg viewBox="0 0 16 16"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
       </div>
-      <p class="tool-card__desc">解决 Emby 网页端或客户端播放 STRM 时，只能由 Emby 服务端代为拉流、走不了 302 直连的问题：反代访问后，LitePan 把 302 的 CDN 地址直接交给播放器。</p>
-      <div class="tool-card__row"><div class="tool-card__stat"><span class="tool-card__num">{{ embyConfigs.length }}</span><span class="tool-card__label">个配置 · {{ embyRunning }} 个运行</span></div><AppButton variant="secondary" @click="embyOpen = true">配置反代参数</AppButton></div>
+      <p class="tool-card__desc">将 Emby 的 STRM 播放请求转换为网盘 302 直链，避免媒体流量经过 Emby 服务器中转。</p>
+      <div class="tool-card__row"><div class="tool-card__stat"><span class="tool-card__num">{{ embyConfigs.length }}</span><span class="tool-card__label">个配置 · {{ embyRunning }} 个运行</span></div><AppButton size="sm" variant="secondary" @click="embyOpen = true">配置反代</AppButton></div>
     </article>
 
     <article v-show="matches('飞牛影视反代')" class="tool-card" :class="fnosForm.enabled ? 'is-enabled' : 'is-disabled'">
       <span class="tool-card__bar" :class="fnosForm.enabled ? 'is-enabled' : 'is-disabled'" />
       <div class="tool-card__head">
         <img class="tool-card__logo" :src="fnosLogo" alt="飞牛影视" />
-        <div class="tool-card__meta"><h3 class="tool-card__name">飞牛影视反代 <span class="tool-card__tag">第三方播放器</span><SettingsHelpTooltip title="飞牛影视反代说明"><p>在播放器和飞牛影视之间加一层：播放 STRM 时，把真实的网盘播放地址直接交给播放器。</p><p>爆米花 / VidHub / SenPlayer 等连接配置里的「反代入口」，就能正常播放 STRM 影片。</p></SettingsHelpTooltip></h3><p class="tool-card__driver">STRM 播放直连 · 飞牛路径转换</p></div>
+        <div class="tool-card__meta"><h3 class="tool-card__name">飞牛影视反代</h3><p class="tool-card__driver">STRM 直连 · 飞牛路径转换</p></div>
         <button class="check-toggle" type="button" :class="{ on: fnosForm.enabled }" :disabled="fnosSaving" title="启用 / 停用" @click="saveFnos(!fnosForm.enabled)"><svg viewBox="0 0 16 16"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
       </div>
-      <p class="tool-card__desc">解决第三方播放器（如 VidHub、SenPlayer、爆米花）把影视来源填成飞牛影视后，无法播放 STRM 的问题：反代访问后，将飞牛保存的 STRM 路径还原为 LitePan 地址。</p>
-      <div class="tool-card__row"><div class="tool-card__stat"><span class="tool-card__num">{{ fnosForm.running ? '运行中' : fnosForm.enabled ? '待监听' : '未启用' }}</span></div><AppButton variant="secondary" @click="fnosOpen = true">配置反代参数</AppButton></div>
+      <p class="tool-card__desc">解决Vidhub、Senplayer、爆米花等第三方播放器添加飞牛影视源后，无法播放STRM的问题。</p>
+      <div class="tool-card__row"><div class="tool-card__stat"><span class="tool-card__num">{{ fnosForm.running ? '运行中' : fnosForm.enabled ? '待监听' : '未启用' }}</span></div><AppButton size="sm" variant="secondary" @click="fnosOpen = true">配置反代</AppButton></div>
     </article>
 
     <AppModal :open="embyOpen" title="Emby 反代配置" size="lg" @close="embyOpen = false">
@@ -301,10 +301,13 @@ async function testFnos() {
 
 .tool-card {
   position:relative;
+  min-width:0;
+  display:flex;
+  flex-direction:column;
   background:var(--surface);
   border:1px solid var(--border);
   border-radius:var(--radius-xl);
-  padding:20px;
+  padding:14px;
   overflow:hidden;
   transition:var(--transition)
 }
@@ -334,12 +337,13 @@ async function testFnos() {
 .tool-card__head {
   display:flex;
   align-items:center;
-  gap:14px
+  gap:10px;
+  min-width:0
 }
 
 .tool-card__logo {
-  width:48px;
-  height:48px;
+  width:42px;
+  height:42px;
   border-radius:var(--radius-md);
   flex-shrink:0;
   object-fit:contain
@@ -356,28 +360,28 @@ async function testFnos() {
   font-weight:600;
   display:flex;
   align-items:center;
-  gap:8px;
-  flex-wrap:wrap
-}
-
-.tool-card__tag {
-  font-size:11px;
-  font-weight:500;
-  padding:1px 8px;
-  border-radius:var(--radius-pill);
-  background:var(--info-soft);
-  color:var(--info)
+  gap:6px;
+  flex-wrap:wrap;
+  line-height:1.35
 }
 
 .tool-card__driver {
   margin:2px 0 0;
   font-size:12px;
+  line-height:1.4;
   color:var(--text-muted)
 }
 
 .tool-card__desc {
-  margin:14px 0 0;
+  display:-webkit-box;
+  flex:0 0 36px;
+  height:36px;
+  margin:10px 0 0;
+  overflow:hidden;
+  -webkit-box-orient:vertical;
+  -webkit-line-clamp:2;
   font-size:13px;
+  line-height:18px;
   color:var(--text-regular)
 }
 
@@ -385,26 +389,29 @@ async function testFnos() {
   display:flex;
   align-items:center;
   justify-content:space-between;
-  gap:12px;
-  margin-top:16px;
-  padding-top:14px;
+  gap:8px;
+  min-width:0;
+  margin-top:10px;
+  padding-top:10px;
   border-top:1px dashed var(--border)
 }
 
 .tool-card__stat {
   display:flex;
   align-items:baseline;
-  gap:8px
+  min-width:0;
+  gap:6px
 }
 
 .tool-card__num {
-  font-size:16px;
+  font-size:15px;
   font-weight:700;
   color:var(--text)
 }
 
 .tool-card__label {
-  font-size:13px;
+  font-size:12px;
+  white-space:nowrap;
   color:var(--text-muted)
 }
 

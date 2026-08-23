@@ -115,14 +115,14 @@ const securityOriginal = reactive({
   session_timeout: "2",
 });
 const homepageForm = reactive({
-  public_index_enabled: true,
+  public_index_enabled: false,
   index_account_switch_mode: "dropdown" as "dropdown" | "floating",
   admin_home_return_mode: "top_icon" as "sidebar" | "top_icon",
   header_effects_enabled: true,
   index_strm_auto_detect_enabled: true,
 });
 const homepageOriginal = reactive({
-  public_index_enabled: true,
+  public_index_enabled: false,
   index_account_switch_mode: "dropdown" as "dropdown" | "floating",
   admin_home_return_mode: "top_icon" as "sidebar" | "top_icon",
   header_effects_enabled: true,
@@ -286,7 +286,7 @@ function applySystemConfig(config: {
   securityForm.session_timeout = String(config.session_timeout || 2);
   securityOriginal.admin_username = securityForm.admin_username;
   securityOriginal.session_timeout = securityForm.session_timeout;
-  homepageForm.public_index_enabled = config.public_index_enabled ?? true;
+  homepageForm.public_index_enabled = config.public_index_enabled ?? false;
   homepageOriginal.public_index_enabled = homepageForm.public_index_enabled;
   const mode = config.index_account_switch_mode === "floating" ? "floating" : "dropdown";
   homepageForm.index_account_switch_mode = mode;

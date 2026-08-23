@@ -77,10 +77,13 @@ const stateClass = computed(() => (props.enabled ? "is-enabled" : "is-disabled")
 <style scoped>
 .tool-card {
   position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
-  padding: 20px;
+  padding: 14px;
   overflow: hidden;
   transition: var(--transition);
 }
@@ -112,7 +115,8 @@ const stateClass = computed(() => (props.enabled ? "is-enabled" : "is-disabled")
 .tool-card__head {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
+  min-width: 0;
 }
 
 .tool-card__meta {
@@ -121,8 +125,8 @@ const stateClass = computed(() => (props.enabled ? "is-enabled" : "is-disabled")
 }
 
 .tool-card__logo {
-  width: 48px;
-  height: 48px;
+  width: 42px;
+  height: 42px;
   border-radius: var(--radius-md);
   flex-shrink: 0;
   object-fit: cover;
@@ -144,8 +148,9 @@ const stateClass = computed(() => (props.enabled ? "is-enabled" : "is-disabled")
   font-weight: 600;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
+  line-height: 1.35;
 }
 
 .tool-card__tag {
@@ -165,12 +170,20 @@ const stateClass = computed(() => (props.enabled ? "is-enabled" : "is-disabled")
 .tool-card__driver {
   margin: 2px 0 0;
   font-size: 12px;
+  line-height: 1.4;
   color: var(--text-muted);
 }
 
 .tool-card__desc {
-  margin: 14px 0 0;
+  display: -webkit-box;
+  flex: 0 0 36px;
+  height: 36px;
+  margin: 10px 0 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   font-size: 13px;
+  line-height: 18px;
   color: var(--text-regular);
 }
 
@@ -186,16 +199,18 @@ const stateClass = computed(() => (props.enabled ? "is-enabled" : "is-disabled")
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-top: 16px;
-  padding-top: 14px;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 10px;
+  padding-top: 10px;
   border-top: 1px dashed var(--border);
 }
 
 .tool-card__stat {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  min-width: 0;
+  gap: 6px;
 }
 
 .tool-card__stat--compact {
@@ -203,26 +218,28 @@ const stateClass = computed(() => (props.enabled ? "is-enabled" : "is-disabled")
 }
 
 .tool-card__stat--compact .tool-card__num {
-  max-width: 230px;
+  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .tool-card__num {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text);
 }
 
 .tool-card__label {
-  font-size: 13px;
+  font-size: 12px;
+  white-space: nowrap;
   color: var(--text-muted);
 }
 
 .tool-card__actions {
   display: flex;
   align-items: center;
-  gap: 14px;
+  flex: 0 0 auto;
+  gap: 8px;
 }
 </style>

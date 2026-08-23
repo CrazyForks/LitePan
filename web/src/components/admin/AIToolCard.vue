@@ -110,14 +110,13 @@ async function saveConfig() {
 </script>
 
 <template>
-  <div v-show="matches('AI 辅助增强工具')">
+  <div v-show="matches('AI 辅助识别')">
     <CloudToolCard
       :enabled="aiConfig.enabled"
-      name="AI 辅助增强工具"
-      driver="已接入目录整理 · 低置信作品批量补判"
+      name="AI 辅助识别"
+      driver="目录整理 · 低置信作品补判"
       logo-src="/logos/AI.png"
       logo-alt="AI"
-      :tags="[{ label: '通用' }]"
       :stat-value="aiConfig.model || '待配置'"
       :compact-stat="true"
     >
@@ -126,7 +125,7 @@ async function saveConfig() {
           class="check-toggle"
           type="button"
           :class="{ on: aiConfig.enabled }"
-          :aria-label="aiConfig.enabled ? '停用 AI 辅助增强工具' : '启用 AI 辅助增强工具'"
+          :aria-label="aiConfig.enabled ? '停用 AI 辅助识别' : '启用 AI 辅助识别'"
           :disabled="aiSaving"
           title="启用 / 停用"
           @click="toggleEnabled"
@@ -143,16 +142,15 @@ async function saveConfig() {
           </svg>
         </button>
       </template>
-      开启后，目录整理中内置规则识别不出或低置信的作品，将批量交给 AI 模型补判标题与季集，
-      仍由原流程校验并生成计划；未配置或调用失败时自动回落内置识别，不影响整理。
+      将内置规则无法识别或置信度较低的作品交给 AI 补判，调用失败时自动回退原有识别流程。
       <template #actions>
-        <AppButton variant="secondary" :disabled="aiSaving" @click="openSettings(false)">
-          配置模型参数
+        <AppButton size="sm" variant="secondary" :disabled="aiSaving" @click="openSettings(false)">
+          模型设置
         </AppButton>
       </template>
     </CloudToolCard>
 
-    <AppModal :open="aiSettingsOpen" title="AI 辅助增强工具 · 模型设置" size="md" @close="closeSettings">
+    <AppModal :open="aiSettingsOpen" title="AI 辅助识别 · 模型设置" size="md" @close="closeSettings">
       <label class="ai-settings-field">
         <span>API 地址</span>
         <input v-model.trim="aiDraft.base_url" type="url" placeholder="https://api.deepseek.com" />

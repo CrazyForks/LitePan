@@ -168,7 +168,7 @@ async function onBound() {
     try {
       await quarkTVApi.setEnabled(true);
       qtvStatus.value.enabled = true;
-      toast.success("已启用夸克 STRM 播放接管");
+      toast.success("已启用夸克 STRM 接管");
     } catch (e) {
       toast.error(getApiErrorMessage(e, "绑定成功但启用失败，请手动开启"));
     } finally {
@@ -222,17 +222,14 @@ async function saveSettings() {
 </script>
 
 <template>
-  <div v-show="matches('夸克 STRM 播放接管')">
+  <div v-show="matches('夸克 STRM 接管')">
     <CloudToolCard
       :enabled="qtvStatus.enabled"
-      name="夸克 STRM 播放接管"
-      driver="作用于夸克网盘 · STRM 播放请求走 TV 302 直链"
+      name="夸克 STRM 接管"
+      driver="夸克网盘 · TV 版 302 直链"
       logo-src="/logos/quark.png"
       logo-alt="夸克"
-      :tags="[
-        { label: '夸克网盘' },
-        { label: '实验性', variant: 'warn' },
-      ]"
+      :tags="[{ label: '实验性', variant: 'warn' }]"
       :stat-value="qtvStatus.bindings.length"
       stat-label="个绑定账号"
     >
@@ -241,7 +238,7 @@ async function saveSettings() {
           class="check-toggle"
           type="button"
           :class="{ on: qtvStatus.enabled }"
-          :aria-label="qtvStatus.enabled ? '停用夸克 STRM 播放接管' : '启用夸克 STRM 播放接管'"
+          :aria-label="qtvStatus.enabled ? '停用夸克 STRM 接管' : '启用夸克 STRM 接管'"
           :disabled="qtvSaving || !qtvStatus.available"
           title="启用 / 停用"
           @click="toggleEnabled"
@@ -258,15 +255,15 @@ async function saveSettings() {
           </svg>
         </button>
       </template>
-      开启后，夸克网盘账号的 STRM 播放请求改走夸克 TV 的 302 直链，由夸克转码播放，画质会明显下降，且存在部分字幕不可用问题，请根据需要开启或关闭。
+      让夸克 STRM 播放改走 TV 版 302 直链；播放使用转码，画质和字幕支持可能受到限制。
       <template #actions>
-        <AppButton variant="secondary" :disabled="qtvSaving" @click="openManage">
-          账号绑定设置
+        <AppButton size="sm" variant="secondary" :disabled="qtvSaving" @click="openManage">
+          账号绑定
         </AppButton>
       </template>
     </CloudToolCard>
 
-    <AppModal :open="qtvManageOpen" title="夸克 STRM 播放接管 · 账号绑定" size="md" @close="closeManage">
+    <AppModal :open="qtvManageOpen" title="夸克 STRM 接管 · 账号绑定" size="md" @close="closeManage">
       <div v-if="qtvStatus.bindings.length" class="qtv-list">
         <div v-for="b in qtvStatus.bindings" :key="b.account_id" class="qtv-item">
           <div class="qtv-item__main">

@@ -74,6 +74,19 @@ func TestDefaultAdminPasswordIsInitializedAsHashAndMustChange(t *testing.T) {
 	}
 }
 
+func TestPublicIndexIsDisabledByDefault(t *testing.T) {
+	svc, configs, ctx := newBareTestAuth(t)
+	if svc.publicIndexEnabled(ctx) {
+		t.Fatal("public index should be disabled by default")
+	}
+	if err := configs.Set(ctx, KeyPublicIndexEnabled, "true"); err != nil {
+		t.Fatalf("enable public index: %v", err)
+	}
+	if !svc.publicIndexEnabled(ctx) {
+		t.Fatal("saved public index setting should override the default")
+	}
+}
+
 func TestReadSessionExpiresAfterTimeout(t *testing.T) {
 	svc, configs, ctx := newTestAuth(t)
 	_ = configs.Set(ctx, KeySessionTimeout, "1800")

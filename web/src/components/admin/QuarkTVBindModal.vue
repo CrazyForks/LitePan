@@ -174,7 +174,7 @@ onUnmounted(clearTimers);
 </script>
 
 <template>
-  <AppModal :open="open" title="夸克 STRM 播放接管 · 账号绑定" size="md" @close="handleClose">
+  <AppModal :open="open" title="夸克 STRM 接管 · 账号绑定" size="md" @close="handleClose">
     <label class="qtv-field">
       <span>选择夸克账号</span>
       <AppSelect

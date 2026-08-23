@@ -15,7 +15,7 @@ export const useAuthStore = defineStore("auth", () => {
   const username = ref("");
   const mustChangePassword = ref(false);
   const passwordChangeReason = ref("");
-  const publicIndexEnabled = ref(true);
+  const publicIndexEnabled = ref(false);
   const loaded = ref(false);
 
   const isAdmin = computed(() => sessionAdmin.value && !mustChangePassword.value);
@@ -25,7 +25,7 @@ export const useAuthStore = defineStore("auth", () => {
     username.value = data.username ?? "";
     mustChangePassword.value = Boolean(data.must_change_password);
     passwordChangeReason.value = data.password_change_reason ?? "";
-    publicIndexEnabled.value = data.public_index_enabled ?? true;
+    publicIndexEnabled.value = data.public_index_enabled ?? false;
     syncAdminBodyClass(isAdmin.value);
     loaded.value = true;
   }
