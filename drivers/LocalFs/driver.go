@@ -8,11 +8,13 @@ import (
 
 	"litepan/internal/domain"
 	"litepan/internal/driver"
+	"litepan/pkg/jsonvalue"
 )
 
 // Addition 是本地文件系统驱动的配置。
 type Addition struct {
-	RootPath string `json:"root_path" form:"required,full" type:"local_dir" label:"本地根目录"`
+	RootPath string                   `json:"root_path" form:"required,full" type:"local_dir" label:"本地根目录"`
+	CacheTTL jsonvalue.FlexibleString `json:"cache_ttl" label:"缓存时间（分钟）" type:"number" default:"0" form:"full"`
 }
 
 // Driver 把本地目录作为网盘驱动（路径型 ID）。
