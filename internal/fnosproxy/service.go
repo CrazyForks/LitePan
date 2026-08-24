@@ -87,21 +87,23 @@ type Options struct {
 }
 
 type Config struct {
-	Enabled   bool   `json:"enabled"`
-	FnosURL   string `json:"fnos_url"`
-	Port      string `json:"proxy_port"`
-	PathMaps  string `json:"strm_path_maps"`
-	StrmDir   string `json:"strm_dir"`
-	ProxyURL  string `json:"proxy_url"`
-	Running   bool   `json:"running"`
-	LastError string `json:"last_error,omitempty"`
+	Enabled           bool   `json:"enabled"`
+	FnosURL           string `json:"fnos_url"`
+	Port              string `json:"proxy_port"`
+	PathMaps          string `json:"strm_path_maps"`
+	DirectSTRMClients string `json:"direct_strm_clients"`
+	StrmDir           string `json:"strm_dir"`
+	ProxyURL          string `json:"proxy_url"`
+	Running           bool   `json:"running"`
+	LastError         string `json:"last_error,omitempty"`
 }
 
 type UpdateRequest struct {
-	Enabled  bool                     `json:"enabled"`
-	FnosURL  string                   `json:"fnos_url"`
-	Port     jsonvalue.FlexibleString `json:"proxy_port"`
-	PathMaps string                   `json:"strm_path_maps"`
+	Enabled           bool                     `json:"enabled"`
+	FnosURL           string                   `json:"fnos_url"`
+	Port              jsonvalue.FlexibleString `json:"proxy_port"`
+	PathMaps          string                   `json:"strm_path_maps"`
+	DirectSTRMClients string                   `json:"direct_strm_clients"`
 }
 
 func New(opts Options) *Service {
@@ -169,10 +171,11 @@ func (s *Service) Update(ctx context.Context, in UpdateRequest) (Config, error) 
 		}
 	}
 	if err := s.settings.Update(ctx, map[string]string{
-		settings.KeyFnosEnabled:      strconv.FormatBool(in.Enabled),
-		settings.KeyFnosURL:          fnosURL,
-		settings.KeyFnosProxyPort:    port,
-		settings.KeyFnosStrmPathMaps: pathMaps,
+		settings.KeyFnosEnabled:           strconv.FormatBool(in.Enabled),
+		settings.KeyFnosURL:               fnosURL,
+		settings.KeyFnosProxyPort:         port,
+		settings.KeyFnosStrmPathMaps:      pathMaps,
+		settings.KeyFnosDirectSTRMClients: proxybase.NormalizeClientKeywords(in.DirectSTRMClients),
 	}); err != nil {
 		return Config{}, err
 	}
@@ -251,10 +254,11 @@ func ConfigFromUpdate(in UpdateRequest) (Config, error) {
 		return Config{}, err
 	}
 	return Config{
-		Enabled:  in.Enabled,
-		FnosURL:  fnosURL,
-		Port:     port,
-		PathMaps: normalizeHostStrmRoots(in.PathMaps),
+		Enabled:           in.Enabled,
+		FnosURL:           fnosURL,
+		Port:              port,
+		PathMaps:          normalizeHostStrmRoots(in.PathMaps),
+		DirectSTRMClients: proxybase.NormalizeClientKeywords(in.DirectSTRMClients),
 	}, nil
 }
 
@@ -345,15 +349,17 @@ func (s *Service) configFromSettings() Config {
 		return Config{}
 	}
 	return Config{
-		Enabled:  s.settings.Bool(settings.KeyFnosEnabled),
-		FnosURL:  strings.TrimRight(strings.TrimSpace(s.settings.String(settings.KeyFnosURL)), "/"),
-		Port:     strings.TrimSpace(s.settings.String(settings.KeyFnosProxyPort)),
-		PathMaps: strings.TrimSpace(s.settings.String(settings.KeyFnosStrmPathMaps)),
+		Enabled:           s.settings.Bool(settings.KeyFnosEnabled),
+		FnosURL:           strings.TrimRight(strings.TrimSpace(s.settings.String(settings.KeyFnosURL)), "/"),
+		Port:              strings.TrimSpace(s.settings.String(settings.KeyFnosProxyPort)),
+		PathMaps:          strings.TrimSpace(s.settings.String(settings.KeyFnosStrmPathMaps)),
+		DirectSTRMClients: proxybase.NormalizeClientKeywords(s.settings.String(settings.KeyFnosDirectSTRMClients)),
 	}
 }
 
 func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
-	if proxybase.StrmPlayPathRE.MatchString(r.URL.Path) {
+	escapedPath := r.URL.EscapedPath()
+	if proxybase.StrmPlayPathRE.MatchString(escapedPath) {
 		s.serveSTRM(w, r)
 		return
 	}
@@ -406,7 +412,7 @@ func (s *Service) serveSTRM(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "STRM playback is unavailable", http.StatusNotImplemented)
 		return
 	}
-	m := proxybase.StrmPlayPathRE.FindStringSubmatch(r.URL.Path)
+	m := proxybase.StrmPlayPathRE.FindStringSubmatch(r.URL.EscapedPath())
 	if len(m) < 5 {
 		http.NotFound(w, r)
 		return
@@ -448,6 +454,10 @@ func (s *Service) serveSTRM(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg Config, fullPath string) {
+	s.log.Debug("飞牛反代播放请求来源",
+		"client", proxybase.EmbyClientName(r),
+		"user_agent", r.UserAgent(),
+	)
 	mediaSourceID := queryValue(r, "mediasourceid")
 	itemID := ""
 	if m := videoStreamPathRE.FindStringSubmatch(fullPath); len(m) > 1 {
@@ -469,6 +479,10 @@ func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg
 		}
 	}
 	if playURL != "" {
+		if proxybase.MatchesClientKeywords(r, cfg.DirectSTRMClients) {
+			proxybase.ServeSTRMDescriptor(w, r, playURL)
+			return
+		}
 		if s.serveLitePanPlayback(w, r, playURL) {
 			return
 		}
@@ -642,14 +656,10 @@ func (s *Service) modifyPlaybackInfo(w http.ResponseWriter, r *http.Request, cfg
 	}
 
 	changed := false
-	strmSourceCount := 0
 	for _, mediaSource := range mediaSources(payload) {
 		// 补齐客户端要求非空的 MediaStream 字段。
 		if normalizeEmbyMediaStreams(mediaSource) {
 			changed = true
-		}
-		if isStrmPath(strings.TrimSpace(stringValue(mediaSource, "Path"))) {
-			strmSourceCount++
 		}
 		if s.rewriteStrmMediaSource(mediaSource, itemID, r, cfg) {
 			changed = true
@@ -690,25 +700,6 @@ func (s *Service) rewriteStrmMediaSource(mediaSource map[string]any, itemID stri
 	delete(mediaSource, "TranscodingSubProtocol")
 	delete(mediaSource, "TranscodingContainer")
 	return true
-}
-
-func embyClientName(r *http.Request) string {
-	if r == nil {
-		return ""
-	}
-	for _, key := range []string{"X-Emby-Authorization", "Authorization"} {
-		raw := strings.TrimSpace(r.Header.Get(key))
-		if raw == "" {
-			continue
-		}
-		for _, part := range strings.Split(raw, ",") {
-			part = strings.TrimSpace(part)
-			if len(part) >= 7 && strings.EqualFold(part[:7], "Client=") {
-				return strings.Trim(part[7:], `"' `)
-			}
-		}
-	}
-	return strings.TrimSpace(r.Header.Get("X-Emby-Client"))
 }
 
 func proxiedVideoPath(r *http.Request, itemID, mediaSourceID string) string {

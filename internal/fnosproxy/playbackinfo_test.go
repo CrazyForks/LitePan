@@ -3,6 +3,7 @@ package fnosproxy
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,6 +22,14 @@ func TestUpdateRequestAcceptsNumericPort(t *testing.T) {
 	}
 	if in.Port.String() != "18997" {
 		t.Fatalf("端口=%q", in.Port.String())
+	}
+}
+
+func TestEmbyClientNameRecognizesMediaBrowserPrefix(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/Items/demo/PlaybackInfo", nil)
+	req.Header.Set("X-Emby-Authorization", `MediaBrowser Client="Infuse", Device="Mac", Token="secret"`)
+	if got := proxybase.EmbyClientName(req); got != "Infuse" {
+		t.Fatalf("客户端名=%q，期望 Infuse", got)
 	}
 }
 
@@ -225,6 +234,73 @@ func TestRedirectSTRMStreamNonLitePanStillRedirectsOriginalURL(t *testing.T) {
 	}
 }
 
+func TestRedirectSTRMStreamMatchedClientReturnsOriginalDescriptor(t *testing.T) {
+	fileID := "file-infuse-descriptor"
+	litepanURL := fmt.Sprintf("https://litepan.example:8888/api/strm/play/7/%s/t/token/n/demo.mkv", strm.EncodeFileKey(fileID))
+	service := New(Options{})
+	service.rememberSource("ms-infuse", "item-infuse", "/movie/demo.strm", litepanURL)
+	service.servePlayback = func(w http.ResponseWriter, r *http.Request, req playback.Request, intent playback.Intent) error {
+		t.Fatal("命中的终端读取客户端应先返回 STRM 文本，不应直接进入 playback")
+		return nil
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://media.example:18997/Videos/item-infuse/stream?MediaSourceId=ms-infuse", nil)
+	req.Header.Set("User-Agent", "Infuse-Direct/8.5")
+	req.Header.Set("Range", "bytes=0-")
+	rec := httptest.NewRecorder()
+	service.redirectSTRMStream(rec, req, Config{DirectSTRMClients: "Infuse;VidHub", Port: "18997"}, strings.TrimPrefix(req.URL.RequestURI(), "/"))
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusPartialContent {
+		t.Fatalf("状态码=%d，期望 206", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := litepanURL + "\n"
+	if string(body) != want {
+		t.Fatalf("STRM 文本=%q，期望 %q", body, want)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/plain") {
+		t.Fatalf("Content-Type=%q，期望 text/plain", got)
+	}
+}
+
+func TestDirectSTRMClientRequestMatchesConfiguredKeywords(t *testing.T) {
+	tests := []struct {
+		name      string
+		clients   string
+		client    string
+		ua        string
+		wantMatch bool
+	}{
+		{name: "客户端名称命中且忽略大小写", clients: "Infuse;VidHub", client: "infuse", wantMatch: true},
+		{name: "UA命中", clients: "Infuse；VidHub", ua: "VidHub/2.1", wantMatch: true},
+		{name: "未命中", clients: "Infuse;VidHub", client: "SenPlayer", ua: "SenPlayer/1.0", wantMatch: false},
+		{name: "空配置", clients: "", client: "Infuse", ua: "Infuse-Direct/8.5", wantMatch: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/Videos/demo/stream", nil)
+			if tc.client != "" {
+				req.Header.Set("X-Emby-Client", tc.client)
+			}
+			req.Header.Set("User-Agent", tc.ua)
+			if got := proxybase.MatchesClientKeywords(req, tc.clients); got != tc.wantMatch {
+				t.Fatalf("匹配结果=%v，期望 %v", got, tc.wantMatch)
+			}
+		})
+	}
+}
+
+func TestNormalizeClientKeywords(t *testing.T) {
+	if got, want := proxybase.NormalizeClientKeywords(" Infuse；VidHub;infuse;; "), "Infuse;VidHub"; got != want {
+		t.Fatalf("规范化结果=%q，期望 %q", got, want)
+	}
+}
+
 func TestRedirectSTRMStreamBrokenLitePanURLNoLongerFallsBackTo302(t *testing.T) {
 	service := New(Options{})
 	service.rememberSource("ms6", "item-6", "/movie/demo.strm", "http://127.0.0.1:5211/api/strm/play/broken")
@@ -314,5 +390,21 @@ func TestParseLitePanSTRMURLFilenameRegressionCases(t *testing.T) {
 				t.Fatalf("编码路径不应出现空格：%q", gotPath)
 			}
 		})
+	}
+}
+
+func TestStrmPlayRouteMatchesEscapedUnicodeFilename(t *testing.T) {
+	fileName := "蜘蛛侠：崭新之日 - Spider-Man： Brand New Day (2026) [2160p].mp4"
+	playPath := fmt.Sprintf(
+		"/api/strm/play/10/%s/t/token/n/%s",
+		strm.EncodeFileKey("file-spaces"),
+		url.PathEscape(fileName),
+	)
+	req := httptest.NewRequest(http.MethodGet, playPath, nil)
+	if proxybase.StrmPlayPathRE.MatchString(req.URL.Path) {
+		t.Fatal("测试前提失效：解码后含空格的 URL.Path 不应匹配")
+	}
+	if !proxybase.StrmPlayPathRE.MatchString(req.URL.EscapedPath()) {
+		t.Fatalf("编码路径未匹配: %q", req.URL.EscapedPath())
 	}
 }

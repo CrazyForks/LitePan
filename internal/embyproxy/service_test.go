@@ -104,6 +104,44 @@ func TestRedirectSTRMStreamResolvesLitePanSTRMOnServer(t *testing.T) {
 	}
 }
 
+func TestRedirectSTRMStreamMatchedClientReadsOriginalSTRM(t *testing.T) {
+	fileID := "file-direct-client"
+	litepanURL := fmt.Sprintf("https://litepan.example:8888/api/strm/play/12/%s/t/token/n/demo.mkv", strm.EncodeFileKey(fileID))
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/Items") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, fmt.Sprintf(`{"Items":[{"Id":"123","MediaSources":[{"Id":"ms1","Path":%q}]}]}`, litepanURL))
+	}))
+	defer upstream.Close()
+
+	svc := testEmbyProxyService(t, upstream.URL)
+	svc.servePlayback = func(w http.ResponseWriter, r *http.Request, req playback.Request, intent playback.Intent) error {
+		t.Fatal("命中的 STRM 直读客户端不应由 LitePan 代取地址")
+		return nil
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://litepan.test:8097/Videos/123/stream?MediaSourceId=ms1&api_key=test-key", nil)
+	req.Header.Set("User-Agent", "XXXPlay/1.0")
+	req.Header.Set("Range", "bytes=0-")
+	rec := httptest.NewRecorder()
+	svc.redirectSTRMStream(rec, req, Config{EmbyURL: upstream.URL, APIKey: "test-key", DirectSTRMClients: "XXXPlay"}, strings.TrimPrefix(req.URL.RequestURI(), "/"))
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusPartialContent {
+		t.Fatalf("状态码=%d，期望 206", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(body), litepanURL+"\n"; got != want {
+		t.Fatalf("STRM 文本=%q，期望 %q", got, want)
+	}
+}
+
 func TestRedirectSTRMStreamUsesPlaybackResponseForProxyMode(t *testing.T) {
 	litepanURL := fmt.Sprintf("http://192.168.60.8:5211/api/strm/play/9/%s/t/token/n/demo.mkv", strm.EncodeFileKey("file-9"))
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

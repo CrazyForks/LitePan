@@ -66,30 +66,33 @@ type Options struct {
 }
 
 type Config struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	EmbyURL   string `json:"emby_url"`
-	APIKey    string `json:"api_key"`
-	Port      string `json:"proxy_port"`
-	ProxyURL  string `json:"proxy_url"`
-	Running   bool   `json:"running"`
-	LastError string `json:"last_error,omitempty"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	EmbyURL           string `json:"emby_url"`
+	APIKey            string `json:"api_key"`
+	Port              string `json:"proxy_port"`
+	DirectSTRMClients string `json:"direct_strm_clients"`
+	ProxyURL          string `json:"proxy_url"`
+	Running           bool   `json:"running"`
+	LastError         string `json:"last_error,omitempty"`
 }
 
 type storedConfig struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	EmbyURL string `json:"emby_url"`
-	APIKey  string `json:"api_key"`
-	Port    string `json:"proxy_port"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	EmbyURL           string `json:"emby_url"`
+	APIKey            string `json:"api_key"`
+	Port              string `json:"proxy_port"`
+	DirectSTRMClients string `json:"direct_strm_clients,omitempty"`
 }
 
 type UpdateRequest struct {
-	ID      string                   `json:"id"`
-	Name    string                   `json:"name"`
-	EmbyURL string                   `json:"emby_url"`
-	APIKey  string                   `json:"api_key"`
-	Port    jsonvalue.FlexibleString `json:"proxy_port"`
+	ID                string                   `json:"id"`
+	Name              string                   `json:"name"`
+	EmbyURL           string                   `json:"emby_url"`
+	APIKey            string                   `json:"api_key"`
+	Port              jsonvalue.FlexibleString `json:"proxy_port"`
+	DirectSTRMClients string                   `json:"direct_strm_clients"`
 }
 
 type State struct {
@@ -247,6 +250,7 @@ func storedConfigs(configs []Config) []storedConfig {
 	for _, cfg := range configs {
 		out = append(out, storedConfig{
 			ID: cfg.ID, Name: cfg.Name, EmbyURL: cfg.EmbyURL, APIKey: cfg.APIKey, Port: cfg.Port,
+			DirectSTRMClients: cfg.DirectSTRMClients,
 		})
 	}
 	return out
@@ -528,11 +532,12 @@ func ConfigFromUpdate(in UpdateRequest) (Config, error) {
 		return Config{}, err
 	}
 	return Config{
-		ID:      strings.TrimSpace(in.ID),
-		Name:    name,
-		EmbyURL: embyURL,
-		APIKey:  strings.TrimSpace(in.APIKey),
-		Port:    port,
+		ID:                strings.TrimSpace(in.ID),
+		Name:              name,
+		EmbyURL:           embyURL,
+		APIKey:            strings.TrimSpace(in.APIKey),
+		Port:              port,
+		DirectSTRMClients: proxybase.NormalizeClientKeywords(in.DirectSTRMClients),
 	}, nil
 }
 
@@ -661,6 +666,7 @@ func (s *Service) configsFromSettings() []Config {
 		configs[i].EmbyURL = strings.TrimRight(strings.TrimSpace(configs[i].EmbyURL), "/")
 		configs[i].APIKey = strings.TrimSpace(configs[i].APIKey)
 		configs[i].Port = strings.TrimSpace(configs[i].Port)
+		configs[i].DirectSTRMClients = proxybase.NormalizeClientKeywords(configs[i].DirectSTRMClients)
 	}
 	return configs
 }
@@ -705,7 +711,7 @@ func (s *Service) handleConfig(configID string, w http.ResponseWriter, r *http.R
 }
 
 func (s *Service) handleWithConfig(cfg Config, w http.ResponseWriter, r *http.Request) {
-	if proxybase.StrmPlayPathRE.MatchString(r.URL.Path) {
+	if proxybase.StrmPlayPathRE.MatchString(r.URL.EscapedPath()) {
 		s.serveSTRM(w, r)
 		return
 	}
@@ -734,7 +740,7 @@ func (s *Service) serveSTRM(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "STRM playback is unavailable", http.StatusNotImplemented)
 		return
 	}
-	m := proxybase.StrmPlayPathRE.FindStringSubmatch(r.URL.Path)
+	m := proxybase.StrmPlayPathRE.FindStringSubmatch(r.URL.EscapedPath())
 	if len(m) < 5 {
 		http.NotFound(w, r)
 		return
@@ -796,6 +802,10 @@ func (s *Service) serveLitePanPlayback(w http.ResponseWriter, r *http.Request, l
 }
 
 func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg Config, fullPath string) {
+	s.log.Debug("Emby 反代播放请求来源",
+		"client", proxybase.EmbyClientName(r),
+		"user_agent", r.UserAgent(),
+	)
 	if r.Method == http.MethodHead {
 		s.proxyRequest(w, r, cfg, fullPath)
 		return
@@ -824,6 +834,10 @@ func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg
 			continue
 		}
 		if redirectURL := s.extractLitePanSTRM(mediaSource, r, cfg); redirectURL != "" {
+			if proxybase.MatchesClientKeywords(r, cfg.DirectSTRMClients) {
+				proxybase.ServeSTRMDescriptor(w, r, redirectURL)
+				return
+			}
 			if s.serveLitePanPlayback(w, r, redirectURL) {
 				return
 			}
@@ -831,6 +845,10 @@ func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg
 	}
 	itemPath := normalizeMediaURL(stringValue(item, "Path"), r, cfg)
 	if isLitePanSTRMURL(itemPath) {
+		if proxybase.MatchesClientKeywords(r, cfg.DirectSTRMClients) {
+			proxybase.ServeSTRMDescriptor(w, r, itemPath)
+			return
+		}
 		if s.serveLitePanPlayback(w, r, itemPath) {
 			return
 		}

@@ -5,6 +5,7 @@ export interface FnosConfig {
   fnos_url: string;
   proxy_port: string;
   strm_path_maps: string;
+  direct_strm_clients: string;
   strm_dir: string;
   proxy_url: string;
   running: boolean;
@@ -16,6 +17,7 @@ export interface FnosConfigUpdate {
   fnos_url: string;
   proxy_port: string;
   strm_path_maps: string;
+  direct_strm_clients: string;
 }
 
 export function fetchFnosConfig() {

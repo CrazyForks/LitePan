@@ -36,6 +36,7 @@ const embyDraft = reactive<EmbyConfigUpdate>({
   emby_url: "",
   api_key: "",
   proxy_port: "",
+  direct_strm_clients: "",
 });
 
 const fnosForm = reactive({
@@ -43,6 +44,7 @@ const fnosForm = reactive({
   fnos_url: "",
   proxy_port: "",
   strm_path_maps: "",
+  direct_strm_clients: "Infuse",
   strm_dir: "/app/strm",
   proxy_url: "",
   running: false,
@@ -70,6 +72,7 @@ function applyFnos(config: FnosConfig) {
   fnosForm.fnos_url = config.fnos_url || "";
   fnosForm.proxy_port = config.proxy_port || "";
   fnosForm.strm_path_maps = config.strm_path_maps || "";
+  fnosForm.direct_strm_clients = config.direct_strm_clients || "";
   fnosForm.strm_dir = config.strm_dir || "/app/strm";
   fnosForm.proxy_url = config.proxy_url || "";
   fnosForm.running = Boolean(config.running);
@@ -105,6 +108,7 @@ function openNewEmby() {
     emby_url: "",
     api_key: "",
     proxy_port: "",
+    direct_strm_clients: "",
   });
   embyEditorOpen.value = true;
 }
@@ -117,6 +121,7 @@ function editEmby(config: EmbyConfig) {
     emby_url: config.emby_url,
     api_key: config.api_key,
     proxy_port: config.proxy_port,
+    direct_strm_clients: config.direct_strm_clients || "",
   });
   embyEditorOpen.value = true;
 }
@@ -128,6 +133,7 @@ function updatesFromConfigs(configs: EmbyConfig[]): EmbyConfigUpdate[] {
     emby_url: item.emby_url,
     api_key: item.api_key,
     proxy_port: String(item.proxy_port || ""),
+    direct_strm_clients: item.direct_strm_clients || "",
   }));
 }
 
@@ -212,7 +218,7 @@ async function refreshEmby(config: EmbyConfig) {
 async function saveFnos(enabled = fnosForm.enabled) {
   fnosSaving.value = true;
   try {
-    applyFnos(await saveFnosConfig({ enabled, fnos_url: fnosForm.fnos_url, proxy_port: String(fnosForm.proxy_port || ""), strm_path_maps: fnosForm.strm_path_maps }));
+    applyFnos(await saveFnosConfig({ enabled, fnos_url: fnosForm.fnos_url, proxy_port: String(fnosForm.proxy_port || ""), strm_path_maps: fnosForm.strm_path_maps, direct_strm_clients: fnosForm.direct_strm_clients }));
     toast.success("飞牛影视反代配置已保存");
     return true;
   } catch (error) {
@@ -226,7 +232,7 @@ async function saveFnos(enabled = fnosForm.enabled) {
 async function testFnos() {
   fnosTesting.value = true;
   try {
-    await testFnosConfig({ enabled: fnosForm.enabled, fnos_url: fnosForm.fnos_url, proxy_port: String(fnosForm.proxy_port || ""), strm_path_maps: fnosForm.strm_path_maps });
+    await testFnosConfig({ enabled: fnosForm.enabled, fnos_url: fnosForm.fnos_url, proxy_port: String(fnosForm.proxy_port || ""), strm_path_maps: fnosForm.strm_path_maps, direct_strm_clients: fnosForm.direct_strm_clients });
     toast.success("飞牛影视连接成功");
   } catch (error) {
     toast.error(getApiErrorMessage(error, "飞牛影视连接失败"));
@@ -280,12 +286,13 @@ async function testFnos() {
         <label><span>Emby 地址<SettingsHelpTooltip title="Emby 地址说明"><p>你的 Emby 服务器地址，例如 http://192.168.1.10:8096。</p><p>给 LitePan 连 Emby 用的，播放器里不要填这个。</p></SettingsHelpTooltip></span><input v-model.trim="embyDraft.emby_url" placeholder="http://192.168.1.10:8096" /></label>
         <label><span>API Key<SettingsHelpTooltip title="API Key 说明"><p>在 Emby 后台「API 密钥」里生成一个，粘贴到这里，用来连接 Emby 和刷库。</p></SettingsHelpTooltip></span><input v-model.trim="embyDraft.api_key" type="password" autocomplete="new-password" placeholder="Emby API Key" /></label>
         <label><span>反代端口<SettingsHelpTooltip title="反代端口说明"><p>反代用的端口，随便选一个没被占用的数字就行。</p><p>留空则不启动反代。</p></SettingsHelpTooltip></span><input v-model.trim="embyDraft.proxy_port" inputmode="numeric" placeholder="例如 18097" /></label>
+        <label><span>STRM 直读客户端<SettingsHelpTooltip title="STRM 直读客户端说明"><p>一般无需填写。播放器无法通过反代播放 STRM 时，可让它自己读取 STRM 中的地址。</p><p>填写客户端关键字，多个用分号隔开，例如 <code>XXXPlay;YYYPlayer</code>；未匹配的播放器仍由 LitePan 代取地址。</p><p>外网播放时，请确保 STRM 的 URL 基础地址可从外网访问。</p></SettingsHelpTooltip></span><input v-model.trim="embyDraft.direct_strm_clients" placeholder="默认留空" /></label>
       </div>
       <template #footer><AppButton class="footer-left" variant="secondary" :disabled="embyTesting" @click="testEmby">{{ embyTesting ? '测试中…' : '测试连接' }}</AppButton><AppButton variant="secondary" @click="embyEditorOpen = false">取消</AppButton><AppButton variant="primary" :disabled="embySaving" @click="saveEmbyEditor">{{ embySaving ? '保存中…' : '保存' }}</AppButton></template>
     </AppModal>
 
     <AppModal :open="fnosOpen" title="飞牛影视反代配置" size="md" @close="fnosOpen = false">
-      <div class="form-grid"><label><span>飞牛影视地址<SettingsHelpTooltip title="飞牛影视地址说明"><p>你的飞牛影视地址，端口一般是 8005（不是 NAS 管理页的 5666）。</p><p>给 LitePan 连飞牛用的，播放器里不要填这个。</p></SettingsHelpTooltip></span><input v-model.trim="fnosForm.fnos_url" placeholder="http://192.168.1.50:8005" /></label><label><span>飞牛 STRM 目录<SettingsHelpTooltip title="飞牛 STRM 目录说明"><p>把 Docker 里映射到 <code>/app/strm</code> 的左边路径填到这里。</p><p>例：<code>/vol1/1000/Strm/LitePanGO:/app/strm</code> → 填 <code>/vol1/1000/Strm/LitePanGO</code>。</p><p>两边路径相同则可留空。</p></SettingsHelpTooltip></span><input v-model.trim="fnosForm.strm_path_maps" placeholder="/vol1/1000/Strm/LitePanGO" /></label><label><span>反代端口<SettingsHelpTooltip title="反代端口说明"><p>反代用的端口，随便选一个没被占用的数字就行，别和 Emby 反代用同一个。</p><p>留空则不启动反代。</p></SettingsHelpTooltip></span><input v-model.trim="fnosForm.proxy_port" inputmode="numeric" placeholder="例如 18997" /></label><small v-if="fnosForm.last_error" class="field-error">{{ fnosForm.last_error }}</small></div>
+      <div class="form-grid"><label><span>飞牛影视地址<SettingsHelpTooltip title="飞牛影视地址说明"><p>你的飞牛影视地址，端口一般是 8005（不是 NAS 管理页的 5666）。</p><p>给 LitePan 连飞牛用的，播放器里不要填这个。</p></SettingsHelpTooltip></span><input v-model.trim="fnosForm.fnos_url" placeholder="http://192.168.1.50:8005" /></label><label><span>飞牛 STRM 目录<SettingsHelpTooltip title="飞牛 STRM 目录说明"><p>把 Docker 里映射到 <code>/app/strm</code> 的左边路径填到这里。</p><p>例：<code>/vol1/1000/Strm/LitePanGO:/app/strm</code> → 填 <code>/vol1/1000/Strm/LitePanGO</code>。</p><p>两边路径相同则可留空。</p></SettingsHelpTooltip></span><input v-model.trim="fnosForm.strm_path_maps" placeholder="/vol1/1000/Strm/LitePanGO" /></label><label><span>反代端口<SettingsHelpTooltip title="反代端口说明"><p>反代用的端口，随便选一个没被占用的数字就行，别和 Emby 反代用同一个。</p><p>留空则不启动反代。</p></SettingsHelpTooltip></span><input v-model.trim="fnosForm.proxy_port" inputmode="numeric" placeholder="例如 18997" /></label><label><span>STRM 直读客户端<SettingsHelpTooltip title="STRM 直读客户端说明"><p>部分播放器（如 Infuse）不支持由 LitePan 代取下载地址，需要自己读取 STRM 中的地址。</p><p>填写这些播放器的客户端关键字，多个用分号隔开，例如 <code>Infuse;XXXPlay</code>；未匹配的播放器仍由 LitePan 代取地址。</p><p>外网播放时，请确保 STRM 的 URL 基础地址可从外网访问。</p></SettingsHelpTooltip></span><input v-model.trim="fnosForm.direct_strm_clients" placeholder="Infuse;XXXPlay" /></label><small v-if="fnosForm.last_error" class="field-error">{{ fnosForm.last_error }}</small></div>
       <div class="endpoint"><div class="endpoint-label">反代入口<SettingsHelpTooltip title="反代入口说明"><p>在播放器里添加飞牛服务器时，填这个地址。</p><p>注意不是上面的「飞牛影视地址」，别填混了。</p></SettingsHelpTooltip></div><div class="endpoint-row"><span class="endpoint-url" :class="{ muted: !fnosForm.running }">{{ fnosForm.running ? resolveProxyURL(fnosForm.proxy_url, fnosForm.proxy_port) : '启动后生成入口' }}</span><button class="ghost-btn" type="button" :disabled="!fnosForm.running" @click="copyEndpoint(fnosForm)">复制</button></div></div>
       <template #footer><AppButton class="footer-left" variant="secondary" :disabled="fnosTesting" @click="testFnos">{{ fnosTesting ? '测试中…' : '测试连接' }}</AppButton><AppButton variant="secondary" @click="fnosOpen = false">取消</AppButton><AppButton variant="primary" :disabled="fnosSaving" @click="saveFnos().then(ok => { if (ok) fnosOpen = false; })">{{ fnosSaving ? '保存中…' : '保存' }}</AppButton></template>
     </AppModal>

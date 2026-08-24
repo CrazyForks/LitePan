@@ -3,6 +3,7 @@
 package proxybase
 
 import (
+	"bytes"
 	"net"
 	"net/http"
 	"net/url"
@@ -114,4 +115,75 @@ func PublicBase(r *http.Request, port string) string {
 		}
 	}
 	return scheme + "://" + host
+}
+
+// EmbyClientName 从 Emby/Jellyfin 请求头中提取客户端名称。
+func EmbyClientName(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	for _, key := range []string{"X-Emby-Authorization", "Authorization"} {
+		raw := strings.TrimSpace(r.Header.Get(key))
+		if raw == "" {
+			continue
+		}
+		for _, part := range strings.Split(raw, ",") {
+			part = strings.TrimSpace(part)
+			if len(part) >= len("MediaBrowser ") && strings.EqualFold(part[:len("MediaBrowser ")], "MediaBrowser ") {
+				part = strings.TrimSpace(part[len("MediaBrowser "):])
+			}
+			if len(part) >= len("Client=") && strings.EqualFold(part[:len("Client=")], "Client=") {
+				return strings.Trim(part[len("Client="):], `"' `)
+			}
+		}
+	}
+	return strings.TrimSpace(r.Header.Get("X-Emby-Client"))
+}
+
+// NormalizeClientKeywords 规范化用分号分隔的客户端关键字列表。
+func NormalizeClientKeywords(value string) string {
+	seen := make(map[string]struct{})
+	keywords := make([]string, 0)
+	for _, keyword := range splitClientKeywords(value) {
+		key := strings.ToLower(keyword)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keywords = append(keywords, keyword)
+	}
+	return strings.Join(keywords, ";")
+}
+
+// MatchesClientKeywords 判断请求的客户端名称或 User-Agent 是否命中关键字列表。
+func MatchesClientKeywords(r *http.Request, value string) bool {
+	if r == nil {
+		return false
+	}
+	haystack := strings.ToLower(EmbyClientName(r) + "\n" + r.UserAgent())
+	for _, keyword := range splitClientKeywords(value) {
+		if strings.Contains(haystack, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+	return false
+}
+
+// ServeSTRMDescriptor 把原 STRM 地址作为单行文本交给播放终端。
+func ServeSTRMDescriptor(w http.ResponseWriter, r *http.Request, playURL string) {
+	data := []byte(strings.TrimSpace(playURL) + "\n")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	http.ServeContent(w, r, "media.strm", time.Time{}, bytes.NewReader(data))
+}
+
+func splitClientKeywords(value string) []string {
+	parts := strings.FieldsFunc(value, func(r rune) bool { return r == ';' || r == '；' })
+	keywords := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if keyword := strings.TrimSpace(part); keyword != "" {
+			keywords = append(keywords, keyword)
+		}
+	}
+	return keywords
 }

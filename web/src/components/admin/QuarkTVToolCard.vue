@@ -255,7 +255,7 @@ async function saveSettings() {
           </svg>
         </button>
       </template>
-      让夸克 STRM 播放改走 TV 版 302 直链；播放使用转码，画质和字幕支持可能受到限制。
+      让夸克 STRM 改走 TV 版 302 直链；转码画质和字幕受影响且部分第三方播放器不兼容。
       <template #actions>
         <AppButton size="sm" variant="secondary" :disabled="qtvSaving" @click="openManage">
           账号绑定
