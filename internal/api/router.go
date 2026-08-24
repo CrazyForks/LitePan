@@ -44,6 +44,7 @@ import (
 	"litepan/internal/quarktv"
 	"litepan/internal/settings"
 	"litepan/internal/share/dav"
+	"litepan/internal/spacecleanup"
 	"litepan/internal/strm"
 	"litepan/internal/strmscrape"
 	"litepan/internal/upload"
@@ -86,6 +87,7 @@ type Deps struct {
 	Notifications     *notification.Service
 	Announcement      *announcement.Service
 	BackupRestore     *backuprestore.Service
+	SpaceCleanup      *spacecleanup.Service
 	DataDir           string
 	StrmDir           string
 	OnSettingsUpdated func(map[string]string)
@@ -125,6 +127,7 @@ type Handler struct {
 	notifications     *notification.Service
 	announcement      *announcement.Service
 	backupRestore     *backuprestore.Service
+	spaceCleanup      *spacecleanup.Service
 	dataDir           string
 	strmDir           string
 	onSettingsUpdated func(map[string]string)
@@ -172,6 +175,7 @@ func NewRouter(d Deps) http.Handler {
 		notifications:     d.Notifications,
 		announcement:      d.Announcement,
 		backupRestore:     d.BackupRestore,
+		spaceCleanup:      d.SpaceCleanup,
 		dataDir:           d.DataDir,
 		strmDir:           d.StrmDir,
 		onSettingsUpdated: d.OnSettingsUpdated,
@@ -338,6 +342,11 @@ func NewRouter(d Deps) http.Handler {
 					r.Post("/bind/poll", h.pollQuarkTVBind)
 					r.Put("/binding/settings", h.updateQuarkTVBindingSettings)
 					r.Delete("/bind", h.unbindQuarkTV)
+				})
+				r.Route("/tools/cleanup", func(r chi.Router) {
+					r.Post("/scan", h.scanSpaceCleanup)
+					r.Post("/execute", h.executeSpaceCleanup)
+					r.Get("/report", h.latestSpaceCleanupReport)
 				})
 				r.Route("/media-organize", func(r chi.Router) {
 					r.Get("/tasks", h.listMediaOrganizeTasks)

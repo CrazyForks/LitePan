@@ -15,8 +15,6 @@ import { copyTextToClipboard, toast } from "@/composables/useToast";
 import AppButton from "@/components/base/AppButton.vue";
 import AppModal from "@/components/base/AppModal.vue";
 import SettingsHelpTooltip from "@/components/admin/SettingsHelpTooltip.vue";
-import embyLogo from "@/assets/proxy/embylogo.png";
-import fnosLogo from "@/assets/proxy/fnmovielogo.png";
 
 const props = withDefaults(defineProps<{ searchQuery?: string }>(), { searchQuery: "" });
 
@@ -243,7 +241,7 @@ async function testFnos() {
     <article v-show="matches('Emby 反代')" class="tool-card" :class="embyEnabled ? 'is-enabled' : 'is-disabled'">
       <span class="tool-card__bar" :class="embyEnabled ? 'is-enabled' : 'is-disabled'" />
       <div class="tool-card__head">
-        <img class="tool-card__logo" :src="embyLogo" alt="Emby" />
+        <img class="tool-card__logo" src="/logos/emby.png" alt="Emby" />
         <div class="tool-card__meta"><h3 class="tool-card__name">Emby 反代</h3><p class="tool-card__driver">STRM 直连 · 多 Emby 服务</p></div>
         <button class="check-toggle" type="button" :class="{ on: embyEnabled }" :disabled="embySaving" title="启用 / 停用" @click="setEmbyEnabled(!embyEnabled)"><svg viewBox="0 0 16 16"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
       </div>
@@ -254,7 +252,7 @@ async function testFnos() {
     <article v-show="matches('飞牛影视反代')" class="tool-card" :class="fnosForm.enabled ? 'is-enabled' : 'is-disabled'">
       <span class="tool-card__bar" :class="fnosForm.enabled ? 'is-enabled' : 'is-disabled'" />
       <div class="tool-card__head">
-        <img class="tool-card__logo" :src="fnosLogo" alt="飞牛影视" />
+        <img class="tool-card__logo" src="/logos/fnmovie.png" alt="飞牛影视" />
         <div class="tool-card__meta"><h3 class="tool-card__name">飞牛影视反代</h3><p class="tool-card__driver">STRM 直连 · 飞牛路径转换</p></div>
         <button class="check-toggle" type="button" :class="{ on: fnosForm.enabled }" :disabled="fnosSaving" title="启用 / 停用" @click="saveFnos(!fnosForm.enabled)"><svg viewBox="0 0 16 16"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
       </div>

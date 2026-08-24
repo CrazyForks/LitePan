@@ -11,6 +11,7 @@ import { useSettingsLoad } from "@/composables/useSettingsLoad";
 import AppButton from "@/components/base/AppButton.vue";
 import AIToolCard from "@/components/admin/AIToolCard.vue";
 import ClassificationToolCard from "@/components/admin/ClassificationToolCard.vue";
+import CleanupToolCard from "@/components/admin/CleanupToolCard.vue";
 import CloudToolCard from "@/components/admin/CloudToolCard.vue";
 import LocalUploadToolCard from "@/components/admin/LocalUploadToolCard.vue";
 import ProxyToolsPanel from "@/components/admin/ProxyToolsPanel.vue";
@@ -23,7 +24,7 @@ const emit = defineEmits<{ "update:searchOpen": [boolean] }>();
 const { runLoad } = useSettingsLoad();
 
 const searchQuery = ref("");
-const cardTitles = ["Emby 反代", "飞牛影视反代", "115 STRM 增强", "夸克 STRM 接管", "AI 辅助识别", "目录整理分类", "从服务器上传"];
+const cardTitles = ["Emby 反代", "飞牛影视反代", "115 STRM 增强", "夸克 STRM 接管", "AI 辅助识别", "目录整理分类", "从服务器上传", "垃圾清理"];
 
 function matches(title: string) {
   const q = searchQuery.value.trim().toLowerCase();
@@ -163,6 +164,8 @@ async function clearCache() {
       <ClassificationToolCard :search-query="searchQuery" />
 
       <LocalUploadToolCard :search-query="searchQuery" />
+
+      <CleanupToolCard :search-query="searchQuery" />
     </div>
     <div v-if="searchOpen && !hasMatch" class="tool-search__empty">没有找到相关工具</div>
   </div>
