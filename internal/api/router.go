@@ -287,6 +287,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Post("/notifications/{id}/read", h.markNotificationRead)
 				r.Delete("/notifications/{id}", h.deleteNotification)
 				r.Get("/announcement", h.getAnnouncement)
+				r.Post("/announcement/read", h.markAnnouncementRead)
 				r.Route("/strm", func(r chi.Router) {
 					r.Get("/startup", h.strmStartupRemaining)
 					r.Get("/tasks", h.listStrmTasks)

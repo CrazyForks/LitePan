@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onDeactivated, ref, watchEffect } from "vue";
+import { computed, defineAsyncComponent, nextTick, onDeactivated, reactive, ref, watch, watchEffect } from "vue";
 import { useRoute } from "vue-router";
 import AppButton from "@/components/base/AppButton.vue";
 import SectionTabBar from "@/components/admin/SectionTabBar.vue";
@@ -47,7 +47,7 @@ const { confirmDiscardChanges } = useSettingsPageDirty(settingsPageDirty, revert
 const route = useRoute();
 const initialTab = String(route.query.tab ?? "") === PROXY_TAB ? ENHANCED_TAB : SCRAPE_TAB;
 const { activeTab, setActiveTab } = useSectionTabRoute(
-	initialTab,
+  initialTab,
   [SCRAPE_TAB, ENHANCED_TAB, BACKUP_TAB],
   {
     beforeTabChange: async () => {
@@ -58,6 +58,17 @@ const { activeTab, setActiveTab } = useSectionTabRoute(
       return true;
     },
   },
+);
+
+// 重面板首次访问时才挂载，之后只隐藏不销毁，保留已加载状态。
+const tabsVisited = reactive<Record<string, boolean>>({});
+watch(
+  activeTab,
+  (tab) => {
+    tabsVisited[tab] = true;
+    if (tab !== ENHANCED_TAB) enhancedSearchOpen.value = false;
+  },
+  { immediate: true },
 );
 
 const drawerSaving = computed(() => readPanelSaving(scrapeSettingsRef.value?.saving));
@@ -80,6 +91,7 @@ async function closeSettingsDrawer() {
 }
 
 onDeactivated(() => {
+  enhancedSearchOpen.value = false;
   if (!settingsDrawerOpen.value) return;
   if (scrapePanelDirty.value) revertDrawerSettings();
   settingsDrawerOpen.value = false;
@@ -113,13 +125,19 @@ async function handleDrawerSave() {
       </template>
     </SectionTabBar>
 
-    <StrmScrapePanel v-if="isScrapeTab" ref="scrapePanelRef" @open-settings="openScrapeSettings" />
+    <StrmScrapePanel
+      v-if="tabsVisited[SCRAPE_TAB]"
+      v-show="isScrapeTab"
+      ref="scrapePanelRef"
+      @open-settings="openScrapeSettings"
+    />
     <CloudToolsPanel
-      v-else-if="isEnhancedTab"
+      v-if="tabsVisited[ENHANCED_TAB]"
+      v-show="isEnhancedTab"
       :search-open="enhancedSearchOpen"
       @update:search-open="enhancedSearchOpen = $event"
     />
-    <BackupRestorePanel v-else-if="isBackupTab" />
+    <BackupRestorePanel v-if="tabsVisited[BACKUP_TAB]" v-show="isBackupTab" />
 
     <AdminSettingsDrawer
       :open="settingsDrawerOpen"

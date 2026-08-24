@@ -1,6 +1,6 @@
 // Package announcement 提供后台公告：从维护者托管的远端 JSON 拉取公告内容，
-// 供管理后台打开时自动弹出。判重依据是公告里的 notice_version（日期字符串），
-// 比本地已读版本更新才弹出；拉取失败静默降级，不影响后台其它功能。
+// 供管理后台打开时自动弹出。判重依据是公告里的 notice_version，
+// 已读状态由 API 层写入 settings；拉取失败静默降级，不影响后台其它功能。
 package announcement
 
 import (

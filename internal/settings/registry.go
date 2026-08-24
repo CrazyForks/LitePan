@@ -28,6 +28,7 @@ const (
 	KeyLogLevel                    = "log_level"
 	KeyLogRetentionDays            = "log_retention_days"
 	KeyLogErrorAckAt               = "log_error_ack_at"
+	KeyAnnouncementReadVersion     = "announcement_read_version"
 	KeyEmbyEnabled                 = "emby_enabled"
 	KeyEmbyProxyInstances          = "emby_proxy_instances"
 	KeyFnosEnabled                 = "fnos_enabled"
@@ -254,6 +255,12 @@ func defaultSpecs() []Spec {
 		},
 		{
 			Key:     KeyLogErrorAckAt,
+			Type:    TypeString,
+			Default: "",
+			Hidden:  true,
+		},
+		{
+			Key:     KeyAnnouncementReadVersion,
 			Type:    TypeString,
 			Default: "",
 			Hidden:  true,

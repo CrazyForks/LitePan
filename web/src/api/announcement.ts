@@ -6,7 +6,7 @@ export interface AnnouncementSection {
 }
 
 export interface AnnouncementItem {
-  /** 判重版本：日期字符串（如 2026-08-20）或内容哈希；比本地已读版本更新才弹出 */
+  /** 判重版本：日期字符串（如 2026-08-20）或内容哈希 */
   notice_version: string;
   badge: string;
   dialog_title: string;
@@ -23,9 +23,17 @@ export interface AnnouncementItem {
 export interface AnnouncementResponse {
   enabled: boolean;
   item: AnnouncementItem | null;
+  /** 当前公告版本是否已在服务端标记为已读 */
+  read: boolean;
 }
 
 // 后台公告：enabled=false 或 item 为 null 时不弹窗。
 export async function fetchAnnouncement() {
   return http.get<AnnouncementResponse>("/admin/announcement");
+}
+
+export async function markAnnouncementRead(noticeVersion: string): Promise<void> {
+  await http.post<{ notice_version: string }>("/admin/announcement/read", {
+    notice_version: noticeVersion,
+  });
 }

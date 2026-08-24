@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { getApiErrorMessage } from "@/api/client";
 import {
   cloudToolsApi,
@@ -39,6 +39,13 @@ function closeSearch() {
   searchQuery.value = "";
   emit("update:searchOpen", false);
 }
+
+watch(
+  () => props.searchOpen,
+  (open) => {
+    if (!open) searchQuery.value = "";
+  },
+);
 
 const status = ref<CloudTool115Status>({ enabled: false, cache_count: 0, available: false });
 const saving = ref(false);
