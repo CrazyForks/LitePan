@@ -326,6 +326,8 @@ function handleClose() {
   align-items: center;
   width: 100%;
   gap: 12px;
+  /* 手机小屏：按钮组允许换行，避免「自动获取 Token / 上一步 / 添加账号」横向溢出被裁 */
+  flex-wrap: wrap;
 }
 .step-footer__left {
   flex-shrink: 0;

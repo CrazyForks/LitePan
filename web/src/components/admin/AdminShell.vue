@@ -19,6 +19,7 @@ withDefaults(
     nav: NavItem[];
     modelValue: string;
     pageTitle?: string;
+    crumbs?: Array<{ label: string; to?: { page: string; tab?: string } }>;
     lockedKeys?: string[];
     homeReturnMode?: "sidebar" | "top_icon";
   }>(),
@@ -29,6 +30,7 @@ const emit = defineEmits<{
   preload: [string];
   logout: [];
   goHome: [];
+  navigate: [{ page: string; tab?: string }];
 }>();
 
 const sidebarCollapsed = ref(false);
@@ -138,11 +140,21 @@ onBeforeUnmount(() => {
 
     <aside class="sidebar">
       <header class="sidebar__header">
-        <img
-          :src="sidebarCompact ? '/static/img/logo-l.png' : '/static/img/logo.png'"
-          alt="LitePan"
-          class="sidebar__logo"
-        />
+        <!-- 点击 logo 展开/收缩侧栏（桌面端）；hover 显示自定义 tooltip 提示 -->
+        <span
+          class="sidebar__logo-wrap"
+          :class="{ 'sidebar__logo-wrap--clickable': !isMobile }"
+          @click="!isMobile && toggleSidebar()"
+        >
+          <img
+            :src="sidebarCompact ? '/static/img/logo-l.png' : '/static/img/logo.png'"
+            alt="LitePan"
+            class="sidebar__logo"
+          />
+          <span v-if="!isMobile" class="sidebar-logo-tip" role="tooltip">
+            {{ sidebarCollapsed ? "展开侧栏" : "收缩侧栏" }}
+          </span>
+        </span>
       </header>
 
       <nav class="sidebar__nav">
@@ -179,29 +191,40 @@ onBeforeUnmount(() => {
     </aside>
 
     <header class="global-chrome">
+      <!-- 移动端：汉堡按钮打开抽屉（桌面端收缩入口移到侧栏边缘按钮） -->
       <button
+        v-if="isMobile"
         type="button"
         class="sidebar-toggle"
-        :class="{ 'sidebar-toggle--active': isMobile && mobileDrawerOpen }"
+        :class="{ 'sidebar-toggle--active': mobileDrawerOpen }"
         :aria-label="sidebarToggleLabel"
-        :aria-expanded="isMobile ? mobileDrawerOpen : !sidebarCollapsed"
+        :aria-expanded="mobileDrawerOpen"
         @click="toggleSidebar"
       >
-        <svg v-if="isMobile && mobileDrawerOpen" viewBox="0 0 24 24" aria-hidden="true">
+        <svg v-if="mobileDrawerOpen" viewBox="0 0 24 24" aria-hidden="true">
           <path d="m6 6 12 12M18 6 6 18" />
         </svg>
-        <svg v-else-if="isMobile" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M4 7h16M4 12h16M4 17h16" />
-        </svg>
-        <svg v-else-if="sidebarCollapsed" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="m10 6 6 6-6 6M4 6v12" />
-        </svg>
         <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-          <path d="m14 6-6 6 6 6M20 6v12" />
+          <path d="M4 7h16M4 12h16M4 17h16" />
         </svg>
       </button>
 
-      <div v-if="pageTitle" class="global-chrome__context">
+      <!-- 真面包屑：后台 / 页面 / 当前 tab（可点击项跳转，当前项高亮） -->
+      <div v-if="crumbs?.length" class="global-chrome__context global-chrome__context--crumbs">
+        <template v-for="(crumb, i) in crumbs" :key="`${crumb.label}-${i}`">
+          <button
+            v-if="crumb.to"
+            type="button"
+            class="global-chrome__crumb-link"
+            @click="emit('navigate', crumb.to)"
+          >
+            {{ crumb.label }}
+          </button>
+          <span v-else class="global-chrome__crumb-current">{{ crumb.label }}</span>
+          <span v-if="i < crumbs.length - 1" class="global-chrome__sep">/</span>
+        </template>
+      </div>
+      <div v-else-if="pageTitle" class="global-chrome__context">
         <span class="global-chrome__crumb">后台</span>
         <span class="global-chrome__sep">/</span>
         <span class="global-chrome__title">{{ pageTitle }}</span>
@@ -263,6 +286,49 @@ onBeforeUnmount(() => {
   color: #fff;
   border-top-right-radius: var(--radius-lg);
   transition: transform 0.28s ease, box-shadow 0.28s ease;
+}
+
+/* 点击 logo 展开/收缩侧栏（桌面端）；hover 显示自定义 tooltip */
+.sidebar__header {
+  position: relative;
+}
+
+.sidebar__logo-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+}
+
+.sidebar__logo-wrap--clickable {
+  cursor: pointer;
+}
+
+/* 自定义 tooltip：黑底白字，浮在 logo 下方、分割线上方（header 内），深浅色主题通用 */
+.sidebar-logo-tip {
+  position: absolute;
+  top: calc(50% + 28px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 220;
+  padding: 3px 9px;
+  border-radius: 5px;
+  background: #18181b;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.3);
+}
+
+.sidebar__logo-wrap:hover .sidebar-logo-tip,
+.sidebar-logo-tip:focus-visible {
+  opacity: 1;
 }
 
 .sidebar__header {
@@ -446,7 +512,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding-left: calc(var(--sidebar-width) + 8px);
+  /* 顶栏左侧内边距对齐正文（24px），面包屑不顶着侧栏 */
+  padding-left: calc(var(--sidebar-width) + 24px);
   padding-right: 22px;
   background: var(--surface);
   border-bottom: 1px solid var(--border-soft);
@@ -459,6 +526,32 @@ onBeforeUnmount(() => {
   gap: 8px;
   min-width: 0;
   font-size: 13px;
+}
+
+/* 真面包屑：可点击项 / 当前项 */
+.global-chrome__crumb-link {
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.global-chrome__crumb-link:hover {
+  color: var(--brand);
+  background: var(--surface-sunken);
+}
+
+.global-chrome__crumb-current {
+  color: var(--text);
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .global-chrome__crumb {

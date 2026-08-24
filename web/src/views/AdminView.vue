@@ -53,6 +53,24 @@ const nav = [
 ];
 const navKeys = nav.map((n) => n.key);
 
+// 各页面 tab 结构：defaultTab 为点击父级面包屑时回落的默认 tab；tabs 为 key→label 映射。
+const PAGE_TABS: Record<string, { defaultTab: string; tabs: Record<string, string> }> = {
+  dashboard: { defaultTab: "overview", tabs: { overview: "运行概况", logs: "系统日志" } },
+  settings: {
+    defaultTab: "security",
+    tabs: { security: "账号安全", homepage: "首页设置", service: "其他设置", "api-keys": "API 秘钥" },
+  },
+  tasks: {
+    defaultTab: "strm",
+    tabs: { strm: "STRM 任务", cache: "缓存任务", organize: "目录整理", automation: "自动联动" },
+  },
+  tools: {
+    defaultTab: "scrape",
+    tabs: { scrape: "STRM 刮削", enhanced: "增强工具", backup: "备份管理" },
+  },
+  share: { defaultTab: "webdav", tabs: { webdav: "WebDAV", fuse: "本地挂载" } },
+};
+
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
@@ -76,6 +94,33 @@ const passwordChangeMessage = computed(() => {
   }
   return "当前管理员密码为非安全状态。请先到系统设置 → 账号安全修改密码。";
 });
+
+// 面包屑：后台（可点回首页）/ 页面（有 tab 时可点回默认 tab）/ 当前 tab
+const crumbs = computed(() => {
+  const pageDef = nav.find((n) => n.key === page.value);
+  const pageLabel = pageDef?.label ?? page.value;
+  const tabCfg = PAGE_TABS[page.value];
+  const items: { label: string; to?: { page: string; tab?: string } }[] = [
+    { label: "后台", to: { page: "dashboard" } },
+  ];
+  if (tabCfg) {
+    const tabLabel = tabCfg.tabs[String(route.query.tab ?? "")];
+    if (tabLabel) {
+      items.push({ label: pageLabel, to: { page: page.value, tab: tabCfg.defaultTab } });
+      items.push({ label: tabLabel });
+    } else {
+      items.push({ label: pageLabel });
+    }
+  } else {
+    items.push({ label: pageLabel });
+  }
+  return items;
+});
+
+function navigateCrumb(to?: { page: string; tab?: string }) {
+  if (!to) return;
+  void router.push({ query: to });
+}
 
 function normalize(value: unknown): string {
   const raw = String(value ?? "").trim();
@@ -249,6 +294,8 @@ onBeforeUnmount(() => {
     :nav="nav"
     :model-value="page"
     :page-title="pageTitle"
+    :crumbs="crumbs"
+    @navigate="navigateCrumb"
     :home-return-mode="adminHomeReturnMode"
     :locked-keys="mustChangePassword ? navKeys.filter((k) => k !== 'settings') : []"
     @update:model-value="changePage"

@@ -1060,6 +1060,11 @@ defineExpose({
 }
 
 @media (max-width: 720px) {
+  .fuse-form {
+    /* 手机小屏去除固定最小宽度，避免表单横向溢出被裁 */
+    min-width: 0;
+  }
+
   .fuse-form__row {
     grid-template-columns: 1fr;
   }

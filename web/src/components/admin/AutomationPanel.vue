@@ -3321,4 +3321,16 @@ defineExpose({
   }
 }
 
+@media (max-width: 720px) {
+  /* 手机小屏：隐藏最长的「执行流程」列，缩短横向滚动距离 */
+  .automation-table {
+    min-width: 480px;
+  }
+
+  .automation-table .col-flow,
+  .automation-row .flow-cell {
+    display: none;
+  }
+}
+
 </style>

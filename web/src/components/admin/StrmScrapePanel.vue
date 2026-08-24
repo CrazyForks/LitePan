@@ -1176,6 +1176,31 @@ defineExpose({
   border-bottom: 1px solid var(--border-soft);
   background: var(--panel-head-bg);
 }
+@media (max-width: 560px) {
+  /* 手机小屏：头部允许换行，避免标题/任务选择器与右侧操作按钮挤压重叠 */
+  .scrape-panel__head {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+
+  .scrape-panel__head-left {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .scrape-panel__head-actions {
+    margin-left: auto;
+  }
+
+  .scrape-panel__task-select {
+    min-width: 0;
+  }
+
+  .scrape-search-expand--open .scrape-search-expand__input {
+    width: min(200px, 42vw);
+    max-width: min(200px, 42vw);
+  }
+}
 .scrape-panel__head-left {
   display: flex;
   align-items: center;
