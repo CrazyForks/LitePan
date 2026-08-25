@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { coverExtractApi, type CoverFile, type CoverFrame, type CoverRuntime } from "@/api/coverExtract";
+import { coverExtractApi, type CoverFile, type CoverFrame, type CoverRuntime, type CoverStyle } from "@/api/coverExtract";
 import { getApiErrorMessage } from "@/api/client";
 import { toast } from "@/composables/useToast";
 import { canvasToJPEG, createCoverPoster, type CoverPosterFocus } from "@/utils/coverPoster";
@@ -9,13 +9,8 @@ import AppModal from "@/components/base/AppModal.vue";
 import AccountFolderField from "@/components/admin/AccountFolderField.vue";
 import CloudToolCard from "@/components/admin/CloudToolCard.vue";
 import FolderPickerModal from "@/components/file/FolderPickerModal.vue";
-import AppSelect from "@/components/base/AppSelect.vue";
 
 type CaptureMode = "uniform" | "head_tail" | "timestamp";
-const panelShapeOptions = [
-  { value: "slant", label: "斜边" },
-  { value: "straight", label: "直边" },
-];
 
 const props = withDefaults(defineProps<{ searchQuery?: string }>(), { searchQuery: "" });
 const open = ref(false);
@@ -28,6 +23,7 @@ const targetPickerOpen = ref(false);
 const captureMode = ref<CaptureMode>("uniform");
 const files = ref<CoverFile[]>([]);
 const runtime = ref<CoverRuntime | null>(null);
+const globalStyle = ref<CoverStyle>({ shape: "slant", height: 0.22, panel_color: "#3C4CC3", opacity: 0.8, text_color: "#fffdf8", packaged: false });
 const activeID = ref("");
 const selectedFrame = ref("");
 const timeHour = ref(0);
@@ -36,6 +32,21 @@ const timeSecond = ref(0);
 const statusText = ref("");
 const previewError = ref("");
 const posterCanvas = ref<HTMLCanvasElement | null>(null);
+const stylePanelOpen = ref(false);
+const filesPage = ref(1);
+const framesPage = ref(1);
+const PAGE_SIZE = 6;
+const candListEl = ref<HTMLElement | null>(null);
+const filesListEl = ref<HTMLElement | null>(null);
+const filePageSize = ref(PAGE_SIZE);
+const candPageSize = ref(PAGE_SIZE);
+const narrow = ref(window.innerWidth <= 900);
+const adjustMode = ref(false);
+const colorPickerFor = ref<"" | "panel" | "text">("");
+const paletteColors = [
+  "#000000", "#ffffff", "#3C4CC3", "#2563eb", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444",
+  "#8b5cf6", "#ec4899", "#64748b", "#92400e", "#065f46", "#1e293b", "#f1f5f9", "#fffdf8",
+];
 const titles = ref<Record<string, string>>({});
 const packaged = ref<Record<string, boolean>>({});
 const panelColors = ref<Record<string, string>>({});
@@ -62,43 +73,43 @@ const targetDisplay = computed(() => active.value ? `${active.value.target_path 
 const visible = computed(() => !props.searchQuery.trim() || "视频海报生成封面提取".includes(props.searchQuery.trim()));
 const selectedFrameInfo = computed(() => active.value?.frames.find((frame) => frame.id === selectedFrame.value));
 const activeTitle = computed({
-  get: () => active.value ? (titles.value[active.value.id] ?? "") : "",
+  get: () => active.value ? (titles.value[active.value.id] ?? inferTitle(active.value)) : "",
   set: (value: string) => {
     if (active.value) titles.value[active.value.id] = value;
   },
 });
 const activePackaged = computed({
-  get: () => active.value ? (packaged.value[active.value.id] ?? false) : false,
+  get: () => active.value ? (packaged.value[active.value.id] ?? globalStyle.value.packaged) : false,
   set: (value: boolean) => {
     if (active.value) packaged.value[active.value.id] = value;
   },
 });
 const activePanelColor = computed({
-  get: () => active.value ? (panelColors.value[active.value.id] ?? "#000000") : "#000000",
+  get: () => active.value ? (panelColors.value[active.value.id] ?? globalStyle.value.panel_color) : "#000000",
   set: (value: string) => {
     if (active.value) panelColors.value[active.value.id] = value;
   },
 });
 const activePanelOpacity = computed({
-  get: () => active.value ? (panelOpacities.value[active.value.id] ?? 0.8) : 0.8,
+  get: () => active.value ? (panelOpacities.value[active.value.id] ?? globalStyle.value.opacity) : 0.8,
   set: (value: number) => {
     if (active.value) panelOpacities.value[active.value.id] = Number(value);
   },
 });
 const activeTextColor = computed({
-  get: () => active.value ? (textColors.value[active.value.id] ?? "#fffdf8") : "#fffdf8",
+  get: () => active.value ? (textColors.value[active.value.id] ?? globalStyle.value.text_color) : "#fffdf8",
   set: (value: string) => {
     if (active.value) textColors.value[active.value.id] = value;
   },
 });
 const activePanelShape = computed({
-  get: () => active.value ? (panelShapes.value[active.value.id] ?? "slant") : "slant",
+  get: () => active.value ? (panelShapes.value[active.value.id] ?? globalStyle.value.shape) : "slant",
   set: (value: "slant" | "straight") => {
     if (active.value) panelShapes.value[active.value.id] = value;
   },
 });
 const activePanelHeight = computed({
-  get: () => active.value ? (panelHeights.value[active.value.id] ?? 0.22) : 0.22,
+  get: () => active.value ? (panelHeights.value[active.value.id] ?? globalStyle.value.height) : 0.22,
   set: (value: number) => {
     if (active.value) panelHeights.value[active.value.id] = Number(value);
   },
@@ -109,16 +120,84 @@ const activeImageZoom = computed({
     if (active.value) imageZooms.value[active.value.id] = Number(value);
   },
 });
-const captureHint = computed(() => {
-  if (captureMode.value === "uniform") return "按完整片长均匀选取 5 个时间点，适合快速挑选代表画面。";
-  if (captureMode.value === "head_tail") return "从视频开头和结尾各取 1 张，共生成 2 张候选画面。";
-  return "设置准确时间点，只提取该位置的 1 张候选画面。";
-});
 const captureActionLabel = computed(() => {
-  if (captureMode.value === "uniform") return "提取五张";
-  if (captureMode.value === "head_tail") return "提取首尾";
-  return "按时间提取";
+  if (captureMode.value === "uniform") return "取帧";
+  if (captureMode.value === "head_tail") return "取帧";
+  return "取帧";
 });
+const zoomPercent = computed(() => `${Math.round(activeImageZoom.value * 100)}%`);
+const previewDragTitle = computed(() => (narrow.value ? "拖动调整画面位置，可点复位恢复居中" : "拖动调整画面位置，双击恢复居中"));
+const adjustHintText = computed(() => (narrow.value ? "拖动画面调整位置 · 可点复位恢复居中" : "拖动画面调整位置 · 完成或双击复位"));
+const pagedFiles = computed(() => {
+  const size = filePageSize.value;
+  const start = (filesPage.value - 1) * size;
+  return files.value.slice(start, start + size);
+});
+const pagedFrames = computed(() => {
+  if (!active.value) return [];
+  const size = candPageSize.value;
+  const start = (framesPage.value - 1) * size;
+  return active.value.frames.slice(start, start + size);
+});
+const filesPageCount = computed(() => Math.max(1, Math.ceil(files.value.length / filePageSize.value)));
+const framesPageCount = computed(() => Math.max(1, Math.ceil((active.value?.frames.length ?? 0) / candPageSize.value)));
+
+function measureFilePageSize() {
+  if (!narrow.value) {
+    if (filePageSize.value !== PAGE_SIZE) filePageSize.value = PAGE_SIZE;
+    return;
+  }
+  const el = filesListEl.value;
+  if (!el) return;
+  const first = el.querySelector<HTMLElement>(".c-file");
+  if (!first) {
+    if (filePageSize.value !== 3) filePageSize.value = 3;
+    return;
+  }
+  const gap = 5;
+  const itemHeight = first.getBoundingClientRect().height;
+  if (itemHeight <= 0) return;
+  const rows = Math.max(1, Math.floor((el.clientHeight + gap) / (itemHeight + gap)));
+  if (rows !== filePageSize.value) filePageSize.value = rows;
+}
+
+// 候选画面分页自适应：按右栏可视高度计算每页行数（2 列），保证每页正好填满、不滚动不浪费。
+function measureCandPageSize() {
+  const el = candListEl.value;
+  if (!el) return;
+  if (narrow.value) {
+    // 小屏：固定 2 列 1 行，每页 2 张
+    if (candPageSize.value !== 2) {
+      candPageSize.value = 2;
+      const count = active.value?.frames.length ?? 0;
+      framesPage.value = Math.min(framesPage.value, Math.max(1, Math.ceil(count / 2)));
+    }
+    return;
+  }
+  const width = el.clientWidth;
+  const height = el.clientHeight;
+  if (width <= 0 || height <= 0) {
+    // 布局尚未稳定（初始渲染高度为 0），下一帧重试
+    requestAnimationFrame(() => measureCandPageSize());
+    return;
+  }
+  const gap = 8;
+  const itemWidth = (width - gap) / 2;
+  const itemHeight = itemWidth * 0.75;
+  const rows = Math.max(1, Math.floor((height + gap) / (itemHeight + gap)));
+  const size = rows * 2;
+  if (size !== candPageSize.value) {
+    candPageSize.value = size;
+    const count = active.value?.frames.length ?? 0;
+    framesPage.value = Math.min(framesPage.value, Math.max(1, Math.ceil(count / size)));
+  }
+}
+let candObserver: ResizeObserver | null = null;
+function ensureCandObserver() {
+  if (candObserver || !candListEl.value) return;
+  candObserver = new ResizeObserver(() => measureCandPageSize());
+  candObserver.observe(candListEl.value);
+}
 
 function fmtDuration(ms?: number) {
   if (!ms) return "待提取";
@@ -146,14 +225,8 @@ function inferTitle(file: CoverFile) {
 }
 
 function ensureFileOptions(file: CoverFile) {
+  // 仅初始化片名；样式项不预写，未单独调整的文件实时读取全局默认样式
   if (!(file.id in titles.value)) titles.value[file.id] = inferTitle(file);
-  if (!(file.id in packaged.value)) packaged.value[file.id] = false;
-  if (!(file.id in panelColors.value)) panelColors.value[file.id] = "#000000";
-  if (!(file.id in panelOpacities.value)) panelOpacities.value[file.id] = 0.8;
-  if (!(file.id in textColors.value)) textColors.value[file.id] = "#fffdf8";
-  if (!(file.id in panelShapes.value)) panelShapes.value[file.id] = "slant";
-  if (!(file.id in panelHeights.value)) panelHeights.value[file.id] = 0.22;
-  if (!(file.id in imageZooms.value)) imageZooms.value[file.id] = 1;
 }
 
 function frameFocus(frameID = selectedFrame.value): CoverPosterFocus {
@@ -199,7 +272,8 @@ function ensureActiveSelection() {
 
 async function load() {
   try {
-    const [list, rt] = await Promise.all([coverExtractApi.files(), coverExtractApi.runtime()]);
+    const [list, rt, style] = await Promise.all([coverExtractApi.files(), coverExtractApi.runtime(), coverExtractApi.getStyle()]);
+    globalStyle.value = style;
     files.value = normalizeFiles(list.files ?? []);
     runtime.value = rt;
     if (!files.value.some((file) => file.id === activeID.value)) activeID.value = files.value[0]?.id ?? "";
@@ -253,7 +327,8 @@ async function extract(mode: CaptureMode) {
     files.value = files.value.map((file) => file.id === out.id ? { ...out, frames: out.frames ?? [] } : file);
     const firstNewFrame = out.frames.find((frame) => !previousFrames.has(frame.id));
     selectedFrame.value = firstNewFrame?.id ?? out.frames[0]?.id ?? "";
-    statusText.value = `当前视频已生成 ${out.frames.length} 张候选图`;
+    statusText.value = "";
+    toast.success(`已生成 ${out.frames.length} 张候选图`);
   } catch (error) {
     toast.error(getApiErrorMessage(error, "提取失败"));
     await load();
@@ -280,6 +355,8 @@ async function buildPoster() {
 }
 
 function startPreviewDrag(event: PointerEvent) {
+  // 小屏：仅「调整画面」模式下拦截拖动，其余情况交给页面滚动
+  if (narrow.value && !adjustMode.value) return;
   if (event.button !== 0 || previewing.value || !selectedFrameInfo.value) return;
   const element = event.currentTarget as HTMLElement;
   dragState = {
@@ -317,6 +394,20 @@ function finishPreviewDrag(event: PointerEvent) {
 function resetPreviewFocus() {
   if (!selectedFrameInfo.value) return;
   setFrameFocus(selectedFrameInfo.value.id, { x: 0.5, y: 0.5 }, true);
+}
+
+function toggleAdjust() {
+  adjustMode.value = !adjustMode.value;
+}
+
+function toggleColorPicker(target: "panel" | "text") {
+  colorPickerFor.value = colorPickerFor.value === target ? "" : target;
+}
+
+function pickColor(color: string) {
+  if (colorPickerFor.value === "panel") activePanelColor.value = color;
+  else if (colorPickerFor.value === "text") activeTextColor.value = color;
+  colorPickerFor.value = "";
 }
 
 async function refreshPreview(silent = false) {
@@ -357,14 +448,15 @@ async function save() {
     let out = await coverExtractApi.saveComposed(payload, blob);
     if (out.conflict) {
       if (!window.confirm(`${out.filename} 已存在，确定覆盖吗？`)) {
-        statusText.value = "已取消保存";
+        statusText.value = "";
+        toast.info("已取消保存");
         return;
       }
       out = await coverExtractApi.saveComposed({ ...payload, overwrite: true }, blob);
     }
     if (out.ok) {
       toast.success(`已保存到 ${targetDisplay.value}`);
-      statusText.value = "封面保存完成";
+      statusText.value = "";
     }
   } catch (error) {
     toast.error(getApiErrorMessage(error, error instanceof Error ? error.message : "保存封面失败"));
@@ -415,6 +507,18 @@ async function remove(id: string) {
   }
 }
 
+async function clearAll() {
+  try {
+    await coverExtractApi.clear();
+    files.value = [];
+    activeID.value = "";
+    selectedFrame.value = "";
+    toast.success("已清空列表");
+  } catch (error) {
+    toast.error(getApiErrorMessage(error, "清空列表失败"));
+  }
+}
+
 async function setTarget(payload: { parentId: string; path: string }) {
   if (!active.value) return;
   try {
@@ -440,9 +544,104 @@ function choose(frame: CoverFrame) {
   selectedFrame.value = frame.id;
 }
 
+async function removeFrame(frameID: string) {
+  if (!active.value) return;
+  const id = active.value.id;
+  try {
+    await coverExtractApi.removeFrame(id, frameID);
+    files.value = files.value.map((file) => file.id === id ? { ...file, frames: file.frames.filter((frame) => frame.id !== frameID) } : file);
+    if (selectedFrame.value === frameID) selectedFrame.value = active.value?.frames[0]?.id ?? "";
+    const count = active.value?.frames.length ?? 0;
+    framesPage.value = Math.min(framesPage.value, Math.max(1, Math.ceil(count / candPageSize.value)));
+  } catch (error) {
+    toast.error(getApiErrorMessage(error, "移除候选画面失败"));
+  }
+}
+
+function toggleStylePanel() {
+  stylePanelOpen.value = !stylePanelOpen.value;
+}
+
+function onPackagedToggle(event: Event) {
+  // 打开包装海报时自动弹出样式面板，方便立即调整
+  if ((event.target as HTMLInputElement).checked) stylePanelOpen.value = true;
+}
+
+async function saveAsDefault() {
+  try {
+    await coverExtractApi.saveStyle({
+      shape: activePanelShape.value,
+      height: activePanelHeight.value,
+      panel_color: activePanelColor.value,
+      opacity: activePanelOpacity.value,
+      text_color: activeTextColor.value,
+      packaged: activePackaged.value,
+    });
+    globalStyle.value = {
+      shape: activePanelShape.value,
+      height: activePanelHeight.value,
+      panel_color: activePanelColor.value,
+      opacity: activePanelOpacity.value,
+      text_color: activeTextColor.value,
+      packaged: activePackaged.value,
+    };
+    toast.success("已保存为默认样式，之后加入的视频将默认使用此样式");
+  } catch (error) {
+    toast.error(getApiErrorMessage(error, "保存默认样式失败"));
+  }
+}
+
+function onWindowClick() {
+  stylePanelOpen.value = false;
+  colorPickerFor.value = "";
+}
+
+function onResize() {
+  narrow.value = window.innerWidth <= 900;
+}
+
 watch([selectedFrame, activeTitle, activePackaged, activePanelColor, activePanelOpacity, activeTextColor, activePanelShape, activePanelHeight, activeImageZoom, open], () => void refreshPreview(), { flush: "post" });
-onMounted(load);
+watch(files, (list) => {
+  void nextTick(() => {
+    measureFilePageSize();
+    filesPage.value = Math.min(filesPage.value, Math.max(1, Math.ceil(list.length / filePageSize.value)));
+  });
+});
+watch([narrow, open], () => {
+  void nextTick(() => {
+    measureFilePageSize();
+    const count = files.value.length;
+    filesPage.value = Math.min(filesPage.value, Math.max(1, Math.ceil(count / filePageSize.value)));
+    ensureCandObserver();
+    measureCandPageSize();
+  });
+});
+watch(() => active.value?.id, () => {
+  framesPage.value = 1;
+  void nextTick(() => {
+    ensureCandObserver();
+    measureCandPageSize();
+  });
+});
+watch(() => active.value?.frames.length, (count) => {
+  framesPage.value = Math.min(framesPage.value, Math.max(1, Math.ceil((count ?? 0) / candPageSize.value)));
+  if ((count ?? 0) > 0) {
+    void nextTick(() => {
+      ensureCandObserver();
+      measureCandPageSize();
+    });
+  }
+});
+onMounted(() => {
+  window.addEventListener("click", onWindowClick);
+  window.addEventListener("resize", onResize);
+  void load();
+});
 onUnmounted(() => {
+  candObserver?.disconnect();
+  candObserver = null;
+  window.removeEventListener("click", onWindowClick);
+  window.removeEventListener("resize", onResize);
   if (previewAnimationFrame) window.cancelAnimationFrame(previewAnimationFrame);
 });
 </script>
@@ -454,119 +653,377 @@ onUnmounted(() => {
     <template #actions><AppButton size="sm" @click="show">打开工具</AppButton></template>
   </CloudToolCard>
 
-  <AppModal :open="open" title="视频海报生成" size="lg" @close="open = false">
-    <div v-if="runtime && !runtime.ready" class="cover-warning">
-      {{ runtime.error }}<br>请将组件放到 {{ runtime.manual_path }}
-      <AppButton v-if="runtime.auto_download_available" size="sm" :disabled="downloading" @click="downloadTool">{{ downloading ? "安装中…" : "自动安装" }}</AppButton>
-    </div>
-    <div class="cover-layout">
-      <aside class="cover-files">
-        <div v-for="file in files" :key="file.id" class="cover-file" :class="{ active: file.id === active?.id }">
-          <button type="button" class="cover-file__select" @click="select(file)"><span>{{ file.name }}</span><small>{{ fmtDuration(file.duration_ms) }} · {{ file.frames.length ? `${file.frames.length} 张候选图` : file.status }}</small></button>
-          <button type="button" class="cover-file__remove" aria-label="移除视频及候选图" @click="remove(file.id)">×</button>
+  <AppModal :open="open" bare @close="open = false">
+    <div class="cover-shell">
+      <!-- 顶栏 -->
+      <div class="c-top">
+        <h1 class="c-title">视频海报生成</h1>
+        <div class="c-spacer" />
+        <!-- 时分秒排在取帧切换左侧、紧挨右对齐 -->
+        <div v-if="captureMode === 'timestamp'" class="time-input" @click.stop>
+          <input v-model.number="timeHour" aria-label="时" type="number" min="0"><span>时</span>
+          <input v-model.number="timeMinute" aria-label="分" type="number" min="0" max="59"><span>分</span>
+          <input v-model.number="timeSecond" aria-label="秒" type="number" min="0" max="59"><span>秒</span>
         </div>
-        <p v-if="!files.length">请在文件管理中右键视频，发送到视频海报生成工具。</p>
-      </aside>
-
-      <section class="cover-main">
-        <div v-if="active" class="cover-capture-panel">
-          <div class="cover-capture-tabs" role="tablist" aria-label="选择取帧方式">
-            <button type="button" role="tab" :aria-selected="captureMode === 'uniform'" :class="{ active: captureMode === 'uniform' }" @click="captureMode = 'uniform'">
-              <strong>均匀取帧五张</strong>
-            </button>
-            <button type="button" role="tab" :aria-selected="captureMode === 'head_tail'" :class="{ active: captureMode === 'head_tail' }" @click="captureMode = 'head_tail'">
-              <strong>片头片尾取帧</strong>
-            </button>
-            <button type="button" role="tab" :aria-selected="captureMode === 'timestamp'" :class="{ active: captureMode === 'timestamp' }" @click="captureMode = 'timestamp'">
-              <strong>按时间取帧</strong>
-            </button>
-          </div>
-          <div class="cover-capture-run">
-            <span class="cover-capture-hint">{{ captureHint }}</span>
-            <div v-if="captureMode === 'timestamp'" class="cover-time"><input v-model.number="timeHour" aria-label="小时" type="number" min="0"><span>时</span><input v-model.number="timeMinute" aria-label="分钟" type="number" min="0" max="59"><span>分</span><input v-model.number="timeSecond" aria-label="秒" type="number" min="0" max="59"><span>秒</span></div>
-            <AppButton size="sm" :disabled="loading || !enabled || !runtime?.ready" @click="extract(captureMode)">{{ captureActionLabel }}</AppButton>
-          </div>
+        <div class="seg">
+          <button type="button" :class="{ on: captureMode === 'uniform' }" @click="captureMode = 'uniform'">均匀取帧</button>
+          <button type="button" :class="{ on: captureMode === 'head_tail' }" @click="captureMode = 'head_tail'">片头片尾</button>
+          <button type="button" :class="{ on: captureMode === 'timestamp' }" @click="captureMode = 'timestamp'">按时间</button>
         </div>
-        <div v-if="statusText" class="cover-status"><span v-if="loading || downloading || saving" class="cover-spinner" />{{ statusText }}</div>
+        <button class="c-extract" type="button" :disabled="loading || !enabled || !runtime?.ready || !active" @click="extract(captureMode)">{{ loading ? "取帧中…" : captureActionLabel }}</button>
+        <button class="c-close" type="button" aria-label="关闭" @click="open = false">✕</button>
+      </div>
 
-        <div v-if="active?.frames.length" class="cover-workspace">
-          <div class="cover-candidates">
-            <div class="cover-section-title"><strong>候选画面</strong><span>保留原视频比例</span></div>
-            <div class="cover-grid">
-              <button v-for="frame in active.frames" :key="frame.id" type="button" :class="{ selected: selectedFrame === frame.id }" @click="choose(frame)">
-                <img :src="coverExtractApi.imageURL(frame.id)" loading="lazy">
-                <span>{{ fmtTimestamp(frame.time_ms) }}</span>
-              </button>
+      <!-- ffmpeg 未就绪 -->
+      <div v-if="runtime && !runtime.ready" class="cover-warning">
+        {{ runtime.error }}<br>请将组件放到 {{ runtime.manual_path }}
+        <AppButton v-if="runtime.auto_download_available" size="sm" :disabled="downloading" @click="downloadTool">{{ downloading ? "安装中…" : "自动安装" }}</AppButton>
+      </div>
+
+      <!-- 主体：三栏 -->
+      <div class="c-layout">
+        <aside class="c-files">
+          <div class="c-files-cap"><b>待处理影片</b><button type="button" class="c-files-clear" @click="clearAll">清空</button></div>
+          <div v-if="files.length" ref="filesListEl" class="c-files-list">
+            <div v-for="file in pagedFiles" :key="file.id" class="c-file" :class="{ active: file.id === active?.id }" @click="select(file)">
+              <span class="c-file-dot" />
+              <span class="c-file-info">
+                <b>{{ file.name }}</b>
+                <small>{{ fmtDuration(file.duration_ms) }} · {{ file.frames.length }} 张候选</small>
+              </span>
+              <button type="button" class="c-file-rm" title="移除" @click.stop="remove(file.id)">✕</button>
             </div>
           </div>
-
-          <div class="cover-preview-pane">
-            <div class="cover-section-title"><strong>海报预览</strong><span>拖动画面 · 双击复位</span></div>
-            <div
-              class="cover-preview-frame"
-              :class="{ dragging: draggingPreview }"
-              title="拖动调整画面位置，双击恢复居中"
-              @pointerdown="startPreviewDrag"
-              @pointermove="movePreviewDrag"
-              @pointerup="finishPreviewDrag"
-              @pointercancel="finishPreviewDrag"
-              @dblclick.prevent="resetPreviewFocus"
-            >
-              <canvas ref="posterCanvas" :class="{ loading: previewing }" />
-              <label class="cover-preview-zoom" title="放大画面后可拖动调整位置" @pointerdown.stop @dblclick.stop>
-                <small>{{ Math.round(activeImageZoom * 100) }}%</small>
-                <input v-model.number="activeImageZoom" aria-label="画面缩放" type="range" min="1" max="1.5" step="0.01" orient="vertical">
-              </label>
-              <span v-if="previewing" class="cover-preview-loading"><i class="cover-spinner" />正在合成预览…</span>
-            </div>
-            <p v-if="previewError" class="cover-error">{{ previewError }}</p>
+          <div v-else class="c-file-empty">列表为空<br>右键网盘视频<br>发送到视频海报生成工具</div>
+          <div v-if="filesPageCount > 1" class="c-pager">
+            <button type="button" :disabled="filesPage <= 1" @click="filesPage--">‹</button>
+            <span>{{ filesPage }} / {{ filesPageCount }}</span>
+            <button type="button" :disabled="filesPage >= filesPageCount" @click="filesPage++">›</button>
           </div>
+        </aside>
 
+        <section class="c-stage">
+          <div
+            v-if="active && active.frames.length"
+            class="preview-wrap"
+            :class="{ dragging: draggingPreview, 'adjust-mode': narrow && adjustMode }"
+            :title="previewDragTitle"
+            @pointerdown="startPreviewDrag"
+            @pointermove="movePreviewDrag"
+            @pointerup="finishPreviewDrag"
+            @pointercancel="finishPreviewDrag"
+            @dblclick.prevent="resetPreviewFocus"
+          >
+            <canvas ref="posterCanvas" :class="{ loading: previewing }" />
+            <button v-if="narrow" type="button" class="adjust-btn" :class="{ active: adjustMode }" @click.stop="toggleAdjust">{{ adjustMode ? "完成" : "调整" }}</button>
+            <button v-if="narrow && adjustMode" type="button" class="adjust-reset-btn" @click.stop="resetPreviewFocus">复位</button>
+            <span v-if="adjustMode" class="adjust-hint">{{ adjustHintText }}</span>
+            <label class="zoom" title="放大画面后可拖动调整位置" @pointerdown.stop @click.stop @dblclick.stop>
+              <span>{{ zoomPercent }}</span>
+              <input v-model.number="activeImageZoom" aria-label="画面缩放" type="range" min="1" max="1.5" step="0.01">
+            </label>
+            <span v-if="loading || downloading || saving || previewing" class="preview-loading"><i class="c-spinner" />{{ loading || downloading || saving ? statusText : "正在合成预览…" }}</span>
+            <span v-if="previewError" class="preview-error">{{ previewError }}</span>
+          </div>
+          <div v-else class="stage-empty">
+            <template v-if="!(loading || downloading || saving)">
+              <p v-if="active && active.error">{{ active.error }}</p>
+              <p v-else>{{ active ? "取帧后可在这里选择画面并实时预览海报。" : "右键网盘视频，发送到视频海报生成工具。" }}</p>
+            </template>
+            <span v-if="loading || downloading || saving" class="stage-empty-loading"><i class="c-spinner" />{{ statusText }}</span>
+          </div>
+          <!-- 包装设置：仅一行（开关 + 片名），样式入口在底栏 -->
+          <div v-if="active" class="stylebar">
+            <label class="tb-switch" :class="{ on: activePackaged }">
+              <input v-model="activePackaged" type="checkbox" @change="onPackagedToggle">
+              <span class="tb-track" /><b>包装海报</b>
+            </label>
+            <div class="tb-title">
+              <input v-model="activeTitle" maxlength="16" type="text" placeholder="输入片名（最多 16 字）">
+            </div>
+          </div>
+        </section>
+
+        <aside class="c-cands">
+          <div class="c-cands-cap"><b>候选画面</b><span>{{ active?.frames.length ?? 0 }} 张</span></div>
+          <div v-if="active?.frames.length" ref="candListEl" class="cand-list">
+            <div v-for="frame in pagedFrames" :key="frame.id" class="cand" :class="{ on: selectedFrame === frame.id }" @click="choose(frame)">
+              <img :src="coverExtractApi.imageURL(frame.id)" loading="lazy">
+              <span class="cand-t">{{ fmtTimestamp(frame.time_ms) }}</span>
+              <span class="cand-mark">✓</span>
+              <button type="button" class="cand-rm" title="移除该候选画面" @click.stop="removeFrame(frame.id)">✕</button>
+            </div>
+          </div>
+          <div v-else-if="active" class="cand-empty">{{ active.error || "暂无候选画面，请先取帧" }}</div>
+          <div v-else class="cand-empty">未选择影片</div>
+          <div v-if="framesPageCount > 1" class="c-pager">
+            <button type="button" :disabled="framesPage <= 1" @click="framesPage--">‹</button>
+            <span>{{ framesPage }} / {{ framesPageCount }}</span>
+            <button type="button" :disabled="framesPage >= framesPageCount" @click="framesPage++">›</button>
+          </div>
+        </aside>
+      </div>
+
+      <!-- 底栏：仅保存 -->
+      <div class="c-footer">
+        <div class="footer-style-wrap" @click.stop>
+          <button type="button" class="footer-style" :class="{ open: stylePanelOpen }" title="海报样式设置" @click="toggleStylePanel">≡</button>
+          <div v-if="stylePanelOpen" class="style-panel" @click.stop>
+            <div class="sp-item"><span class="sp-ic">▧</span><span class="sp-label">形状</span>
+              <div class="sp-toggle">
+                <button type="button" :class="{ on: activePanelShape === 'slant' }" @click="activePanelShape = 'slant'">斜切</button>
+                <button type="button" :class="{ on: activePanelShape === 'straight' }" @click="activePanelShape = 'straight'">直角</button>
+              </div>
+            </div>
+            <div class="sp-item"><span class="sp-ic">↕</span><span class="sp-label">高度</span><input v-model.number="activePanelHeight" type="range" min="0.15" max="0.3" step="0.01"><small>{{ Math.round(activePanelHeight * 100) }}%</small></div>
+            <div class="sp-item"><span class="sp-ic">◐</span><span class="sp-label">底色</span>
+              <button type="button" class="sp-swatch-btn" :class="{ open: colorPickerFor === 'panel' }" :style="{ background: activePanelColor }" @click.stop="toggleColorPicker('panel')" />
+            </div>
+            <div class="sp-item"><span class="sp-ic">◔</span><span class="sp-label">透明度</span><input v-model.number="activePanelOpacity" type="range" min="0" max="1" step="0.05"><small>{{ Math.round(activePanelOpacity * 100) }}%</small></div>
+            <div class="sp-item"><span class="sp-ic">A</span><span class="sp-label">字色</span>
+              <button type="button" class="sp-swatch-btn" :class="{ open: colorPickerFor === 'text' }" :style="{ background: activeTextColor }" @click.stop="toggleColorPicker('text')" />
+            </div>
+            <div v-if="colorPickerFor" class="sp-palette" @click.stop>
+              <button v-for="c in paletteColors" :key="c" type="button" class="sp-palette-cell" :class="{ sel: (colorPickerFor === 'panel' ? activePanelColor : activeTextColor) === c }" :style="{ background: c }" :title="c" @click="pickColor(c)" />
+            </div>
+            <button type="button" class="sp-save" @click="saveAsDefault">设为默认样式</button>
+          </div>
         </div>
-        <div v-else-if="active" class="cover-empty">取帧后可在这里选择画面并实时预览海报。</div>
-        <p v-if="active?.error" class="cover-error">{{ active.error }}</p>
-      </section>
-    </div>
-    <div v-if="active?.frames.length" class="cover-package-controls">
-      <div class="cover-package-head">
-        <label class="cover-package-toggle"><input v-model="activePackaged" type="checkbox"><strong>包装海报</strong></label>
-        <label v-if="activePackaged" class="cover-title-input"><span>片名</span><input v-model="activeTitle" maxlength="16" type="text" placeholder="最多 16 个字"></label>
-      </div>
-      <div v-if="activePackaged" class="cover-package-options">
-        <div class="cover-style-controls">
-          <label class="cover-edge"><span>边缘</span><AppSelect v-model="activePanelShape" :options="panelShapeOptions" /></label>
-          <label class="cover-height" title="底部形状高度"><span>高度</span><input v-model.number="activePanelHeight" type="range" min="0.15" max="0.3" step="0.01"><small>{{ Math.round(activePanelHeight * 100) }}%</small></label>
-          <label title="底部色块颜色"><span>底色</span><input v-model="activePanelColor" type="color"></label>
-          <label class="cover-opacity" title="设为 0% 时仅保留片名"><span>透明度</span><input v-model.number="activePanelOpacity" type="range" min="0" max="1" step="0.05"><small>{{ Math.round(activePanelOpacity * 100) }}%</small></label>
-          <label title="片名颜色"><span>字色</span><input v-model="activeTextColor" type="color"></label>
-        </div>
+        <AccountFolderField class="tb-path" :display="targetDisplay" :title="`封面保存到 ${targetDisplay}`" browse-label="目录" @browse="openTargetPicker" />
+        <button class="tb-save-btn" type="button" :disabled="!enabled || !selectedFrame || saving || loading || previewing || !active" @click="save">{{ saving ? "保存中…" : "保存封面" }}</button>
       </div>
     </div>
-    <template #footer>
-      <div v-if="active" class="cover-footer">
-        <AccountFolderField class="cover-footer__path" :display="targetDisplay" :title="`封面保存到 ${targetDisplay}`" browse-label="选择目录" @browse="openTargetPicker" />
-        <AppButton variant="primary" :disabled="!enabled || !selectedFrame || saving || loading || previewing" @click="save">{{ saving ? "保存中…" : "保存封面" }}</AppButton>
-      </div>
-    </template>
   </AppModal>
   <FolderPickerModal :open="targetPickerOpen" nested :account-id="active?.account_id ?? null" :initial-path="active?.target_path ?? '/'" title="选择封面保存目录" confirm-text="保存到此目录" @close="targetPickerOpen = false" @resolve="setTarget" />
 </template>
 
 <style scoped>
-.check-toggle{width:28px;height:28px;border-radius:50%;border:0;padding:0;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;background:var(--border);color:var(--text-muted);transition:background .18s ease,color .18s ease,box-shadow .18s ease}.check-toggle svg{width:14px;height:14px}.check-toggle:hover{background:var(--surface-hover)}.check-toggle.on{background:var(--success);color:#fff;box-shadow:0 0 0 4px rgba(16,185,129,.16)}.check-toggle:disabled{opacity:.5;cursor:not-allowed}
-.cover-warning{padding:10px 12px;margin-bottom:12px;border:1px solid var(--warning);border-radius:10px;color:var(--warning)}.cover-layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:16px;min-height:480px}.cover-files{border-right:1px solid var(--border);padding-right:12px}.cover-file{position:relative;display:flex;border:1px solid transparent;border-radius:10px}.cover-file.active{border-color:var(--primary);background:var(--primary-soft)}.cover-file__select{min-width:0;flex:1;padding:10px;text-align:left;border:0;background:transparent;color:var(--text);cursor:pointer}.cover-file__remove{width:32px;border:0;background:transparent;color:var(--text-muted);font-size:18px;cursor:pointer}.cover-file__remove:hover{color:var(--danger)}.cover-files span,.cover-files small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cover-files small{color:var(--text-muted);margin-top:4px}.cover-main{min-width:0}.cover-capture-panel{padding:0}.cover-capture-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-bottom:1px solid var(--border)}.cover-capture-tabs>button{min-width:0;padding:4px 8px 10px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--text-muted);text-align:center;cursor:pointer;transition:border-color .16s ease,color .16s ease}.cover-capture-tabs>button:hover{color:var(--text)}.cover-capture-tabs>button.active{border-bottom-color:var(--primary);color:var(--primary)}.cover-capture-tabs strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600}.cover-capture-run{display:flex;align-items:center;gap:10px;padding-top:10px}.cover-capture-hint{min-width:0;flex:1;font-size:12px;color:var(--text-muted)}.cover-time{display:flex;align-items:center;gap:4px}.cover-time input{width:48px;padding:7px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)}.cover-time span{font-size:12px;color:var(--text-muted)}.cover-status{display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--text-muted)}.cover-spinner{display:inline-block;width:15px;height:15px;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:cover-spin .8s linear infinite}@keyframes cover-spin{to{transform:rotate(360deg)}}
-.cover-workspace{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:18px;margin-top:16px;align-items:start}.cover-section-title{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:9px}.cover-section-title span{font-size:12px;color:var(--text-muted)}.cover-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(116px,1fr));gap:10px}.cover-grid button{min-width:0;padding:4px;border:2px solid transparent;border-radius:10px;background:var(--surface-soft);cursor:pointer}.cover-grid button.selected{border-color:var(--primary);background:var(--primary-soft)}.cover-grid img{display:block;width:100%;aspect-ratio:4/3;object-fit:contain;border-radius:6px;background:#06080c}.cover-grid span{display:block;padding:4px;color:var(--text-muted)}
-.cover-package-controls{grid-column:1/-1;min-width:0;margin-top:2px;padding-top:14px;border-top:1px solid var(--border)}.cover-package-toggle{display:flex;align-items:center;gap:9px;width:max-content;cursor:pointer}.cover-package-toggle input{width:17px;height:17px;accent-color:var(--primary)}.cover-package-toggle span,.cover-package-toggle small{display:block}.cover-package-toggle small{margin-top:2px;color:var(--text-muted)}.cover-package-options{min-width:0;display:flex;align-items:center;flex-wrap:wrap;gap:10px 20px;margin-top:12px}.cover-title-input{min-width:240px;flex:1 1 320px;display:flex;align-items:center;gap:8px}.cover-title-input>span,.cover-style-controls span{flex:0 0 auto;font-size:12px;color:var(--text-muted)}.cover-title-input input{min-width:0;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)}.cover-style-controls{min-width:0;display:flex;align-items:center;flex:1 1 520px;flex-wrap:wrap;gap:8px 18px}.cover-style-controls label{display:flex;align-items:center;gap:6px;white-space:nowrap}.cover-style-controls select{height:30px;padding:0 24px 0 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)}.cover-style-controls input[type=color]{width:30px;height:30px;padding:2px;border:1px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer}.cover-opacity input,.cover-height input{width:82px;accent-color:var(--primary)}.cover-opacity small,.cover-height small{width:34px;color:var(--text-muted);font-size:11px}
-.cover-package-controls{grid-column:auto;margin-top:16px}
-.cover-package-head{display:flex;align-items:center;gap:24px}.cover-package-head .cover-title-input{max-width:620px}
-.cover-preview-pane{min-width:0}.cover-preview-frame{position:relative;width:100%;overflow:hidden;border-radius:12px;background:#08090e;box-shadow:0 10px 28px rgba(4,8,18,.16);cursor:grab;touch-action:none;user-select:none}.cover-preview-frame.dragging{cursor:grabbing}.cover-preview-frame canvas{display:block;width:100%;aspect-ratio:2/3;pointer-events:none;transition:opacity .15s ease}.cover-preview-frame canvas.loading{opacity:.5}.cover-preview-zoom{position:absolute;z-index:2;top:10px;right:10px;display:flex;flex-direction:column;align-items:center;gap:5px;padding:7px 5px;border:1px solid rgba(255,255,255,.22);border-radius:10px;background:rgba(7,12,20,.58);color:#fff;cursor:default;backdrop-filter:blur(8px)}.cover-preview-zoom small{font-size:10px;line-height:1}.cover-preview-zoom input{width:18px;height:86px;margin:0;accent-color:#fff;cursor:pointer;writing-mode:vertical-lr;direction:rtl}.cover-preview-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:8px;pointer-events:none;color:#fff;background:rgba(5,7,12,.28);font-size:13px}.cover-empty{display:flex;align-items:center;justify-content:center;min-height:260px;margin-top:16px;border:1px dashed var(--border);border-radius:12px;color:var(--text-muted)}.cover-error{color:var(--danger)}.cover-footer{display:flex;align-items:stretch;gap:10px;width:100%}.cover-footer__path{min-width:0;flex:1}.cover-footer>:last-child{flex:0 0 auto}
-.cover-style-controls input[type=range]{appearance:none;-webkit-appearance:none;width:88px;height:16px;margin:0;background:transparent;cursor:pointer}.cover-style-controls input[type=range]::-webkit-slider-runnable-track{height:2px;border:0;border-radius:999px;background:color-mix(in srgb,var(--text-muted) 34%,transparent)}.cover-style-controls input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;margin-top:-5px;border:2px solid var(--surface);border-radius:50%;background:var(--primary);box-shadow:0 1px 5px rgba(31,78,150,.25);transition:transform .15s ease,box-shadow .15s ease}.cover-style-controls input[type=range]:hover::-webkit-slider-thumb{transform:scale(1.12);box-shadow:0 1px 7px rgba(31,78,150,.34)}.cover-style-controls input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 22%,transparent)}.cover-style-controls input[type=range]::-moz-range-track{height:2px;border:0;border-radius:999px;background:color-mix(in srgb,var(--text-muted) 34%,transparent)}.cover-style-controls input[type=range]::-moz-range-thumb{width:9px;height:9px;border:2px solid var(--surface);border-radius:50%;background:var(--primary);box-shadow:0 1px 5px rgba(31,78,150,.25)}
-.cover-preview-zoom{padding:8px 7px;border-color:rgba(255,255,255,.14);border-radius:12px;background:rgba(8,13,22,.48);box-shadow:0 6px 18px rgba(0,0,0,.16)}.cover-preview-zoom input{appearance:none;-webkit-appearance:none;width:3px;height:88px;margin:2px 7px;background:rgba(255,255,255,.32);border-radius:999px;outline:none}.cover-preview-zoom input::-webkit-slider-runnable-track{width:3px;border:0;border-radius:999px;background:rgba(255,255,255,.32)}.cover-preview-zoom input::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border:2px solid rgba(20,25,34,.48);border-radius:50%;background:#fff;box-shadow:0 2px 7px rgba(0,0,0,.28);transition:transform .15s ease}.cover-preview-zoom input:hover::-webkit-slider-thumb{transform:scale(1.12)}.cover-preview-zoom input::-moz-range-track{width:3px;border:0;border-radius:999px;background:rgba(255,255,255,.32)}.cover-preview-zoom input::-moz-range-thumb{width:10px;height:10px;border:2px solid rgba(20,25,34,.48);border-radius:50%;background:#fff;box-shadow:0 2px 7px rgba(0,0,0,.28)}
-.cover-style-controls input[type=range]::-webkit-slider-thumb{border:1px solid rgba(255,255,255,.9);background:#2f6fed}.cover-style-controls input[type=range]::-moz-range-thumb{border:1px solid rgba(255,255,255,.9);background:#2f6fed}
-.cover-preview-zoom input{width:88px;height:3px;margin:44px -35px;writing-mode:horizontal-tb;direction:ltr;transform:rotate(-90deg);transform-origin:center}.cover-preview-zoom input::-webkit-slider-runnable-track{width:100%;height:3px}.cover-preview-zoom input::-webkit-slider-thumb{width:13px;height:13px;margin-top:-5px;border:1px solid rgba(255,255,255,.9);background:#2f6fed}.cover-preview-zoom input::-moz-range-track{width:100%;height:3px}.cover-preview-zoom input::-moz-range-thumb{width:11px;height:11px;border:1px solid rgba(255,255,255,.9);background:#2f6fed}
-.cover-package-head{display:grid;grid-template-columns:180px minmax(0,1fr);align-items:center;gap:20px}.cover-package-head .cover-title-input{max-width:none}.cover-package-toggle{display:flex;align-items:center;gap:10px;width:auto;min-height:38px}.cover-package-toggle strong{font-size:15px;white-space:nowrap}.cover-package-options{display:block;margin-top:14px}.cover-style-controls{display:grid;grid-template-columns:minmax(150px,180px) minmax(210px,1fr) 94px minmax(210px,1fr) 94px;align-items:center;gap:16px 24px}.cover-style-controls label{min-width:0}.cover-style-controls .cover-height,.cover-style-controls .cover-opacity{display:grid;grid-template-columns:auto minmax(76px,1fr) 36px}.cover-style-controls input[type=range]{width:100%}.cover-style-controls input[type=color]{width:28px;height:28px;border-radius:7px}.cover-style-controls select{min-width:92px}
-.cover-style-controls input[type=color]{padding:0;border:0;background:transparent;box-shadow:none}.cover-style-controls input[type=color]::-webkit-color-swatch-wrapper{padding:0}.cover-style-controls input[type=color]::-webkit-color-swatch{border:0;border-radius:6px}.cover-style-controls input[type=color]::-moz-color-swatch{border:0;border-radius:6px}.cover-edge :deep(.select){width:92px}.cover-edge :deep(.select__trigger){min-height:30px;padding:5px 9px;border-radius:8px}
-@media(max-width:760px){.cover-layout{grid-template-columns:1fr}.cover-files{border-right:0;border-bottom:1px solid var(--border);padding:0 0 10px;max-height:150px;overflow:auto}.cover-capture-tabs>button{padding-inline:3px}.cover-capture-run{align-items:stretch;flex-wrap:wrap}.cover-capture-hint{flex-basis:100%}.cover-workspace{grid-template-columns:1fr}.cover-preview-pane{width:min(280px,100%);margin:0 auto}.cover-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.cover-package-head{align-items:flex-start;flex-direction:column;gap:10px}.cover-package-options{display:grid;grid-template-columns:1fr}.cover-title-input{min-width:0;width:100%}.cover-style-controls{gap:9px 12px}.cover-opacity,.cover-height{flex:1 1 180px}.cover-opacity input,.cover-height input{min-width:70px;flex:1}.cover-time{flex:1}.cover-footer{flex-wrap:wrap}.cover-footer__path{flex-basis:100%}.cover-footer>:last-child{margin-left:auto}}
-@media(max-width:1100px){.cover-style-controls{grid-template-columns:repeat(2,minmax(0,1fr))}.cover-style-controls>label:last-child{grid-column:auto}}
-@media(max-width:760px){.cover-package-head{display:grid;grid-template-columns:1fr;gap:10px}.cover-style-controls{grid-template-columns:1fr}.cover-style-controls .cover-height,.cover-style-controls .cover-opacity{grid-template-columns:auto minmax(90px,1fr) 36px}}
+/* ── 浅色工作区：局部变量覆盖，独立于全局深色主题 ── */
+.cover-shell {
+  --c-bg: #f6f7f9;
+  --c-panel: #ffffff;
+  --c-line: #e8eaee;
+  --c-line2: #d8dbe1;
+  --c-text: #1a1d23;
+  --c-muted: #6b7280;
+  --c-faint: #9aa1ac;
+  --c-accent: #1f6feb;
+  --c-accent-soft: rgba(31, 111, 235, 0.08);
+  --c-dark: #0f141a;
+  --c-danger: #dc2626;
+  --c-serif: "Songti SC", "STSong", "Noto Serif SC", serif;
+
+  width: min(900px, 94vw);
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  background: var(--c-bg);
+  color: var(--c-text);
+  border-radius: 22px;
+  overflow: hidden;
+  box-shadow: 0 24px 70px rgba(20, 30, 50, 0.18);
+  font-size: 14px;
+}
+.cover-shell * { box-sizing: border-box; }
+
+/* ── 深色主题：局部变量整体切换，与全局 tokens 的 dark 值一致 ── */
+:root[data-theme="dark"] .cover-shell {
+  --c-bg: #101215;
+  --c-panel: #181b20;
+  --c-line: #2b3038;
+  --c-line2: #3a4250;
+  --c-text: #e7eaf0;
+  --c-muted: #9099a8;
+  --c-faint: #6a7380;
+  --c-accent: #3b82f6;
+  --c-accent-soft: rgba(59, 130, 246, 0.18);
+  --c-dark: #3b82f6;
+  --c-danger: #ef4444;
+}
+:root[data-theme="dark"] .cover-warning {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  border-bottom-color: var(--c-line);
+}
+:root[data-theme="dark"] .c-extract,
+:root[data-theme="dark"] .tb-save-btn,
+:root[data-theme="dark"] .footer-style {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+:root[data-theme="dark"] .c-extract:hover,
+:root[data-theme="dark"] .tb-save-btn:hover {
+  background: #2563eb;
+}
+
+/* 顶栏 */
+.c-top { display: flex; align-items: center; gap: 12px; padding: 11px 20px; background: var(--c-panel); border-bottom: 1px solid var(--c-line); flex-shrink: 0; }
+.c-title { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: 0.2px; white-space: nowrap; }
+.c-spacer { flex: 1; }
+
+/* 左栏：待处理影片 */
+.c-files { border-right: 1px solid var(--c-line); padding: 14px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+.c-files-cap { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--c-muted); margin: 0 6px 2px; }
+.c-files-cap b { color: var(--c-text); font-size: 13px; }
+.c-files-clear { color: var(--c-muted); background: none; border: 0; font-size: 11px; cursor: pointer; font-family: inherit; }
+.c-files-clear:hover { color: var(--c-danger); }
+.c-files-list { display: flex; flex-direction: column; gap: 5px; overflow-y: auto; min-height: 0; flex: 1; }
+.c-file { display: flex; align-items: center; gap: 10px; padding: 8px 11px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; transition: background 0.15s, border-color 0.15s; }
+.c-file:hover { background: var(--c-bg); }
+.c-file.active { background: var(--c-accent-soft); border-color: rgba(31, 111, 235, 0.35); }
+.c-file-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c-line2); flex-shrink: 0; }
+.c-file.active .c-file-dot { background: var(--c-accent); }
+.c-file-info { min-width: 0; flex: 1; }
+.c-file-info b { display: block; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-file-info small { display: block; font-size: 11px; color: var(--c-muted); margin-top: 3px; }
+.c-file-rm { width: 24px; height: 24px; border: 0; border-radius: 7px; background: transparent; color: var(--c-faint); font-size: 13px; cursor: pointer; flex-shrink: 0; opacity: 0; transition: opacity 0.12s; }
+.c-file:hover .c-file-rm { opacity: 1; }
+.c-file-rm:hover { color: var(--c-danger); background: rgba(220, 38, 38, 0.08); }
+.c-file-empty { font-size: 12px; color: var(--c-faint); line-height: 1.7; padding: 10px 8px; }
+
+/* 取帧模式 + 时间输入 */
+.seg { display: flex; gap: 2px; background: var(--c-bg); border: 1px solid var(--c-line); border-radius: 10px; padding: 3px; flex-shrink: 0; }
+.seg button { border: 0; background: transparent; padding: 7px 14px; border-radius: 8px; font-size: 13px; color: var(--c-muted); cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s, box-shadow 0.15s; white-space: nowrap; }
+.seg button.on { background: var(--c-panel); color: var(--c-text); box-shadow: 0 1px 4px rgba(20, 30, 50, 0.08); }
+.time-input { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+.time-input input { width: 46px; padding: 7px 6px; border: 1px solid var(--c-line); border-radius: 8px; background: var(--c-panel); color: var(--c-text); font-size: 13px; text-align: center; outline: none; font-family: inherit; }
+.time-input input:focus { border-color: var(--c-accent); }
+.time-input span { font-size: 11px; color: var(--c-faint); }
+.c-extract { padding: 8px 20px; border: 0; border-radius: 10px; background: var(--c-dark); color: #fff; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: background 0.15s; flex-shrink: 0; }
+.c-extract:hover { background: #1c232c; }
+.c-extract:disabled { opacity: 0.4; cursor: not-allowed; }
+.c-close { width: 34px; height: 34px; border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-panel); color: var(--c-muted); font-size: 14px; cursor: pointer; flex-shrink: 0; }
+.c-close:hover { color: var(--c-text); }
+
+/* ffmpeg 警告 */
+.cover-warning { padding: 8px 20px; border-bottom: 1px solid var(--c-line); background: #fff8ec; color: #b45309; font-size: 12px; line-height: 1.6; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; flex-shrink: 0; }
+
+/* 主体：三栏 */
+.c-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr) 260px; flex: 1; min-height: 0; }
+.c-cands { border-left: 1px solid var(--c-line); padding: 14px 12px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.c-cands-cap { display: flex; justify-content: space-between; font-size: 12px; color: var(--c-muted); margin: 0 6px 2px; }
+.c-cands-cap b { color: var(--c-text); font-size: 13px; }
+.cand-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; overflow-y: auto; min-height: 0; flex: 1; align-content: start; }
+.cand { position: relative; min-width: 0; border: 2px solid transparent; border-radius: 11px; overflow: hidden; cursor: pointer; background: #000; padding: 0; transition: border-color 0.16s, box-shadow 0.16s; }
+.cand:hover { border-color: var(--c-line2); }
+.cand.on { border-color: var(--c-accent); box-shadow: 0 0 0 3px var(--c-accent-soft); }
+.cand img { display: block; width: 100%; aspect-ratio: 4/3; object-fit: cover; }
+.cand-t { position: absolute; left: 7px; bottom: 6px; font-size: 10px; color: #fff; background: rgba(0, 0, 0, 0.58); padding: 2px 6px; border-radius: 5px; }
+.cand-mark { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 50%; background: var(--c-accent); color: #fff; font-size: 10px; display: flex; align-items: center; justify-content: center; opacity: 0; }
+.cand.on .cand-mark { opacity: 1; }
+.cand-rm { position: absolute; right: 6px; bottom: 5px; width: 20px; height: 20px; border: 0; border-radius: 50%; background: rgba(220, 38, 38, 0.85); color: #fff; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.12s; z-index: 2; }
+.cand:hover .cand-rm { opacity: 1; }
+.cand-rm:hover { background: #b91c1c; }
+.cand-empty { font-size: 12px; color: var(--c-faint); line-height: 1.7; padding: 10px 8px; }
+
+/* 分页条 */
+.c-pager { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 4px 0 0; flex-shrink: 0; }
+.c-pager button { width: 26px; height: 26px; border: 1px solid var(--c-line); border-radius: 7px; background: var(--c-panel); color: var(--c-muted); font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: border-color 0.15s, color 0.15s; }
+.c-pager button:hover:not(:disabled) { border-color: var(--c-line2); color: var(--c-text); }
+.c-pager button:disabled { opacity: 0.35; cursor: not-allowed; }
+.c-pager span { font-size: 11px; color: var(--c-faint); }
+
+.c-stage { padding: 12px 14px 14px; display: flex; flex-direction: column; align-items: center; min-width: 0; min-height: 0; overflow-y: auto; }
+.preview-wrap { position: relative; width: min(280px, 100%); flex-shrink: 0; border-radius: 14px; overflow: hidden; background: #000; box-shadow: 0 16px 40px rgba(20, 30, 50, 0.16); cursor: grab; touch-action: none; user-select: none; }
+.preview-wrap.dragging { cursor: grabbing; }
+.preview-wrap canvas { display: block; width: 100%; aspect-ratio: 2/3; pointer-events: none; transition: opacity 0.15s; }
+.preview-wrap canvas.loading { opacity: 0.5; }
+.zoom { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 8px; padding: 7px 11px; border-radius: 999px; background: rgba(10, 14, 22, 0.6); border: 1px solid rgba(255, 255, 255, 0.14); color: #fff; font-size: 11px; cursor: default; }
+.adjust-btn { position: absolute; top: 12px; left: 12px; padding: 5px 13px; border-radius: 999px; background: rgba(10, 14, 22, 0.6); border: 1px solid rgba(255, 255, 255, 0.14); color: #fff; font-size: 11px; cursor: pointer; z-index: 3; backdrop-filter: blur(10px); }
+.adjust-btn.active { background: var(--c-accent); border-color: var(--c-accent); }
+.adjust-reset-btn { position: absolute; top: 12px; left: 72px; padding: 5px 12px; border-radius: 999px; background: rgba(10, 14, 22, 0.6); border: 1px solid rgba(255, 255, 255, 0.14); color: #fff; font-size: 11px; cursor: pointer; z-index: 3; backdrop-filter: blur(10px); }
+.adjust-reset-btn:hover { background: rgba(10, 14, 22, 0.78); }
+.adjust-hint { position: absolute; top: 50px; left: 50%; transform: translateX(-50%); padding: 4px 12px; border-radius: 999px; background: rgba(10, 14, 22, 0.66); border: 1px solid rgba(255, 255, 255, 0.14); color: #fff; font-size: 10px; white-space: nowrap; z-index: 3; pointer-events: none; }
+.zoom input { appearance: none; -webkit-appearance: none; width: 84px; height: 14px; margin: 0; background: transparent; cursor: pointer; }
+.zoom input::-webkit-slider-runnable-track { height: 3px; border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.32); }
+.zoom input::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; margin-top: -4.5px; border: 2px solid rgba(20, 25, 34, 0.48); border-radius: 50%; background: #fff; box-shadow: 0 2px 7px rgba(0, 0, 0, 0.28); transition: transform 0.15s; }
+.zoom input:hover::-webkit-slider-thumb { transform: scale(1.12); }
+.zoom input::-moz-range-track { height: 3px; border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.32); }
+.zoom input::-moz-range-thumb { width: 10px; height: 10px; border: 2px solid rgba(20, 25, 34, 0.48); border-radius: 50%; background: #fff; box-shadow: 0 2px 7px rgba(0, 0, 0, 0.28); }
+.preview-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; color: #fff; background: rgba(5, 7, 12, 0.28); font-size: 13px; pointer-events: none; z-index: 3; }
+.preview-error { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 10px; background: rgba(127, 29, 29, 0.72); color: #fecaca; font-size: 11px; text-align: center; pointer-events: none; z-index: 3; }
+.stage-empty { position: relative; display: flex; align-items: center; justify-content: center; width: min(280px, 100%); aspect-ratio: 2/3; border: 1px dashed var(--c-line2); border-radius: 14px; color: var(--c-muted); font-size: 13px; text-align: center; line-height: 1.9; padding: 20px; }
+.stage-empty-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--c-bg); color: var(--c-muted); font-size: 12px; border-radius: 14px; z-index: 2; }
+.c-spinner { width: 14px; height: 14px; border: 2px solid var(--c-line2); border-top-color: var(--c-accent); border-radius: 50%; animation: c-spin 0.7s linear infinite; display: inline-block; flex-shrink: 0; }
+@keyframes c-spin { to { transform: rotate(360deg); } }
+
+/* 包装设置条：仅一行（开关 + 片名） */
+.stylebar { position: relative; margin-top: 10px; width: min(320px, 100%); display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid var(--c-line); border-radius: 12px; background: var(--c-panel); }
+/* 底栏样式入口：三横图标，面板向上弹出（只遮左栏） */
+.footer-style-wrap { position: relative; flex-shrink: 0; }
+.footer-style { width: 38px; height: 40px; border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-panel); color: var(--c-muted); font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: border-color 0.15s, color 0.15s, background 0.15s; }
+.footer-style:hover, .footer-style.open { color: var(--c-text); border-color: var(--c-line2); background: var(--c-bg); }
+/* 样式浮层面板：浅色、竖列、在左栏内左右等距居中 */
+.style-panel { position: absolute; bottom: calc(100% + 8px); left: -10px; width: 260px; display: flex; flex-direction: column; gap: 7px; padding: 12px; border-radius: 12px; background: var(--c-panel); color: var(--c-text); border: 1px solid var(--c-line); box-shadow: 0 14px 34px rgba(20, 30, 50, 0.14); z-index: 30; }
+.style-panel::after { content: ""; position: absolute; top: 100%; left: 36px; border: 5px solid transparent; border-top-color: var(--c-panel); }
+.sp-item { display: flex; align-items: center; gap: 10px; min-height: 30px; }
+.sp-ic { width: 16px; font-size: 13px; color: var(--c-muted); text-align: center; flex-shrink: 0; }
+.sp-label { width: 40px; font-size: 12px; color: var(--c-muted); flex-shrink: 0; }
+.sp-toggle { flex: 1; min-width: 0; display: flex; border: 1px solid var(--c-line); border-radius: 7px; overflow: hidden; }
+.sp-toggle button { flex: 1; padding: 5px 0; border: 0; background: var(--c-bg); color: var(--c-muted); font-size: 12px; cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s; }
+.sp-toggle button + button { border-left: 1px solid var(--c-line); }
+.sp-toggle button.on { background: var(--c-accent); color: #fff; }
+.sp-item input[type="range"] { appearance: none; -webkit-appearance: none; flex: 1; min-width: 0; height: 18px; margin: 0; background: transparent; cursor: pointer; }
+.sp-item input[type="range"]::-webkit-slider-runnable-track { height: 3px; border: 0; border-radius: 999px; background: var(--c-line2); }
+.sp-item input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 13px; height: 13px; margin-top: -5px; border: 2px solid #fff; border-radius: 50%; background: var(--c-accent); box-shadow: 0 1px 4px rgba(20, 30, 50, 0.22); transition: transform 0.15s; }
+.sp-item input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.12); }
+.sp-item input[type="range"]::-moz-range-track { height: 3px; border: 0; border-radius: 999px; background: var(--c-line2); }
+.sp-item input[type="range"]::-moz-range-thumb { width: 11px; height: 11px; border: 2px solid #fff; border-radius: 50%; background: var(--c-accent); box-shadow: 0 1px 4px rgba(20, 30, 50, 0.22); }
+.sp-item input[type="color"] { width: 46px; height: 26px; border: 1px solid var(--c-line); border-radius: 6px; padding: 2px; background: var(--c-bg); cursor: pointer; }
+/* 色块选择：自定义色板，无原生控件兼容问题 */
+.sp-swatch-btn { flex: 1; min-width: 0; height: 26px; border: 1px solid var(--c-line); border-radius: 6px; cursor: pointer; padding: 0; }
+.sp-swatch-btn.open { outline: 2px solid var(--c-accent); outline-offset: 1px; }
+.sp-palette { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; padding: 10px; border: 1px solid var(--c-line); border-radius: 8px; background: var(--c-bg); }
+.sp-palette-cell { width: 100%; aspect-ratio: 1; border: 1px solid var(--c-line2); border-radius: 5px; cursor: pointer; padding: 0; }
+.sp-palette-cell.sel { outline: 2px solid var(--c-accent); outline-offset: 1px; }
+.sp-item small { width: 42px; text-align: right; font-size: 11px; color: var(--c-faint); flex-shrink: 0; }
+.sp-save { width: 100%; padding: 7px; border: 1px solid var(--c-line); border-radius: 8px; background: var(--c-bg); color: var(--c-muted); font-size: 12px; cursor: pointer; font-family: inherit; transition: border-color 0.15s, color 0.15s; margin-top: 2px; }
+.sp-save:hover { color: var(--c-text); border-color: var(--c-line2); }
+.tb-switch { display: flex; align-items: center; gap: 9px; cursor: pointer; flex-shrink: 0; user-select: none; }
+.tb-switch input { display: none; }
+.tb-track { width: 36px; height: 20px; border-radius: 999px; background: var(--c-line2); position: relative; transition: background 0.2s; flex-shrink: 0; }
+.tb-track::after { content: ""; position: absolute; top: 2.5px; left: 3px; width: 15px; height: 15px; border-radius: 50%; background: #fff; transition: left 0.2s; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); }
+.tb-switch.on .tb-track { background: var(--c-accent); }
+.tb-switch.on .tb-track::after { left: 18px; }
+.tb-switch b { font-size: 12.5px; font-weight: 600; }
+.tb-title { flex: 1; min-width: 80px; max-width: 170px; }
+.tb-title input { width: 100%; border: 0; border-bottom: 1px solid var(--c-line2); background: transparent; padding: 5px 2px; font-size: 14px; font-family: var(--c-serif); color: var(--c-text); outline: none; transition: border-color 0.15s; }
+.tb-title input:focus { border-color: var(--c-accent); }
+.tb-title input::placeholder { color: var(--c-faint); }
+/* 底栏：仅保存（目录全宽 + 保存按钮） */
+.c-footer { display: flex; align-items: center; gap: 12px; padding: 10px 20px; border-top: 1px solid var(--c-line); background: var(--c-panel); flex-shrink: 0; }
+.tb-path { flex: 1; min-width: 0; }
+.tb-save-btn { padding: 10px 26px; border: 0; border-radius: 10px; background: var(--c-dark); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background 0.15s; }
+.tb-save-btn:hover { background: #1c232c; }
+.tb-save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 卡片开关（保持原样） */
+.check-toggle { width: 28px; height: 28px; border-radius: 50%; border: 0; padding: 0; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; background: var(--border); color: var(--text-muted); transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease; }
+.check-toggle svg { width: 14px; height: 14px; }
+.check-toggle:hover { background: var(--surface-hover); }
+.check-toggle.on { background: var(--success); color: #fff; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.16); }
+.check-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+
+@media (max-width: 900px) {
+  /* 小屏：弹窗交给页面纵向滚动，横向永不溢出 */
+  .cover-shell { max-height: none; overflow-x: hidden; overflow-y: visible; }
+  .c-layout { grid-template-columns: 1fr; }
+  .c-files { border-right: 0; border-bottom: 1px solid var(--c-line); padding: 14px; max-height: 210px; overflow: hidden; }
+  .c-files-list { flex-direction: column; overflow: hidden; }
+  .c-file { flex-shrink: 0; }
+  .c-stage { overflow: visible; padding: 16px 14px 14px; }
+  .preview-wrap { width: min(300px, 84vw); touch-action: pan-y; }
+  .preview-wrap.adjust-mode { touch-action: none; }
+  .stage-empty { width: min(300px, 84vw); }
+  .stylebar { width: min(300px, 84vw); }
+  .c-cands { border-left: 0; border-top: 1px solid var(--c-line); padding: 14px; }
+  .cand-list { grid-template-columns: repeat(2, minmax(0, 1fr)); overflow-y: auto; align-content: start; }
+  .cand { min-width: 0; }
+  .c-files-list, .cand-list { scrollbar-width: none; }
+  .c-files-list::-webkit-scrollbar, .cand-list::-webkit-scrollbar { display: none; }
+  .c-top { flex-wrap: wrap; gap: 8px; }
+  .seg button { padding: 6px 10px; font-size: 12px; }
+  .time-input input { width: 40px; }
+  .c-extract { padding: 8px 14px; }
+  .c-footer { flex-wrap: wrap; gap: 12px; }
+}
 </style>

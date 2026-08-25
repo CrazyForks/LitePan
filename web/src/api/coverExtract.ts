@@ -3,6 +3,7 @@ import { http } from "./client";
 export interface CoverFrame { id: string; time_ms: number }
 export interface CoverFile { id: string; account_id: number; file_id: string; parent_id: string; target_parent_id: string; target_path: string; name: string; size: number; status: string; error?: string; duration_ms?: number; frames: CoverFrame[] }
 export interface CoverRuntime { enabled: boolean; ready: boolean; error?: string; manual_path: string; auto_download_available: boolean }
+export interface CoverStyle { shape: "slant" | "straight"; height: number; panel_color: string; opacity: number; text_color: string; packaged: boolean }
 
 const base = "/admin/tools/cover-extract";
 export const coverExtractApi = {
@@ -10,10 +11,13 @@ export const coverExtractApi = {
   add: (payload: { account_id: number; file_id: string; parent_id: string; directory_chain: Array<{ id: string; name: string }> }) => http.post<CoverFile>(`${base}/files`, payload),
   setTarget: (id: string, payload: { parent_id: string; path: string }) => http.put<CoverFile>(`${base}/files/${encodeURIComponent(id)}/target`, payload),
   remove: (id: string) => http.del<{ ok: boolean }>(`${base}/files/${encodeURIComponent(id)}`),
+  removeFrame: (id: string, frameID: string) => http.del<{ ok: boolean }>(`${base}/files/${encodeURIComponent(id)}/frames/${encodeURIComponent(frameID)}`),
   clear: () => http.del<{ ok: boolean }>(`${base}/files`),
   runtime: () => http.get<CoverRuntime>(`${base}/runtime`),
   setEnabled: (enabled: boolean) => http.put<CoverRuntime>(`${base}/enabled`, { enabled }),
   download: () => http.post<CoverRuntime>(`${base}/runtime/download`),
+  getStyle: () => http.get<CoverStyle>(`${base}/style`),
+  saveStyle: (payload: CoverStyle) => http.put<CoverStyle>(`${base}/style`, payload),
   extract: (payload: { session_file_id: string; mode: "uniform" | "head_tail" | "timestamp"; count?: number; timestamp_ms?: number }) => http.post<CoverFile>(`${base}/extract`, payload),
   save: (payload: { session_file_id: string; frame_id: string; overwrite: boolean }) => http.post<{ ok: boolean; conflict?: boolean; filename: string }>(`${base}/save`, payload),
   saveComposed: (payload: { session_file_id: string; frame_id: string; overwrite: boolean }, poster: Blob) => {

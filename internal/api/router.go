@@ -359,6 +359,7 @@ func NewRouter(d Deps) http.Handler {
 					r.Post("/files", h.addCoverExtractFile)
 					r.Delete("/files", h.clearCoverExtractFiles)
 					r.Delete("/files/{id}", h.removeCoverExtractFile)
+					r.Delete("/files/{id}/frames/{frameID}", h.removeCoverFrame)
 					r.Put("/files/{id}/target", h.updateCoverExtractTarget)
 					r.Post("/extract", h.extractCoverFrames)
 					r.Get("/images/{id}", h.coverExtractImage)
@@ -366,6 +367,8 @@ func NewRouter(d Deps) http.Handler {
 					r.Post("/save-composed", h.saveComposedCover)
 					r.Get("/runtime", h.coverExtractRuntime)
 					r.Post("/runtime/download", h.downloadCoverExtractRuntime)
+					r.Get("/style", h.getCoverStyle)
+					r.Put("/style", h.putCoverStyle)
 				})
 				r.Route("/media-organize", func(r chi.Router) {
 					r.Get("/tasks", h.listMediaOrganizeTasks)

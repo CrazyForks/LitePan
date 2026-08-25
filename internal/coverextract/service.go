@@ -225,6 +225,32 @@ func (s *Service) Remove(id string) {
 		delete(s.files, id)
 	}
 }
+
+// RemoveFrame 移除某视频的单个候选画面（同时释放图片缓存）。
+func (s *Service) RemoveFrame(sessionID, frameID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f := s.files[sessionID]
+	if f == nil {
+		return domain.Errorf(domain.CodeNotFound, "视频不在视频海报生成列表中")
+	}
+	kept := f.Frames[:0]
+	removed := false
+	for _, fr := range f.Frames {
+		if fr.ID == frameID {
+			s.removeFrameLocked(fr.ID)
+			removed = true
+			continue
+		}
+		kept = append(kept, fr)
+	}
+	if !removed {
+		return domain.Errorf(domain.CodeNotFound, "候选画面不存在")
+	}
+	f.Frames = kept
+	f.TouchedAt = time.Now().Unix()
+	return nil
+}
 func (s *Service) Clear() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

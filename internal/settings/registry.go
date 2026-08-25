@@ -53,6 +53,7 @@ const (
 	KeyLocalUploadEnabled          = "local_upload_enabled"
 	KeyLocalUploadMappings         = "local_upload_mappings"
 	KeyCoverExtractEnabled         = "cover_extract_enabled"
+	KeyCoverExtractStyle           = "cover_extract_style"
 	KeyQuarkTVEnabled              = "quark_tv_enabled"
 	KeyStrmScrapeWriteMode         = "strm_scrape_write_mode"
 
@@ -284,6 +285,13 @@ func defaultSpecs() []Spec {
 			Key:     KeyCoverExtractEnabled,
 			Type:    TypeBool,
 			Default: "false",
+			Hidden:  true,
+		},
+		{
+			// 海报默认样式（JSON）：shape/height/panel_color/opacity/text_color/packaged
+			Key:     KeyCoverExtractStyle,
+			Type:    TypeString,
+			Default: "",
 			Hidden:  true,
 		},
 		{

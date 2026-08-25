@@ -2,9 +2,11 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
 	"image/jpeg"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -13,6 +15,82 @@ import (
 	"litepan/internal/domain"
 	"litepan/internal/settings"
 )
+
+// ── 海报默认样式持久化 ──
+
+var (
+	coverStyleShapeSet = map[string]struct{}{"slant": {}, "straight": {}}
+	coverHexColorRe    = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+)
+
+type coverStylePayload struct {
+	Shape      string  `json:"shape"`
+	Height     float64 `json:"height"`
+	PanelColor string  `json:"panel_color"`
+	Opacity    float64 `json:"opacity"`
+	TextColor  string  `json:"text_color"`
+	Packaged   bool    `json:"packaged"`
+}
+
+func defaultCoverStyle() coverStylePayload {
+	return coverStylePayload{Shape: "slant", Height: 0.22, PanelColor: "#3C4CC3", Opacity: 0.8, TextColor: "#fffdf8", Packaged: false}
+}
+
+func sanitizeCoverStyle(s coverStylePayload) coverStylePayload {
+	d := defaultCoverStyle()
+	if _, ok := coverStyleShapeSet[s.Shape]; !ok {
+		s.Shape = d.Shape
+	}
+	if s.Height < 0.15 || s.Height > 0.3 {
+		s.Height = d.Height
+	}
+	if s.Opacity < 0 || s.Opacity > 1 {
+		s.Opacity = d.Opacity
+	}
+	if !coverHexColorRe.MatchString(s.PanelColor) {
+		s.PanelColor = d.PanelColor
+	}
+	if !coverHexColorRe.MatchString(s.TextColor) {
+		s.TextColor = d.TextColor
+	}
+	return s
+}
+
+func (h *Handler) getCoverStyle(w http.ResponseWriter, r *http.Request) {
+	out := defaultCoverStyle()
+	if h.settings != nil {
+		if raw := h.settings.String(settings.KeyCoverExtractStyle); raw != "" {
+			var got coverStylePayload
+			if json.Unmarshal([]byte(raw), &got) == nil {
+				out = sanitizeCoverStyle(got)
+			}
+		}
+	}
+	writeOK(w, out)
+}
+
+func (h *Handler) putCoverStyle(w http.ResponseWriter, r *http.Request) {
+	var req coverStylePayload
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if h.settings == nil {
+		writeErr(w, domain.Errorf(domain.CodeInternal, "设置服务未初始化"))
+		return
+	}
+	req = sanitizeCoverStyle(req)
+	raw, err := json.Marshal(req)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if err := h.settings.Update(r.Context(), map[string]string{settings.KeyCoverExtractStyle: string(raw)}); err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeOK(w, req)
+}
 
 func (h *Handler) coverExtractEnabled() bool {
 	return h.settings != nil && h.settings.Bool(settings.KeyCoverExtractEnabled)
@@ -82,6 +160,13 @@ func (h *Handler) listCoverExtractFiles(w http.ResponseWriter, _ *http.Request) 
 }
 func (h *Handler) removeCoverExtractFile(w http.ResponseWriter, r *http.Request) {
 	h.coverExtract.Remove(chi.URLParam(r, "id"))
+	writeOK(w, map[string]bool{"ok": true})
+}
+func (h *Handler) removeCoverFrame(w http.ResponseWriter, r *http.Request) {
+	if err := h.coverExtract.RemoveFrame(chi.URLParam(r, "id"), chi.URLParam(r, "frameID")); err != nil {
+		writeErr(w, err)
+		return
+	}
 	writeOK(w, map[string]bool{"ok": true})
 }
 func (h *Handler) clearCoverExtractFiles(w http.ResponseWriter, _ *http.Request) {
