@@ -108,7 +108,7 @@ func inspectArchiveSource(source archiveSource) (payloadFile, error) {
 func zipHeader(name string) *zip.FileHeader {
 	header := &zip.FileHeader{Name: name, Method: zip.Store}
 	header.SetMode(0o600)
-	header.SetModTime(time.Unix(0, 0).UTC())
+	header.Modified = time.Unix(0, 0).UTC()
 	return header
 }
 

@@ -133,7 +133,7 @@ func pruneDirCache(ctx context.Context, deps ScanDeps, task *domain.StrmTask, en
 	}
 	// 规模保护：本次清单实际覆盖的目录数不足已有缓存的一半时，判定为拉取不完整，
 	// 跳过清理，避免把未扫到的目录误判为“已删除”而清掉映射。
-	if len(seen) > 0 && len(seen) < len(existing)/2 {
+	if len(seen) > 0 && len(seen)*2 < len(existing) {
 		return nil
 	}
 	var stale []string

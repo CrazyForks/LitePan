@@ -387,18 +387,24 @@ async function testFnos() {
 }
 
 async function setFnosEnabled(enabled: boolean) {
-  fnosEnabled.value = enabled;
-  await saveFnosConfig({
-    enabled,
-    name: fnosForm.name,
-    fnos_url: fnosForm.fnos_url,
-    proxy_port: fnosForm.proxy_port,
-    strm_path_maps: fnosForm.strm_path_maps,
-    direct_strm_clients: fnosForm.direct_strm_clients,
-  })
-    .then(applyFnos)
-    .then(() => toast.success(enabled ? "飞牛影视反代已启用" : "飞牛影视反代已停用"))
-    .catch((error) => toast.error(getApiErrorMessage(error, "保存飞牛影视配置失败")));
+  if (fnosSaving.value) return;
+  fnosSaving.value = true;
+  try {
+    const saved = await saveFnosConfig({
+      enabled,
+      name: fnosForm.name,
+      fnos_url: fnosForm.fnos_url,
+      proxy_port: fnosForm.proxy_port,
+      strm_path_maps: fnosForm.strm_path_maps,
+      direct_strm_clients: fnosForm.direct_strm_clients,
+    });
+    applyFnos(saved);
+    toast.success(enabled ? "飞牛影视反代已启用" : "飞牛影视反代已停用");
+  } catch (error) {
+    toast.error(getApiErrorMessage(error, "保存飞牛影视配置失败"));
+  } finally {
+    fnosSaving.value = false;
+  }
 }
 
 /* ── 通用 ── */

@@ -161,7 +161,10 @@ func (s *Service) Test(ctx context.Context, in UpdateRequest) error {
 	if s == nil {
 		return domain.Errorf(domain.CodeInternal, "AI 辅助增强服务未就绪")
 	}
-	stored := s.runtimeConfig()
+	stored, found := s.storedConfigForTest(in.ID)
+	if strings.TrimSpace(in.ID) != "" && !found {
+		return domain.Errorf(domain.CodeNotFound, "AI 模型配置已不存在，请刷新后重试")
+	}
 	cfg := Config{
 		BaseURL: strings.TrimSpace(in.BaseURL),
 		APIKey:  strings.TrimSpace(in.APIKey),

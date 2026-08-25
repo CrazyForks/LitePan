@@ -99,6 +99,10 @@ func (s *Service) Replace(ctx context.Context, enabled bool, inputs []UpdateRequ
 	}
 	// 保证有且仅有一个默认项（读取与保存都收敛，脏数据也不残留多条）。
 	instances = normalizeDefault(instances)
+	// 删除最后一条配置时同步停用功能，避免出现“开关已启用但没有可用模型”的矛盾状态。
+	if len(instances) == 0 {
+		enabled = false
+	}
 	raw, err := json.Marshal(instances)
 	if err != nil {
 		return State{}, domain.Wrap(domain.CodeInternal, err)
@@ -106,6 +110,8 @@ func (s *Service) Replace(ctx context.Context, enabled bool, inputs []UpdateRequ
 	if err := s.settings.Update(ctx, map[string]string{
 		settings.KeyAIOrganizeEnabled:   boolString(enabled),
 		settings.KeyAIOrganizeInstances: string(raw),
+		// 多配置一旦保存即以 instances 为唯一数据源；清掉旧单配置密钥，避免空列表时旧配置复活。
+		settings.KeyAIOrganizeAPIKey: "",
 	}); err != nil {
 		return State{}, err
 	}
@@ -118,10 +124,7 @@ func (s *Service) Update(ctx context.Context, in UpdateRequest) (State, error) {
 	items := make([]UpdateRequest, 0, len(stored.Items)+1)
 	replaced := false
 	for _, inst := range stored.Items {
-		req := UpdateRequest{
-			ID: inst.ID, Name: inst.Name, BaseURL: inst.BaseURL,
-			APIKey: inst.APIKey, Model: inst.Model, Default: inst.Default,
-		}
+		req := UpdateRequest(inst)
 		if in.ID != "" && inst.ID == in.ID {
 			req = in
 			replaced = true
@@ -152,6 +155,29 @@ func (s *Service) runtimeConfig() Config {
 	return Config{}
 }
 
+// storedConfigForTest 按配置 ID 返回测试所需的原始密钥；空 ID 兼容旧单配置调用，使用默认项。
+func (s *Service) storedConfigForTest(id string) (Config, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		cfg := s.runtimeConfig()
+		return cfg, cfg.BaseURL != "" || cfg.APIKey != "" || cfg.Model != ""
+	}
+	if s == nil || s.settings == nil {
+		return Config{}, false
+	}
+	for _, inst := range s.instancesFromSettings() {
+		if inst.ID == id {
+			return Config{
+				Enabled: s.settings.Bool(settings.KeyAIOrganizeEnabled),
+				BaseURL: strings.TrimSpace(inst.BaseURL),
+				APIKey:  strings.TrimSpace(inst.APIKey),
+				Model:   strings.TrimSpace(inst.Model),
+			}, true
+		}
+	}
+	return Config{}, false
+}
+
 // instancesFromSettings 读取配置列表；空列表时从旧散键构建单条（老库迁移兜底）。
 // 返回前保证恰好一个默认项（脏数据多条默认时收敛为最后一条）。
 func (s *Service) instancesFromSettings() []Instance {
@@ -168,7 +194,8 @@ func (s *Service) instancesFromSettings() []Instance {
 	baseURL := strings.TrimSpace(s.settings.String(settings.KeyAIOrganizeBaseURL))
 	apiKey := strings.TrimSpace(s.settings.String(settings.KeyAIOrganizeAPIKey))
 	model := strings.TrimSpace(s.settings.String(settings.KeyAIOrganizeModel))
-	if baseURL == "" && apiKey == "" && model == "" {
+	// 旧单配置只有在确实保存过密钥时才迁移；默认 URL/模型不能凭空构造一条配置。
+	if apiKey == "" {
 		return nil
 	}
 	return []Instance{{

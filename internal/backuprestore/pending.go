@@ -290,15 +290,7 @@ func finishPendingRestore(pendingPath, resultPath, stageDir string, result resto
 }
 
 func statusFromResult(result restoreResult) Status {
-	return Status{
-		State:        result.State,
-		Message:      result.Message,
-		BackupID:     result.BackupID,
-		BackupNote:   result.BackupNote,
-		Scope:        result.Scope,
-		RestoreAdmin: result.RestoreAdmin,
-		UpdatedAt:    result.UpdatedAt,
-	}
+	return Status(result)
 }
 
 func pruneRollbackDirs(root string, keep int, log *slog.Logger) {

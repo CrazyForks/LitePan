@@ -250,7 +250,10 @@ func (s *Service) cleanupCoverExtractTemp(item planItem) (CleanupItemResult, err
 	if !directChildOf(root, path) {
 		return result, fmt.Errorf("封面提取临时路径无效")
 	}
-	info, err := os.Stat(path)
+	if !s.validCoverExtractTemp(root, filepath.Base(path)) {
+		return result, fmt.Errorf("封面提取临时文件名无效")
+	}
+	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		result.Status, result.Message = "skipped", "文件已不存在"
 		return result, nil
@@ -258,8 +261,8 @@ func (s *Service) cleanupCoverExtractTemp(item planItem) (CleanupItemResult, err
 	if err != nil {
 		return result, err
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		result.Status, result.Message = "skipped", "符号链接不参与清理"
+	if !info.Mode().IsRegular() {
+		result.Status, result.Message = "skipped", "目标不再是普通文件"
 		return result, nil
 	}
 	if !info.ModTime().Before(time.Now().Add(-coverExtractTempMinAge)) {

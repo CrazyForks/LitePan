@@ -167,19 +167,40 @@ function removeRule(rules: ClassificationRule[], index: number) {
 
 // 删除一级后修正选中
 function removeRoot(template: ClassificationTemplate, index: number) {
+  const activeRoot = template.rules[selectedRootIdx.value];
+  const removedRoot = template.rules[index];
   removeRule(template.rules, index);
-  if (index === selectedRootIdx.value) {
-    if (template.rules.length) selectRoot(Math.min(index, template.rules.length - 1));
-    else { selectedRootIdx.value = -1; selectedChildIdx.value = -1; }
+  if (!template.rules.length) {
+    selectedRootIdx.value = -1;
+    selectedChildIdx.value = -1;
+    folded.value = {};
+    return;
   }
+  if (activeRoot && activeRoot !== removedRoot) {
+    const nextIndex = template.rules.indexOf(activeRoot);
+    if (nextIndex >= 0) {
+      selectedRootIdx.value = nextIndex;
+      collapseOthers(nextIndex);
+      return;
+    }
+  }
+  selectRoot(Math.min(index, template.rules.length - 1));
 }
 
 // 删除二级后修正选中
 function removeChild(rule: ClassificationRule, childIdx: number) {
+  const children = rule.children ?? [];
+  const rootIdx = selectedTemplate.value?.rules.indexOf(rule) ?? -1;
+  const isActiveRoot = selectedRootIdx.value === rootIdx;
+  const activeChild = isActiveRoot ? children[selectedChildIdx.value] : undefined;
+  const removedChild = children[childIdx];
   removeRule(rule.children ?? [], childIdx);
-  if (childIdx === selectedChildIdx.value && selectedRootIdx.value === selectedTemplate.value?.rules.indexOf(rule)) {
-    selectedChildIdx.value = -1;
+  if (!isActiveRoot) return;
+  if (activeChild && activeChild !== removedChild) {
+    selectedChildIdx.value = (rule.children ?? []).indexOf(activeChild);
+    return;
   }
+  selectedChildIdx.value = -1;
 }
 
 function objectStringValues(value: unknown, key: string) {

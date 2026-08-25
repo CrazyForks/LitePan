@@ -203,13 +203,36 @@ func treeContainsOnlySystemJunk(root string) bool {
 // scanCoverExtractTemps 扫描封面提取崩溃残留：data/coverextract 的 cover-*.jpg 与 data/tools 的 ffmpeg-*.gz / ffmpeg-*.tmp（超过 1 小时即视为异常中断残留）。
 func (s *Service) scanCoverExtractTemps() []planItem {
 	var out []planItem
-	out = append(out, s.scanDirStaleFiles(filepath.Join(s.opts.DataDir, "coverextract"), "cover-", "封面提取残留文件")...)
-	out = append(out, s.scanDirStaleFiles(filepath.Join(s.opts.DataDir, "tools"), "ffmpeg-", "封面提取残留文件")...)
+	out = append(out, s.scanDirStaleFiles(filepath.Join(s.opts.DataDir, "coverextract"), isCoverExtractImageTemp, "封面提取残留文件")...)
+	out = append(out, s.scanDirStaleFiles(filepath.Join(s.opts.DataDir, "tools"), isFFmpegInstallTemp, "封面提取残留文件")...)
 	return out
 }
 
-// scanDirStaleFiles 扫描 root 下以 prefix 开头、修改时间超过 1 小时的普通文件（不跟随符号链接）。
-func (s *Service) scanDirStaleFiles(root, prefix, name string) []planItem {
+func isCoverExtractImageTemp(name string) bool {
+	return strings.HasPrefix(name, "cover-") && strings.EqualFold(filepath.Ext(name), ".jpg")
+}
+
+func isFFmpegInstallTemp(name string) bool {
+	if !strings.HasPrefix(name, "ffmpeg-") {
+		return false
+	}
+	ext := strings.ToLower(filepath.Ext(name))
+	return ext == ".gz" || ext == ".tmp"
+}
+
+func (s *Service) validCoverExtractTemp(root, name string) bool {
+	switch filepath.Clean(root) {
+	case filepath.Clean(filepath.Join(s.opts.DataDir, "coverextract")):
+		return isCoverExtractImageTemp(name)
+	case filepath.Clean(filepath.Join(s.opts.DataDir, "tools")):
+		return isFFmpegInstallTemp(name)
+	default:
+		return false
+	}
+}
+
+// scanDirStaleFiles 扫描 root 下匹配指定规则、修改时间超过 1 小时的普通文件（不跟随符号链接）。
+func (s *Service) scanDirStaleFiles(root string, match func(string) bool, name string) []planItem {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil
@@ -220,7 +243,7 @@ func (s *Service) scanDirStaleFiles(root, prefix, name string) []planItem {
 		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
 			continue
 		}
-		if !strings.HasPrefix(entry.Name(), prefix) {
+		if !match(entry.Name()) {
 			continue
 		}
 		info, err := entry.Info()

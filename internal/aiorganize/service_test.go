@@ -265,6 +265,51 @@ func TestConfigCannotEnableWhenIncomplete(t *testing.T) {
 	}
 }
 
+func TestReplaceDisablesFeatureWhenLastInstanceRemoved(t *testing.T) {
+	svc := newTestService(t, nil)
+	state, err := svc.Replace(context.Background(), true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Enabled || len(state.Items) != 0 {
+		t.Fatalf("删除最后一条配置后应同步停用功能: %+v", state)
+	}
+	if svc.Available() {
+		t.Fatal("没有配置时 AI 辅助增强不应保持可用")
+	}
+}
+
+func TestConnectionTestUsesRequestedNonDefaultInstance(t *testing.T) {
+	settingsSvc, err := settings.New(context.Background(), &configRepo{values: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(settingsSvc)
+	state, err := svc.Replace(context.Background(), true, []UpdateRequest{
+		{Name: "默认模型", BaseURL: "https://default.invalid/v1", APIKey: "default-key", Model: "default-model", Default: true},
+		{Name: "备用模型", BaseURL: "https://secondary.invalid/v1", APIKey: "secondary-key", Model: "secondary-model"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondary := state.Items[1]
+	svc.http = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Host != "secondary.invalid" {
+			t.Fatalf("连接测试请求了错误配置: host=%s", req.URL.Host)
+		}
+		if got := req.Header.Get("Authorization"); got != "Bearer secondary-key" {
+			t.Fatalf("连接测试使用了错误密钥: %q", got)
+		}
+		return chatHTTPResponse(t, `{"ok":true}`), nil
+	})}
+	if err := svc.Test(context.Background(), UpdateRequest{
+		ID: secondary.ID, Name: secondary.Name, BaseURL: secondary.BaseURL,
+		APIKey: secondary.APIKey, Model: secondary.Model,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReplaceUsesDefaultInstanceAtRuntime(t *testing.T) {
 	settingsSvc, err := settings.New(context.Background(), &configRepo{values: map[string]string{
 		settings.KeyAIOrganizeEnabled: "true",

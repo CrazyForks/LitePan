@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"litepan/internal/domain"
 	"litepan/internal/driver"
 )
 
@@ -13,42 +14,60 @@ const fullListPageSize = 1150
 
 // ListAllFiles 使用 cur=0 让服务端递归展开 rootID 下全部文件，分页拉取。
 // 该模式不返回文件夹，条目自带 pid，由上层结合 pid→路径 缓存还原目录结构。
-// 完整性策略：第一页即拿到接口 Count 作为总数，按“页数 = 总数/页大小”固定拉满每一页，
-// 不再用“本页不足页大小就提前停”的短页判断——115 单页可能因厂商缓存/并发滞后返回不足
-// 一页但后面仍有数据，短页提前停会导致清单不完整，进而让上层把未扫到的目录误判为已删除。
-// 每页仍以空页作为兜底终点，避免依赖不可信的 Count 死循环。
+// 完整性策略：只以空页作为结束信号，不把 Count 或短页当作可靠终点。115 的 Count 可能因
+// 厂商缓存或并发变更暂时偏小；若据此提前停止，会让上层把未扫到的目录误判为已删除。
 func (d *Driver) ListAllFiles(ctx context.Context, rootID string) ([]driver.FullListEntry, error) {
 	root := d.normalizeParent(rootID)
-	var entries []driver.FullListEntry
-	offset := 0
-	total := int64(-1)
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
+	return collectFullListPages(ctx, func(ctx context.Context, offset, limit int) (listPageResp, error) {
 		query := urlValues(map[string]string{
 			"cid":      root,
-			"limit":    strconv.Itoa(fullListPageSize),
+			"limit":    strconv.Itoa(limit),
 			"offset":   strconv.Itoa(offset),
 			"show_dir": "0",
 			"cur":      "0",
 		})
 		var page listPageResp
 		if err := d.apiCallFull(ctx, http.MethodGet, pathList, query, nil, &page); err != nil {
+			return listPageResp{}, err
+		}
+		return page, nil
+	})
+}
+
+type fullListPageFetcher func(context.Context, int, int) (listPageResp, error)
+
+// collectFullListPages 独立承载完整性敏感的分页逻辑，便于对短页、错误 Count 和重复页做回归验证。
+func collectFullListPages(ctx context.Context, fetch fullListPageFetcher) ([]driver.FullListEntry, error) {
+	var entries []driver.FullListEntry
+	offset := 0
+	seenIDs := make(map[string]struct{})
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		page, err := fetch(ctx, offset, fullListPageSize)
+		if err != nil {
 			return nil, err
 		}
 		if len(page.Data) == 0 {
 			break
 		}
-		if total < 0 && page.Count > 0 {
-			total = page.Count
-		}
+		newIDs := 0
 		for _, f := range page.Data {
+			fileID := strings.TrimSpace(f.entryID())
+			if fileID == "" {
+				return nil, domain.Errorf(domain.CodeDriverError, "115 全量清单返回了缺少文件 ID 的条目，已停止扫描")
+			}
+			if _, duplicate := seenIDs[fileID]; duplicate {
+				continue
+			}
+			seenIDs[fileID] = struct{}{}
+			newIDs++
 			if isTrashed(f) {
 				continue
 			}
 			entries = append(entries, driver.FullListEntry{
-				FileID:   f.entryID(),
+				FileID:   fileID,
 				ParentID: f.parentID(),
 				Name:     f.entryName(),
 				Size:     f.entrySize(),
@@ -57,10 +76,10 @@ func (d *Driver) ListAllFiles(ctx context.Context, rootID string) ([]driver.Full
 				MTime:    f.entryMTime(),
 			})
 		}
-		offset += len(page.Data)
-		if total > 0 && int64(offset) >= total {
-			break
+		if newIDs == 0 {
+			return nil, domain.Errorf(domain.CodeDriverError, "115 全量清单分页重复，已停止扫描以避免使用不完整结果")
 		}
+		offset += len(page.Data)
 	}
 	return entries, nil
 }

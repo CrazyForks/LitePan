@@ -113,3 +113,28 @@ func TestPruneDirCacheKeepsAtThresholdHalf(t *testing.T) {
 		t.Fatal("清单覆盖一半时不应触发保护，d4 应被清理")
 	}
 }
+
+func TestPruneDirCacheProtectsBelowHalfWithOddExistingCount(t *testing.T) {
+	cache := newMemDirCache()
+	ctx := context.Background()
+	_ = cache.UpsertBatch(ctx, []domain.StrmDirCacheEntry{
+		{AccountID: 1, DirID: "d1", DirPath: "root/x/d1"},
+		{AccountID: 1, DirID: "d2", DirPath: "root/x/d2"},
+		{AccountID: 1, DirID: "d3", DirPath: "root/x/d3"},
+		{AccountID: 1, DirID: "d4", DirPath: "root/x/d4"},
+		{AccountID: 1, DirID: "d5", DirPath: "root/x/d5"},
+	})
+	entries := []driver.FullListEntry{
+		{FileID: "f1", ParentID: "d1", Name: "1.mkv"},
+		{FileID: "f2", ParentID: "d2", Name: "2.mkv"},
+	}
+	task := &domain.StrmTask{AccountID: 1, Path: "/root"}
+	if err := pruneDirCache(ctx, ScanDeps{DirCache: cache}, task, entries); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"d1", "d2", "d3", "d4", "d5"} {
+		if _, ok, _ := cache.Get(ctx, 1, id); !ok {
+			t.Fatalf("%s 不应被清理：5 条映射只命中 2 条，仍低于一半", id)
+		}
+	}
+}

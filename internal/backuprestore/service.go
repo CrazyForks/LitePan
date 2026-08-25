@@ -576,15 +576,7 @@ func (s *Service) Status() Status {
 	}
 	var result restoreResult
 	if err := readJSONFile(s.resultPath(), &result); err == nil {
-		return Status{
-			State:        result.State,
-			Message:      result.Message,
-			BackupID:     result.BackupID,
-			BackupNote:   result.BackupNote,
-			Scope:        result.Scope,
-			RestoreAdmin: result.RestoreAdmin,
-			UpdatedAt:    result.UpdatedAt,
-		}
+		return Status(result)
 	}
 	return Status{State: StateIdle}
 }

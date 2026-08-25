@@ -312,6 +312,14 @@ func TestScanAndCleanCoverExtractTemps(t *testing.T) {
 	// 正式二进制与正在使用的文件
 	writeTestFile(t, filepath.Join(toolsDir, "ffmpeg"), "binary")
 	writeTestFile(t, filepath.Join(coverDir, "cover-fresh.jpg"), "fresh")
+	ignoredFiles := []string{
+		filepath.Join(toolsDir, "ffmpeg-backup.bin"),
+		filepath.Join(toolsDir, "ffmpeg-static"),
+		filepath.Join(coverDir, "cover-user.png"),
+	}
+	for _, path := range ignoredFiles {
+		writeTestFile(t, path, "keep")
+	}
 	// 过期残留
 	staleJpg := filepath.Join(coverDir, "cover-stale.jpg")
 	staleGz := filepath.Join(toolsDir, "ffmpeg-abc.gz")
@@ -320,7 +328,7 @@ func TestScanAndCleanCoverExtractTemps(t *testing.T) {
 	writeTestFile(t, staleGz, "stale")
 	writeTestFile(t, staleTmp, "stale")
 	old := time.Now().Add(-2 * time.Hour)
-	for _, p := range []string{staleJpg, staleGz, staleTmp} {
+	for _, p := range append([]string{staleJpg, staleGz, staleTmp}, ignoredFiles...) {
 		if err := os.Chtimes(p, old, old); err != nil {
 			t.Fatal(err)
 		}
@@ -342,6 +350,11 @@ func TestScanAndCleanCoverExtractTemps(t *testing.T) {
 	}
 	if _, ok := findItemByPath(items, filepath.Join(coverDir, "cover-fresh.jpg")); ok {
 		t.Fatal("新生成的 cover-*.jpg 不应进入清理项")
+	}
+	for _, path := range ignoredFiles {
+		if _, ok := findItemByPath(items, path); ok {
+			t.Fatalf("不符合精确临时文件规则的文件不应进入清理项：%s", path)
+		}
 	}
 	for _, p := range []string{staleJpg, staleGz, staleTmp} {
 		item, ok := findItemByPath(items, p)
@@ -376,6 +389,38 @@ func TestScanAndCleanCoverExtractTemps(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(coverDir, "cover-fresh.jpg")); err != nil {
 		t.Fatalf("新文件不应被删除：%v", err)
+	}
+	for _, path := range ignoredFiles {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("非临时文件不应被删除：%s: %v", path, err)
+		}
+	}
+}
+
+func TestCleanupCoverExtractTempRevalidatesExactFilename(t *testing.T) {
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	toolsDir := filepath.Join(dataDir, "tools")
+	path := filepath.Join(toolsDir, "ffmpeg-backup.bin")
+	writeTestFile(t, path, "keep")
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(Options{DataDir: dataDir, StrmDir: filepath.Join(root, "strm"), StrmTasks: &strmTaskRepoStub{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.cleanupCoverExtractTemp(planItem{
+		Item:       Item{ID: "invalid", Name: "封面提取残留文件"},
+		TargetPath: path,
+		RootPath:   toolsDir,
+	})
+	if err == nil {
+		t.Fatal("执行清理前必须再次拒绝不符合精确规则的文件")
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("被拒绝的文件必须保留：%v", statErr)
 	}
 }
 
