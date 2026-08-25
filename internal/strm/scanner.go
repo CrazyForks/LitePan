@@ -2,6 +2,7 @@ package strm
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -51,6 +52,9 @@ type ScanDeps struct {
 	Log         *slog.Logger
 	OnProgress  ScanProgressReporter
 	Failures    *FailureCollector
+	// ManualCleanupConfirm 用户手动执行（全部/分支执行）时置位：视为已确认网盘状态，
+	// 允许"远端识别 0"的范围正常清理；定时自动扫描仍受空保护约束。
+	ManualCleanupConfirm bool
 }
 
 type ScanResult struct {
@@ -58,6 +62,8 @@ type ScanResult struct {
 	GeneratedCount int64
 	UpdatedCount   int64
 	RemovedCount   int64
+	Protected      bool   // 安全保护阻止了本次本地清理
+	ProtectReason  string // 保护原因（写入任务状态与通知）
 	Failures       []ScanFailure
 }
 
@@ -75,13 +81,16 @@ type cleanupScope struct {
 }
 
 type branchScanState struct {
-	skippedDirs    map[string]struct{}
-	cleanupScopes  []cleanupScope
-	remoteChildren map[string]map[string]struct{}
-	metadataDirs   map[string]metadataDirectory
+	skippedDirs          map[string]struct{}
+	cleanupScopes        []cleanupScope
+	remoteChildren       map[string]map[string]struct{}
+	metadataDirs         map[string]metadataDirectory
+	pendingBranchDeletes []*domain.StrmBranch
 }
 
 func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode string) (ScanResult, error) {
+	// 手动执行（全部/分支）视为用户已确认网盘状态，放行"远端识别 0"范围的清理
+	deps.ManualCleanupConfirm = runMode == domain.StrmRunModeFull || runMode == domain.StrmRunModeBranch
 	var result ScanResult
 	failures := deps.Failures
 	if failures == nil {
@@ -170,7 +179,14 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 		monitorScopes = append(monitorScopes, scope)
 	}
 
-	skippedParents := removeMonitorBranchesMissingRemote(ctx, deps, allBranches, state.remoteChildren, log)
+	skippedParents, pendingBranchDeletes := findMonitorBranchesMissingRemote(allBranches, state.remoteChildren)
+	state.pendingBranchDeletes = pendingBranchDeletes
+	for _, branch := range pendingBranchDeletes {
+		state.cleanupScopes = append(state.cleanupScopes, cleanupScope{
+			relDirs:   splitRelativePath(branch.RelativePath),
+			recursive: true,
+		})
+	}
 	for _, scope := range monitorScopes {
 		if _, skip := skippedParents[scope.parentID]; skip {
 			continue
@@ -269,54 +285,60 @@ func finalizeScan(
 	cleanupEnabled := task.ScanMode == domain.StrmScanModeIncrementalUpdate || task.ScanMode == domain.StrmScanModeFullSync
 	cleanupScopes := effectiveCleanupScopes(useBranch, state.cleanupScopes)
 	cleanupSkipped := state.skippedDirs
-	if cleanupEnabled && len(seen) == 0 {
-		localCount, err := countScopedStrmFiles(root, taskRelDir, cleanupScopes, cleanupSkipped)
-		if err != nil {
-			return result, err
+	// 安全保护：仅定时自动扫描时按实际清理规模判定。
+	// 待删 STRM 或待删顶层目录达到阈值时保护（防止大批量误清空后重建耗时）；
+	// 小规模清理不保护（误删几十个可快速恢复）。手动执行视为用户确认，直接放行。
+	// 触发时本次所有删除动作（过期 strm/旁路/目录级/元数据）停止，生成与更新照常。
+	protectReason := ""
+	if cleanupEnabled && !deps.ManualCleanupConfirm {
+		impact, countErr := collectCleanupImpact(root, taskRelDir, cleanupScopes, cleanupSkipped, seen, state.remoteChildren)
+		if countErr != nil {
+			return result, countErr
 		}
-		if localCount > 0 {
-			return result, domain.Errorf(
-				domain.CodeValidation,
-				"远端扫描未发现可生成的媒体文件，但本地仍有 %d 个 STRM；为防止误删已停止清理。若云端目录已清空，请删除 STRM 任务并选择同时删除本地文件",
-				localCount,
-			)
-		}
+		protectReason = cleanupProtectReason(impact)
 	}
 
-	if task.SyncMetadata && len(state.metadataDirs) > 0 {
-		filteredMetadata := filterMetadataItems(metadataItems, dirHasMedia, subtreeHasMedia, deps.Settings.MetadataParentEnabled)
-		metadataDirs := filterMetadataDirectories(state.metadataDirs, dirHasMedia, subtreeHasMedia, deps.Settings.MetadataParentEnabled)
-		syncResult, err := syncMetadata(ctx, metadataSyncRequest{
-			AccountID:    task.AccountID,
-			Root:         root,
-			OutputFolder: taskRelDir,
-			Mode:         deps.Settings.MetadataSyncMode,
-			Extensions:   metaExts,
-			MaxSizeBytes: metaMaxBytes,
-			RemoteItems:  filteredMetadata,
-			Directories:  metadataDirs,
-			Files:        deps.Files,
-			Playback:     deps.Playback,
-			Failures:     failures,
-			OnProgress:   deps.OnProgress,
-		})
-		if err != nil {
-			return result, err
+	if protectReason != "" {
+		result.Protected = true
+		result.ProtectReason = protectReason
+		log.Warn("strm 扫描安全保护阻止清理", "task_id", task.ID, "task_name", task.Name, "reason", protectReason)
+	} else {
+		if task.SyncMetadata && len(state.metadataDirs) > 0 {
+			filteredMetadata := filterMetadataItems(metadataItems, dirHasMedia, subtreeHasMedia, deps.Settings.MetadataParentEnabled)
+			metadataDirs := filterMetadataDirectories(state.metadataDirs, dirHasMedia, subtreeHasMedia, deps.Settings.MetadataParentEnabled)
+			syncResult, err := syncMetadata(ctx, metadataSyncRequest{
+				AccountID:    task.AccountID,
+				Root:         root,
+				OutputFolder: taskRelDir,
+				Mode:         deps.Settings.MetadataSyncMode,
+				Extensions:   metaExts,
+				MaxSizeBytes: metaMaxBytes,
+				RemoteItems:  filteredMetadata,
+				Directories:  metadataDirs,
+				Files:        deps.Files,
+				Playback:     deps.Playback,
+				Failures:     failures,
+				OnProgress:   deps.OnProgress,
+			})
+			if err != nil {
+				return result, err
+			}
+			result.GeneratedCount += syncResult.Downloaded
+			result.RemovedCount += syncResult.Deleted
 		}
-		result.GeneratedCount += syncResult.Downloaded
-		result.RemovedCount += syncResult.Deleted
-	}
 
-	if cleanupEnabled {
-		removed, err := cleanupScopedStaleFiles(root, taskRelDir, seen, cleanupScopes, cleanupSkipped, failures)
-		if err != nil {
-			return result, err
+		if cleanupEnabled {
+			removed, err := cleanupScopedStaleFiles(root, taskRelDir, seen, cleanupScopes, cleanupSkipped, failures)
+			if err != nil {
+				return result, err
+			}
+			n, err := cleanupMissingRemoteChildDirs(root, taskRelDir, state.remoteChildren, failures, log)
+			if err != nil {
+				return result, err
+			}
+			result.RemovedCount += removed + n
+			deleteMissingMonitorBranches(ctx, deps, state.pendingBranchDeletes, log)
 		}
-		n, err := cleanupMissingRemoteChildDirs(root, taskRelDir, state.remoteChildren, failures, log)
-		if err != nil {
-			return result, err
-		}
-		result.RemovedCount += removed + n
 	}
 
 	log.Debug("strm scan finished",
@@ -372,6 +394,9 @@ func buildScanScopes(task *domain.StrmTask, branches []*domain.StrmBranch, useBr
 		parentIDs := make(map[string]struct{}, len(branches))
 		scopes := make([]scanScope, 0, len(branches))
 		for _, b := range branches {
+			if b == nil {
+				continue
+			}
 			parentIDs[b.ParentID] = struct{}{}
 			rel := splitRelativePath(b.RelativePath)
 			isBase := b.BranchType == domain.StrmBranchTypeBase
@@ -812,7 +837,7 @@ func parseExtensions(raw string) map[string]struct{} {
 }
 
 func recordRemoteChildren(remoteChildren map[string]map[string]struct{}, relDirs []string, names map[string]struct{}) {
-	if remoteChildren == nil || len(names) == 0 {
+	if remoteChildren == nil {
 		return
 	}
 	key := dirKey(relDirs)
@@ -975,30 +1000,51 @@ func cleanupScopedStaleFiles(root, outputFolder string, seen map[string]struct{}
 	return removed, nil
 }
 
-func countScopedStrmFiles(root, outputFolder string, scopes []cleanupScope, skipped map[string]struct{}) (int64, error) {
+// scopeStrmCounts 记录单个清理范围内的本地 STRM 数与本次远端确认数（seen 命中）。
+// cleanupImpact 本次清理的影响规模：待删 STRM 数（去重）与待删顶层目录数。
+type cleanupImpact struct {
+	staleStrm int64
+	staleDirs int64
+}
+
+const (
+	// 自动扫描保护阈值：待删 STRM 或待删顶层目录达到其一即保护。
+	// 小规模误删可快速恢复，不值得保护；大批量误清空重建耗时长，必须拦下让用户确认。
+	strmDeleteThreshold int64 = 1000
+	dirDeleteThreshold  int64 = 20
+)
+
+// collectCleanupImpact 统计本次清理将影响的规模：
+// 过期 STRM（本地存在、本次远端未确认，跨范围去重）与 cleanupMissingRemoteChildDirs
+// 即将整体删除的顶层子目录数。
+func collectCleanupImpact(root, outputFolder string, scopes []cleanupScope, skipped map[string]struct{}, seen map[string]struct{}, remoteChildren map[string]map[string]struct{}) (cleanupImpact, error) {
+	var imp cleanupImpact
 	taskFolder := localTaskDir("", outputFolder, nil)
-	found := make(map[string]struct{})
-	record := func(path string) error {
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		if !isStrmUnderSkipped(rel, taskFolder, skipped) {
-			found[rel] = struct{}{}
-		}
-		return nil
-	}
+	staleSet := make(map[string]struct{})
 	for _, scope := range scopes {
 		cleanupRoot := filepath.Join(root, taskFolder)
-		cleanupRel := taskFolder
+		scopeRel := taskFolder
 		for _, dir := range scope.relDirs {
 			safeDir := SafeName(dir)
 			cleanupRoot = filepath.Join(cleanupRoot, safeDir)
-			cleanupRel = filepath.Join(cleanupRel, safeDir)
+			scopeRel = filepath.Join(scopeRel, safeDir)
 		}
-		if pathHasOversizedComponent(cleanupRel) {
+		if pathHasOversizedComponent(scopeRel) {
 			continue
+		}
+		visit := func(path string) error {
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			rel = filepath.ToSlash(rel)
+			if isStrmUnderSkipped(rel, taskFolder, skipped) {
+				return nil
+			}
+			if _, ok := seen[rel]; !ok {
+				staleSet[rel] = struct{}{}
+			}
+			return nil
 		}
 		if scope.recursive {
 			err := filepath.WalkDir(cleanupRoot, func(path string, entry fs.DirEntry, err error) error {
@@ -1011,10 +1057,10 @@ func countScopedStrmFiles(root, outputFolder string, scopes []cleanupScope, skip
 				if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".strm") {
 					return nil
 				}
-				return record(path)
+				return visit(path)
 			})
 			if err != nil && !os.IsNotExist(err) {
-				return 0, err
+				return imp, err
 			}
 			continue
 		}
@@ -1023,18 +1069,48 @@ func countScopedStrmFiles(root, outputFolder string, scopes []cleanupScope, skip
 			if os.IsNotExist(err) {
 				continue
 			}
-			return 0, err
+			return imp, err
 		}
 		for _, entry := range entries {
 			if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".strm") {
 				continue
 			}
-			if err := record(filepath.Join(cleanupRoot, entry.Name())); err != nil {
-				return 0, err
+			if err := visit(filepath.Join(cleanupRoot, entry.Name())); err != nil {
+				return imp, err
 			}
 		}
 	}
-	return int64(len(found)), nil
+	imp.staleStrm = int64(len(staleSet))
+	// 待删顶层目录：与 cleanupMissingRemoteChildDirs 的删除范围一致
+	for parentKey, remoteNames := range remoteChildren {
+		parentDirs := relDirsFromDirKey(parentKey)
+		localBase := localTaskDir(root, outputFolder, parentDirs)
+		entries, err := os.ReadDir(localBase)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return imp, err
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			if _, ok := remoteNames[SafeName(entry.Name())]; ok {
+				continue
+			}
+			imp.staleDirs++
+		}
+	}
+	return imp, nil
+}
+
+// cleanupProtectReason 按清理规模判定是否保护，返回空串表示不阻止清理。
+func cleanupProtectReason(imp cleanupImpact) string {
+	if imp.staleStrm >= strmDeleteThreshold || imp.staleDirs >= dirDeleteThreshold {
+		return fmt.Sprintf("本次将删除本地 %d 个 STRM / %d 个目录，超出保护阈值，已停止清理。请确认网盘内容无误后，手动执行任务（全部/分支执行）完成同步", imp.staleStrm, imp.staleDirs)
+	}
+	return ""
 }
 
 func cleanupMissingRemoteChildDirs(root, outputFolder string, remoteChildren map[string]map[string]struct{}, failures *FailureCollector, log *slog.Logger) (int64, error) {
@@ -1078,42 +1154,56 @@ func cleanupMissingRemoteChildDirs(root, outputFolder string, remoteChildren map
 	return removed, nil
 }
 
-func removeMonitorBranchesMissingRemote(
-	ctx context.Context,
-	deps ScanDeps,
-	branches []*domain.StrmBranch,
-	baseRemote map[string]map[string]struct{},
-	log *slog.Logger,
-) map[string]struct{} {
+// findMonitorBranchesMissingRemote 只生成“待删除分支”计划，不在安全保护判定前修改数据库。
+func findMonitorBranchesMissingRemote(branches []*domain.StrmBranch, baseRemote map[string]map[string]struct{}) (map[string]struct{}, []*domain.StrmBranch) {
 	skipped := make(map[string]struct{})
-	if deps.Branches == nil || len(baseRemote) == 0 {
-		return skipped
+	if len(baseRemote) == 0 {
+		return skipped, nil
 	}
 	var baseBranches []*domain.StrmBranch
+	var pending []*domain.StrmBranch
 	for _, b := range branches {
+		if b == nil {
+			continue
+		}
 		if b.BranchType == domain.StrmBranchTypeBase {
 			baseBranches = append(baseBranches, b)
 		}
 	}
 	for _, b := range branches {
+		if b == nil {
+			continue
+		}
 		if b.BranchType == domain.StrmBranchTypeBase {
 			continue
 		}
 		if !monitorBranchMissingOnRemote(b, baseBranches, baseRemote) {
 			continue
 		}
-		if err := deps.Branches.Delete(ctx, b.ID); err != nil {
+		skipped[b.ParentID] = struct{}{}
+		pending = append(pending, b)
+	}
+	return skipped, pending
+}
+
+func deleteMissingMonitorBranches(ctx context.Context, deps ScanDeps, branches []*domain.StrmBranch, log *slog.Logger) {
+	if deps.Branches == nil {
+		return
+	}
+	for _, branch := range branches {
+		if branch == nil {
+			continue
+		}
+		if err := deps.Branches.Delete(ctx, branch.ID); err != nil {
 			if log != nil {
-				log.Warn("strm remove stale monitor branch failed", "path", b.Path, "err", err)
+				log.Warn("strm remove stale monitor branch failed", "path", branch.Path, "err", err)
 			}
 			continue
 		}
-		skipped[b.ParentID] = struct{}{}
 		if log != nil {
-			log.Info("strm remove stale monitor branch", "path", b.Path)
+			log.Info("strm remove stale monitor branch", "path", branch.Path)
 		}
 	}
-	return skipped
 }
 
 func monitorBranchMissingOnRemote(branch *domain.StrmBranch, bases []*domain.StrmBranch, baseRemote map[string]map[string]struct{}) bool {

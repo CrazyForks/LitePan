@@ -13,6 +13,8 @@ const fullListPageSize = 1150
 
 // ListAllFiles 使用 cur=0 让服务端递归展开 rootID 下全部文件，分页拉取。
 // 该模式不返回文件夹，条目自带 pid，由上层结合 pid→路径 缓存还原目录结构。
+// 拉取完整性不做 count 严格校验：接口 count 可能因厂商缓存/并发滞后而不可信，
+// 误删风险统一由上层清理前的规模保护承担。
 func (d *Driver) ListAllFiles(ctx context.Context, rootID string) ([]driver.FullListEntry, error) {
 	root := d.normalizeParent(rootID)
 	var entries []driver.FullListEntry

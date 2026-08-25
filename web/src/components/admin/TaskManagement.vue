@@ -487,7 +487,7 @@ function formatLastScan(value?: string): string {
 function scanStatusVariant(task: StrmTask): AdminRunStatusVariant {
   if (isTaskScanning(task)) return "running";
   if (task.last_scan_status === "ok" || task.last_scan_status === "success") return "success";
-  if (task.last_scan_status === "failed" || task.last_scan_status === "error") return "error";
+  if (task.last_scan_status === "failed" || task.last_scan_status === "error" || task.last_scan_status === "protected") return "error";
   return "pending";
 }
 
@@ -524,6 +524,9 @@ function lastScanSummary(task: StrmTask): string {
   if (!task.last_scan) return "";
   if (task.last_scan_status === "failed" || task.last_scan_status === "error") {
     return task.error_message?.trim() || "执行失败";
+  }
+  if (task.last_scan_status === "protected") {
+    return task.error_message?.trim() || "安全保护阻止清理";
   }
   const parts: string[] = [];
   const created = Number(task.generated_count || 0);

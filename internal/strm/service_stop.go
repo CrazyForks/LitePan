@@ -57,6 +57,10 @@ func scanPatchAfterRun(err error, result ScanResult) domain.StrmScanPatch {
 		Status:         domain.StrmStatusActive,
 	}
 	if err == nil {
+		if result.Protected {
+			patch.LastScanStatus = "protected"
+			patch.ErrorMessage = result.ProtectReason
+		}
 		return patch
 	}
 	if errors.Is(err, context.Canceled) {

@@ -164,11 +164,11 @@ func (d *Driver) ListFiles(ctx context.Context, parentID string) ([]domain.FileI
 		if err := d.apiCallFull(ctx, http.MethodGet, pathList, query, nil, &page); err != nil {
 			return nil, err
 		}
+		if pageNum == 1 {
+			totalCount = page.Count
+		}
 		if len(page.Data) == 0 {
 			break
-		}
-		if fetched == 0 {
-			totalCount = page.Count
 		}
 		for _, f := range page.Data {
 			if isTrashed(f) {

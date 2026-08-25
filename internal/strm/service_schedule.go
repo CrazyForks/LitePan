@@ -202,6 +202,9 @@ func (s *Service) runTaskAsync(task *domain.StrmTask) {
 		}
 		if err == nil || errors.Is(err, context.Canceled) {
 			s.notifyScanFailures(task, result.Failures)
+			if err == nil && result.Protected {
+				s.notifyScanProtected(task, result.ProtectReason)
+			}
 		}
 	}()
 }
