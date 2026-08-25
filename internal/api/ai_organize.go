@@ -8,23 +8,26 @@ import (
 
 func (h *Handler) getAIOrganizeConfig(w http.ResponseWriter, _ *http.Request) {
 	if h.aiOrganize == nil {
-		writeOK(w, aiorganize.Config{})
+		writeOK(w, aiorganize.State{})
 		return
 	}
-	writeOK(w, h.aiOrganize.Config())
+	writeOK(w, h.aiOrganize.State())
 }
 
 func (h *Handler) updateAIOrganizeConfig(w http.ResponseWriter, r *http.Request) {
-	var in aiorganize.Config
+	var in struct {
+		Enabled bool                       `json:"enabled"`
+		Items   []aiorganize.UpdateRequest `json:"items"`
+	}
 	if err := decodeJSON(r, &in); err != nil {
 		writeErr(w, err)
 		return
 	}
 	if h.aiOrganize == nil {
-		writeOK(w, aiorganize.Config{})
+		writeOK(w, aiorganize.State{})
 		return
 	}
-	out, err := h.aiOrganize.Update(r.Context(), in)
+	out, err := h.aiOrganize.Replace(r.Context(), in.Enabled, in.Items)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -33,7 +36,7 @@ func (h *Handler) updateAIOrganizeConfig(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *Handler) testAIOrganizeConfig(w http.ResponseWriter, r *http.Request) {
-	var in aiorganize.Config
+	var in aiorganize.UpdateRequest
 	if err := decodeJSON(r, &in); err != nil {
 		writeErr(w, err)
 		return

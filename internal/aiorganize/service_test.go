@@ -65,11 +65,16 @@ func newTestService(t *testing.T, transport roundTripFunc) *Service {
 
 func TestConfigMasksStoredAPIKeyByLength(t *testing.T) {
 	svc := newTestService(t, nil)
-	cfg := svc.Config()
-	if cfg.APIKey != "********" {
-		t.Fatalf("API Key 脱敏长度 = %d，期望 8", len(cfg.APIKey))
+	st := svc.State()
+	if len(st.Items) != 1 {
+		t.Fatalf("旧散键应迁移为一条配置，got %d", len(st.Items))
 	}
-	if _, err := svc.Update(context.Background(), cfg); err != nil {
+	if st.Items[0].APIKey != "********" {
+		t.Fatalf("API Key 脱敏长度 = %d，期望 8", len(st.Items[0].APIKey))
+	}
+	if _, err := svc.Replace(context.Background(), st.Enabled, []UpdateRequest{
+		{ID: st.Items[0].ID, Name: "默认", BaseURL: st.Items[0].BaseURL, APIKey: st.Items[0].APIKey, Model: st.Items[0].Model, Default: true},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if svc.runtimeConfig().APIKey != "test-key" {
@@ -213,7 +218,7 @@ func TestChatUsesAnthropicMessagesFormat(t *testing.T) {
 		}
 		return anthropicHTTPResponse(t, `{"ok":true}`), nil
 	})
-	if err := svc.Test(context.Background(), Config{
+	if err := svc.Test(context.Background(), UpdateRequest{
 		BaseURL: "https://api.anthropic.com",
 		APIKey:  "test-key",
 		Model:   "claude-sonnet-4-20250514",
@@ -234,13 +239,12 @@ func TestChatFallsBackAndRemembersAnthropicFormat(t *testing.T) {
 		}
 		return anthropicHTTPResponse(t, `{"ok":true}`), nil
 	})
-	cfg := Config{
-		BaseURL: "https://mock.invalid/v1",
-		APIKey:  "test-key",
-		Model:   "test-model",
-	}
 	for range 2 {
-		if err := svc.Test(context.Background(), cfg); err != nil {
+		if err := svc.Test(context.Background(), UpdateRequest{
+			BaseURL: "https://mock.invalid/v1",
+			APIKey:  "test-key",
+			Model:   "test-model",
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -256,8 +260,96 @@ func TestConfigCannotEnableWhenIncomplete(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := New(settingsSvc)
-	if _, err := svc.Update(context.Background(), Config{Enabled: true}); err == nil {
+	if _, err := svc.Replace(context.Background(), true, []UpdateRequest{{Name: "默认"}}); err == nil {
 		t.Fatal("配置不完整时不应允许启用")
+	}
+}
+
+func TestReplaceUsesDefaultInstanceAtRuntime(t *testing.T) {
+	settingsSvc, err := settings.New(context.Background(), &configRepo{values: map[string]string{
+		settings.KeyAIOrganizeEnabled: "true",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(settingsSvc)
+	st, err := svc.Replace(context.Background(), true, []UpdateRequest{
+		{Name: "DeepSeek", BaseURL: "https://api.deepseek.com", APIKey: "key-a", Model: "deepseek-chat", Default: false},
+		{Name: "OpenAI", BaseURL: "https://api.openai.com/v1", APIKey: "key-b", Model: "gpt-4o", Default: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Items) != 2 {
+		t.Fatalf("配置条数 = %d，期望 2", len(st.Items))
+	}
+	rt := svc.runtimeConfig()
+	if rt.BaseURL != "https://api.openai.com/v1" || rt.APIKey != "key-b" || rt.Model != "gpt-4o" {
+		t.Fatalf("运行时未使用默认项: %+v", rt)
+	}
+	// 切换默认项到 DeepSeek
+	st, err = svc.Replace(context.Background(), true, []UpdateRequest{
+		{ID: st.Items[0].ID, Name: "DeepSeek", BaseURL: "https://api.deepseek.com", APIKey: "key-a", Model: "deepseek-chat", Default: true},
+		{ID: st.Items[1].ID, Name: "OpenAI", BaseURL: "https://api.openai.com/v1", APIKey: "key-b", Model: "gpt-4o", Default: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt = svc.runtimeConfig()
+	if rt.BaseURL != "https://api.deepseek.com" || rt.APIKey != "key-a" || rt.Model != "deepseek-chat" {
+		t.Fatalf("切换默认项后运行时异常: %+v", rt)
+	}
+}
+
+func TestReplaceFallsBackToFirstWhenNoDefault(t *testing.T) {
+	settingsSvc, err := settings.New(context.Background(), &configRepo{values: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(settingsSvc)
+	st, err := svc.Replace(context.Background(), false, []UpdateRequest{
+		{Name: "A", BaseURL: "https://a.example.com", APIKey: "key-a", Model: "model-a"},
+		{Name: "B", BaseURL: "https://b.example.com", APIKey: "key-b", Model: "model-b"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Items[0].Default || st.Items[1].Default {
+		t.Fatalf("无默认项时应回退第一条: %+v", st.Items)
+	}
+	if rt := svc.runtimeConfig(); rt.BaseURL != "https://a.example.com" {
+		t.Fatalf("运行时异常: %+v", rt)
+	}
+}
+
+func TestReplaceKeepsSingleDefaultWhenMultipleMarked(t *testing.T) {
+	settingsSvc, err := settings.New(context.Background(), &configRepo{values: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(settingsSvc)
+	st, err := svc.Replace(context.Background(), false, []UpdateRequest{
+		{Name: "A", BaseURL: "https://a.example.com", APIKey: "key-a", Model: "model-a", Default: true},
+		{Name: "B", BaseURL: "https://b.example.com", APIKey: "key-b", Model: "model-b", Default: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults := 0
+	for _, inst := range st.Items {
+		if inst.Default {
+			defaults++
+		}
+	}
+	if defaults != 1 {
+		t.Fatalf("多个默认标记应收敛为一条，got %d: %+v", defaults, st.Items)
+	}
+	// 保留最后标记的一条（B）
+	if st.Items[0].Default || !st.Items[1].Default {
+		t.Fatalf("应保留最后标记的默认项: %+v", st.Items)
+	}
+	if rt := svc.runtimeConfig(); rt.BaseURL != "https://b.example.com" {
+		t.Fatalf("运行时异常: %+v", rt)
 	}
 }
 

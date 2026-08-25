@@ -56,18 +56,6 @@ func (s *Service) Available() bool {
 	return validateConfig(s.runtimeConfig(), true) == nil
 }
 
-func (s *Service) runtimeConfig() Config {
-	if s == nil || s.settings == nil {
-		return Config{}
-	}
-	return Config{
-		Enabled: s.settings.Bool(settings.KeyAIOrganizeEnabled),
-		BaseURL: strings.TrimSpace(s.settings.String(settings.KeyAIOrganizeBaseURL)),
-		APIKey:  strings.TrimSpace(s.settings.String(settings.KeyAIOrganizeAPIKey)),
-		Model:   strings.TrimSpace(s.settings.String(settings.KeyAIOrganizeModel)),
-	}
-}
-
 func (s *Service) Enhance(ctx context.Context, req recognition.BatchRequest) (recognition.BatchResult, error) {
 	return s.EnhanceWithProgress(ctx, req, nil)
 }
@@ -169,24 +157,29 @@ func reportRecognitionProgress(progress recognition.ProgressFunc, state recognit
 	}
 }
 
-func (s *Service) Test(ctx context.Context, in Config) error {
+func (s *Service) Test(ctx context.Context, in UpdateRequest) error {
 	if s == nil {
 		return domain.Errorf(domain.CodeInternal, "AI 辅助增强服务未就绪")
 	}
 	stored := s.runtimeConfig()
-	if strings.TrimSpace(in.BaseURL) == "" {
-		in.BaseURL = stored.BaseURL
+	cfg := Config{
+		BaseURL: strings.TrimSpace(in.BaseURL),
+		APIKey:  strings.TrimSpace(in.APIKey),
+		Model:   strings.TrimSpace(in.Model),
 	}
-	if strings.TrimSpace(in.Model) == "" {
-		in.Model = stored.Model
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = stored.BaseURL
 	}
-	if strings.TrimSpace(in.APIKey) == "" || isAPIKeyMask(strings.TrimSpace(in.APIKey), stored.APIKey) {
-		in.APIKey = stored.APIKey
+	if cfg.Model == "" {
+		cfg.Model = stored.Model
 	}
-	if err := validateConfig(in, true); err != nil {
+	if cfg.APIKey == "" || isAPIKeyMask(cfg.APIKey, stored.APIKey) {
+		cfg.APIKey = stored.APIKey
+	}
+	if err := validateConfig(cfg, true); err != nil {
 		return err
 	}
-	content, err := s.chat(ctx, in, []chatMessage{
+	content, err := s.chat(ctx, cfg, []chatMessage{
 		{Role: "system", Content: "你是连接测试。只返回 JSON 对象。"},
 		{Role: "user", Content: `返回 {"ok":true}。`},
 	})

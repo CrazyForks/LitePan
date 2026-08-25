@@ -474,7 +474,6 @@ async function executeCleanup() {
           <template v-if="selectedDiskBytes > 0"> · {{ formatSize(selectedDiskBytes) }}</template>
           <template v-if="selectedMemoryBytes > 0"> · 内存 {{ formatSize(selectedMemoryBytes) }}</template>
         </span>
-        <AppButton variant="secondary" :disabled="cleaning" @click="closeTool">关闭</AppButton>
         <AppButton variant="primary" :disabled="cleaning || scanning || selectedItems.length === 0" @click="executeCleanup">
           {{ cleaning ? "清理中…" : "立即清理" }}
         </AppButton>

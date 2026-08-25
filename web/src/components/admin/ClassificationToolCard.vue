@@ -40,6 +40,12 @@ const detailMediaType = ref<"movie" | "tv">("movie");
 const detailLoading = ref(false);
 const detailResult = ref<ClassificationTMDBDetail | null>(null);
 
+// 树状态：选中的节点（rootIdx = 一级下标，childIdx = -1 表示选中一级）
+const selectedRootIdx = ref(-1);
+const selectedChildIdx = ref(-1);
+// 一级节点折叠状态（按一级下标）
+const folded = ref<Record<number, boolean>>({});
+
 function cloneConfig(value: ClassificationConfig): ClassificationConfig {
   return JSON.parse(JSON.stringify(value)) as ClassificationConfig;
 }
@@ -57,6 +63,24 @@ const selectedTemplate = computed(() =>
   draft.value.templates.find((item) => item.kind === draft.value.selected_template),
 );
 
+// 当前选中的节点对象（用于右侧编辑绑定）
+const selectedNode = computed<{ rule: ClassificationRule; parent?: ClassificationRule; level: 0 | 1 } | null>(() => {
+  const template = selectedTemplate.value;
+  if (!template || selectedRootIdx.value < 0 || selectedRootIdx.value >= template.rules.length) return null;
+  const rule = template.rules[selectedRootIdx.value];
+  if (selectedChildIdx.value < 0) return { rule, level: 0 };
+  const child = rule.children?.[selectedChildIdx.value];
+  if (!child) return { rule, level: 0 };
+  return { rule: child, parent: rule, level: 1 };
+});
+
+// 内置模板（非 custom）的一级条件只读
+const editingLocked = computed(() => {
+  const node = selectedNode.value;
+  if (!node || node.level !== 0) return false;
+  return selectedTemplate.value?.kind !== "custom";
+});
+
 async function load() {
   try {
     config.value = await classificationApi.getConfig();
@@ -71,18 +95,61 @@ function openSettings() {
   draft.value = cloneConfig(config.value);
   helpOpen.value = false;
   detailResult.value = null;
+  selectFirst();
   open.value = true;
+}
+
+function selectFirst() {
+  const template = selectedTemplate.value;
+  if (template && template.rules.length) {
+    selectedRootIdx.value = 0;
+    selectedChildIdx.value = -1;
+    collapseOthers(0);
+  } else {
+    selectedRootIdx.value = -1;
+    selectedChildIdx.value = -1;
+  }
 }
 
 function selectTemplate(kind: ClassificationTemplateKind) {
   draft.value.selected_template = kind;
+  selectFirst();
+}
+
+function selectRoot(index: number) {
+  selectedRootIdx.value = index;
+  selectedChildIdx.value = -1;
+  collapseOthers(index);
+}
+
+function selectChild(rootIdx: number, childIdx: number) {
+  selectedRootIdx.value = rootIdx;
+  selectedChildIdx.value = childIdx;
+  collapseOthers(rootIdx);
+}
+
+// 手风琴：只展开选中的一级目录，其余收起，避免列表过长
+function collapseOthers(activeIndex: number) {
+  const template = selectedTemplate.value;
+  if (!template) return;
+  const next: Record<number, boolean> = {};
+  template.rules.forEach((_, i) => {
+    next[i] = i !== activeIndex;
+  });
+  folded.value = next;
+}
+
+function toggleFold(index: number) {
+  const next = !folded.value[index];
+  folded.value = { ...folded.value, [index]: next };
 }
 
 function addCustomRootRule(template: ClassificationTemplate) {
   template.rules.push({ name: "新分类", condition: "type=tv", fallback_to_self: false, children: [] });
+  selectRoot(template.rules.length - 1);
 }
 
-function addChildRule(template: ClassificationTemplate, parent: ClassificationRule) {
+function addChildRule(template: ClassificationTemplate, parent: ClassificationRule, rootIdx: number) {
   const condition = template.kind === "region"
     ? "origin_country=CN"
     : template.kind === "genre"
@@ -91,10 +158,28 @@ function addChildRule(template: ClassificationTemplate, parent: ClassificationRu
         ? "genres=剧情"
         : "type=movie";
   (parent.children ??= []).push({ name: "新分类", condition, fallback_to_self: false, children: [] });
+  selectChild(rootIdx, parent.children.length - 1);
 }
 
 function removeRule(rules: ClassificationRule[], index: number) {
   rules.splice(index, 1);
+}
+
+// 删除一级后修正选中
+function removeRoot(template: ClassificationTemplate, index: number) {
+  removeRule(template.rules, index);
+  if (index === selectedRootIdx.value) {
+    if (template.rules.length) selectRoot(Math.min(index, template.rules.length - 1));
+    else { selectedRootIdx.value = -1; selectedChildIdx.value = -1; }
+  }
+}
+
+// 删除二级后修正选中
+function removeChild(rule: ClassificationRule, childIdx: number) {
+  removeRule(rule.children ?? [], childIdx);
+  if (childIdx === selectedChildIdx.value && selectedRootIdx.value === selectedTemplate.value?.rules.indexOf(rule)) {
+    selectedChildIdx.value = -1;
+  }
 }
 
 function objectStringValues(value: unknown, key: string) {
@@ -217,131 +302,211 @@ async function saveSettings() {
       </template>
     </CloudToolCard>
 
-    <AppModal :open="open" title="请选择分类模板" size="lg" @close="open = false">
-      <div class="classification-template-tabs">
-        <button
-          v-for="item in templateMeta"
-          :key="item.kind"
-          type="button"
-          class="classification-template-tab"
-          :class="{ active: draft.selected_template === item.kind }"
-          @click="selectTemplate(item.kind)"
-        >
-          <strong>{{ item.name }}</strong><span>{{ item.desc }}</span>
-        </button>
-      </div>
-
-      <div v-if="selectedTemplate" class="classification-editor">
-        <div class="classification-table-head" aria-hidden="true">
-          <span>分类目录</span>
-          <span>匹配条件</span>
-          <span></span>
+    <AppModal :open="open" bare @close="open = false">
+      <div class="cls-modal">
+        <div class="cls-modal__head">
+          <span class="cls-modal__title">请选择分类模板</span>
+          <button type="button" class="cls-modal__close" aria-label="关闭" @click="open = false">✕</button>
         </div>
 
-        <section
-          v-for="(rule, index) in selectedTemplate.rules"
-          :key="`root-${index}`"
-          class="classification-group"
-        >
-          <div class="classification-row classification-row--root">
-            <input v-model.trim="rule.name" maxlength="120" aria-label="一级分类目录" placeholder="目录名" />
-            <input
-              v-model.trim="rule.condition"
-              maxlength="500"
-              aria-label="一级匹配条件"
-              :readonly="selectedTemplate.kind !== 'custom'"
-              :title="selectedTemplate.kind === 'custom' ? '' : '内置模板的一级匹配条件固定，仅可修改目录名称'"
-              :placeholder="selectedTemplate.kind === 'custom' ? 'type=tv，genres=真人秀' : 'type=movie'"
-            />
-            <div class="classification-actions">
-              <button v-if="selectedTemplate.kind === 'custom'" type="button" class="danger" :disabled="selectedTemplate.rules.length === 1" title="删除" @click="removeRule(selectedTemplate.rules, index)">×</button>
-            </div>
-          </div>
-
-          <div
-            v-for="(child, childIndex) in (rule.children ?? [])"
-            :key="`child-${index}-${childIndex}`"
-            class="classification-row classification-row--child"
+        <div class="classification-template-tabs">
+          <button
+            v-for="item in templateMeta"
+            :key="item.kind"
+            type="button"
+            class="classification-template-tab"
+            :class="{ active: draft.selected_template === item.kind }"
+            @click="selectTemplate(item.kind)"
           >
-            <label>
-              <span aria-hidden="true">└</span>
-              <input v-model.trim="child.name" maxlength="120" aria-label="二级分类目录" placeholder="二级目录名" />
-            </label>
-            <input
-              v-model.trim="child.condition"
-              maxlength="500"
-              aria-label="二级匹配条件"
-              :placeholder="selectedTemplate.kind === 'region' ? 'origin_country=CN;HK' : selectedTemplate.kind === 'custom' ? 'origin_country=JP，genres=动画' : 'genres=犯罪;悬疑'"
-            />
-            <div class="classification-actions">
-              <button type="button" class="danger" title="删除" @click="removeRule(rule.children ?? [], childIndex)">×</button>
+            <strong>{{ item.name }}</strong><span>{{ item.desc }}</span>
+          </button>
+        </div>
+
+        <!-- 文件树 + 右侧编辑 -->
+        <div v-if="selectedTemplate" class="cls-workspace">
+          <!-- 左侧目录树 -->
+          <aside class="cls-tree">
+            <div class="cls-tree__cap">分类目录</div>
+            <div class="cls-tree__list">
+              <template v-for="(rule, index) in selectedTemplate.rules" :key="`root-${index}`">
+                <div
+                  class="cls-tn"
+                  :class="{ active: selectedRootIdx === index && selectedChildIdx < 0 }"
+                  @click="selectRoot(index)"
+                >
+                  <span
+                    class="cls-tn__arrow"
+                    :class="{ open: !folded[index], leaf: !(rule.children?.length) }"
+                    @click.stop="toggleFold(index)"
+                  >▶</span>
+                  <span class="cls-tn__fic">{{ folded[index] ? "📁" : "📂" }}</span>
+                  <b>{{ rule.name }}</b>
+                  <button
+                    v-if="selectedTemplate.kind !== 'media'"
+                    type="button"
+                    class="cls-tn__add"
+                    title="添加二级分类"
+                    @click.stop="addChildRule(selectedTemplate, rule, index)"
+                  >＋</button>
+                  <button
+                    v-if="selectedTemplate.kind === 'custom'"
+                    type="button"
+                    class="cls-tn__del"
+                    :disabled="selectedTemplate.rules.length === 1"
+                    title="删除"
+                    @click.stop="removeRoot(selectedTemplate, index)"
+                  >×</button>
+                </div>
+                <div v-if="!folded[index]" class="cls-tn__children">
+                  <div
+                    v-for="(child, childIndex) in (rule.children ?? [])"
+                    :key="`child-${index}-${childIndex}`"
+                    class="cls-tn cls-tn--child"
+                    :class="{ active: selectedRootIdx === index && selectedChildIdx === childIndex }"
+                    @click="selectChild(index, childIndex)"
+                  >
+                    <span class="cls-tn__arrow leaf">▶</span>
+                    <span class="cls-tn__fic">📂</span>
+                    <b>{{ child.name }}</b>
+                    <button type="button" class="cls-tn__del" title="删除" @click.stop="removeChild(rule, childIndex)">×</button>
+                  </div>
+                </div>
+              </template>
+              <div v-if="!selectedTemplate.rules.length" class="cls-tree__empty">还没有分类目录</div>
             </div>
-          </div>
+            <button
+              v-if="selectedTemplate.kind === 'custom'"
+              type="button"
+              class="cls-tree__add"
+              @click="addCustomRootRule(selectedTemplate)"
+            >＋ 添加一级分类</button>
+          </aside>
 
-          <label v-if="selectedTemplate.kind === 'custom' && (rule.children?.length ?? 0) > 0" class="classification-fallback">
-            <input v-model="rule.fallback_to_self" type="checkbox" />
-            <span>子分类均未命中时，放入「{{ rule.name || "当前" }}」目录</span>
-          </label>
-          <button v-if="selectedTemplate.kind !== 'media'" type="button" class="classification-add classification-add--child" @click="addChildRule(selectedTemplate, rule)">+ 二级分类</button>
-        </section>
+          <!-- 右侧编辑 -->
+          <section class="cls-edit">
+            <template v-if="selectedNode">
+              <div class="cls-edit__head">
+                <div class="cls-edit__title">
+                  <span class="cls-edit__fic">{{ selectedNode.level === 0 ? "📁" : "📂" }}</span>
+                  <span>{{ selectedNode.rule.name || "未命名" }}</span>
+                  <span class="cls-edit__lvl">{{ selectedNode.level === 0 ? "一级" : "二级" }}</span>
+                </div>
+              </div>
 
-        <button v-if="selectedTemplate.kind === 'custom'" type="button" class="classification-add" @click="addCustomRootRule(selectedTemplate)">+ 一级分类</button>
+              <div class="cls-field">
+                <div class="cls-field__head"><span class="cls-field__label">目录名称</span></div>
+                <input v-model.trim="selectedNode.rule.name" maxlength="120" placeholder="目录名" />
+              </div>
+
+              <div class="cls-field">
+                <div class="cls-field__head">
+                  <span class="cls-field__label">匹配条件</span>
+                  <span v-if="editingLocked" class="cls-field__lock">
+                    🔒 内置固定 <span class="cls-field__k">{{ selectedNode.rule.condition }}</span>
+                  </span>
+                </div>
+                <input
+                  v-model.trim="selectedNode.rule.condition"
+                  class="cls-field__mono"
+                  maxlength="500"
+                  :readonly="editingLocked"
+                  :placeholder="selectedTemplate.kind === 'region' ? 'origin_country=CN;HK' : selectedTemplate.kind === 'custom' ? 'type=tv，genres=真人秀' : 'genres=犯罪;悬疑'"
+                />
+              </div>
+
+              <label
+                v-if="selectedTemplate.kind === 'custom' && selectedNode.level === 0 && (selectedNode.rule.children?.length ?? 0) > 0"
+                class="cls-fallback"
+              >
+                <input v-model="selectedNode.rule.fallback_to_self" type="checkbox" />
+                <div>
+                  <b>子分类均未命中时，放入「{{ selectedNode.rule.name || "当前" }}」目录</b>
+                  <span>未勾选则放入目标根目录。</span>
+                </div>
+              </label>
+            </template>
+            <div v-else class="cls-edit__empty">从左侧选择一个分类目录开始编辑</div>
+          </section>
+        </div>
+
+        <div class="cls-modal__foot">
+          <AppButton class="classification-help-button" variant="secondary" @click="helpOpen = true">查看帮助</AppButton>
+          <AppButton variant="primary" :disabled="saving" @click="saveSettings">{{ saving ? "保存中…" : "保存" }}</AppButton>
+        </div>
       </div>
-      <template #footer>
-        <AppButton class="classification-help-button" variant="secondary" @click="helpOpen = true">查看帮助</AppButton>
-        <AppButton variant="secondary" :disabled="saving" @click="open = false">取消</AppButton>
-        <AppButton variant="primary" :disabled="saving" @click="saveSettings">{{ saving ? "保存中…" : "保存" }}</AppButton>
-      </template>
     </AppModal>
 
     <AppModal :open="helpOpen" title="分类帮助" size="lg" nested @close="helpOpen = false">
-      <div class="classification-help">
-        <p>移动整理时，影片会按模板放进分类目录；没匹配上就放在任务目标根目录。本地重命名不受影响。</p>
-      </div>
-
-      <section class="classification-lookup">
-        <div class="classification-lookup__intro">
-          <strong>TMDB 字段查询</strong>
-          <span>输入 ID 查看真实字段，并复制为匹配条件</span>
+      <template #header>
+        <div class="cls-help-head">
+          <h3 class="modal-help-title">分类帮助</h3>
+          <span class="cls-help-head__sub">移动整理时，影片会按模板放进分类目录；没匹配上就放在任务目标根目录。本地重命名不受影响。</span>
         </div>
-        <form class="classification-lookup__form" @submit.prevent="lookupTMDBDetail">
-          <select v-model="detailMediaType" aria-label="TMDB 媒体类型">
-            <option value="movie">电影</option>
-            <option value="tv">电视剧</option>
-          </select>
-          <input v-model.trim="detailTMDBID" inputmode="numeric" maxlength="10" aria-label="TMDB ID" placeholder="TMDB ID，如 281495" />
-          <AppButton type="submit" variant="secondary" :disabled="detailLoading">
-            {{ detailLoading ? "查询中…" : "查询" }}
-          </AppButton>
-        </form>
+      </template>
 
-        <div v-if="detailResult" class="classification-detail">
-          <div class="classification-detail__title">
-            <strong>{{ detailTitle }}</strong>
-            <span>TMDB {{ detailResult.id }} · {{ detailResult.media_type === "tv" ? "电视剧" : "电影" }}</span>
+      <!-- 条件怎么写 -->
+      <section class="cls-help-sec">
+        <div class="cls-help-sec__head"><span class="cls-help-sec__ic">∑</span><span class="cls-help-sec__title">条件怎么写</span></div>
+        <div class="cls-help-syntax">
+          <div class="cls-help-syntax__row">
+            <span class="cls-help-syntax__op">或</span>
+            <span class="cls-help-syntax__ex">origin_country=CN;US</span>
+            <span class="cls-help-syntax__note">同字段多值用分号，CN 或 US 都命中</span>
           </div>
-          <div class="classification-detail__conditions">
-            <button
-              v-for="item in detailConditions"
-              :key="item.value"
-              type="button"
-              :title="`复制 ${item.value}`"
-              @click="copyCondition(item.value)"
-            >
-              <span>{{ item.label }}</span><code>{{ item.value }}</code><b>复制</b>
-            </button>
+          <div class="cls-help-syntax__row">
+            <span class="cls-help-syntax__op">且</span>
+            <span class="cls-help-syntax__ex">type=tv，genres=动画</span>
+            <span class="cls-help-syntax__note">不同字段用逗号，需同时满足（仅自定义）</span>
           </div>
-          <details class="classification-detail__raw">
-            <summary>查看全部 TMDB 详情字段</summary>
-            <pre>{{ detailJSON }}</pre>
-          </details>
+        </div>
+        <div class="cls-help-fields">
+          <span>常用字段：</span><code>type</code><code>origin_country</code><code>genres</code>
+          <span class="cls-help-fields__tip">不确定真实返回值？用下面的查询工具看实际字段。</span>
         </div>
       </section>
 
-      <div class="classification-help classification-help--after-query">
-        <p><strong>模板怎么选：</strong>模板一分电影和剧集，模板二按国家分，模板三按影片类型分；想自己搭配就用自定义模板。</p>
-        <p><strong>条件怎么填：</strong>同一字段有多个可选值时，用分号隔开，例如 <code>origin_country=CN;US</code>，表示原产国家是 CN 或 US 都能命中。不同字段之间用中文或英文逗号隔开，例如 <code>type=tv，genres=动画</code>，表示必须同时是剧集且类型包含动画；这种多字段组合仅用于自定义模板。常用字段有 <code>type</code>、<code>origin_country</code>、<code>genres</code>，不确定实际返回值时可以使用上面的 TMDB 查询。</p>
-      </div>
+      <!-- TMDB 字段查询 -->
+      <section class="cls-help-sec">
+        <div class="cls-help-sec__head"><span class="cls-help-sec__ic">🔎</span><span class="cls-help-sec__title">TMDB 字段查询</span></div>
+        <div class="classification-lookup">
+          <div class="classification-lookup__intro">
+            <strong>查真实字段</strong>
+            <span>输入 ID 查看字段值，点「复制」直接用作匹配条件</span>
+          </div>
+          <form class="classification-lookup__form" @submit.prevent="lookupTMDBDetail">
+            <select v-model="detailMediaType" aria-label="TMDB 媒体类型">
+              <option value="movie">电影</option>
+              <option value="tv">电视剧</option>
+            </select>
+            <input v-model.trim="detailTMDBID" inputmode="numeric" maxlength="10" aria-label="TMDB ID" placeholder="TMDB ID，如 281495" />
+            <AppButton type="submit" variant="secondary" :disabled="detailLoading">
+              {{ detailLoading ? "查询中…" : "查询" }}
+            </AppButton>
+          </form>
+
+          <div v-if="detailResult" class="classification-detail">
+            <div class="classification-detail__title">
+              <strong>{{ detailTitle }}</strong>
+              <span>TMDB {{ detailResult.id }} · {{ detailResult.media_type === "tv" ? "电视剧" : "电影" }}</span>
+            </div>
+            <div class="classification-detail__conditions">
+              <button
+                v-for="item in detailConditions"
+                :key="item.value"
+                type="button"
+                :title="`复制 ${item.value}`"
+                @click="copyCondition(item.value)"
+              >
+                <span>{{ item.label }}</span><code>{{ item.value }}</code><b>复制</b>
+              </button>
+            </div>
+            <details class="classification-detail__raw">
+              <summary>查看全部 TMDB 详情字段</summary>
+              <pre>{{ detailJSON }}</pre>
+            </details>
+          </div>
+        </div>
+      </section>
 
       <template #footer>
         <AppButton variant="primary" @click="helpOpen = false">关闭</AppButton>
@@ -356,61 +521,130 @@ async function saveSettings() {
 .check-toggle:hover { background: var(--surface-hover); }
 .check-toggle.on { background: var(--success); color: #fff; box-shadow: 0 0 0 4px rgba(16, 185, 129, .16); }
 .check-toggle:disabled { opacity: .5; cursor: not-allowed; }
-.classification-template-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.classification-template-tab { min-width: 0; display: grid; gap: 4px; text-align: left; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px; background: var(--surface); color: var(--text); cursor: pointer; }
-.classification-template-tab span { color: var(--text-muted); font-size: 12px; }
-.classification-template-tab.active { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 7%, var(--surface)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 12%, transparent); }
-.classification-lookup { margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-sunken); }
+.classification-template-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+.classification-template-tab { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; align-items: center; padding: 10px 8px 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); cursor: pointer; transition: 0.15s; font-family: inherit; }
+.classification-template-tab strong { font-size: 13px; font-weight: 600; }
+.classification-template-tab span { color: var(--text-faint); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.classification-template-tab:hover { color: var(--text); }
+.classification-template-tab.active { color: var(--brand); border-bottom-color: var(--brand); }
+.classification-template-tab.active span { color: var(--text-muted); }
+
+/* ── 文件树 + 右侧编辑工作台 ── */
+.cls-workspace { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 420px; }
+
+/* 左侧树 */
+.cls-tree { border-right: 1px solid var(--border); background: var(--surface-sunken); padding: 14px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cls-tree__cap { font-size: 11px; color: var(--text-muted); letter-spacing: .06em; padding: 2px 6px 6px; }
+.cls-tree__list { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 1px; padding-bottom: 10px; min-height: 0; }
+.cls-tree__empty { padding: 22px 8px; text-align: center; color: var(--text-muted); font-size: 12px; }
+.cls-tree__add { margin-top: auto; width: 100%; padding: 8px 12px; border-radius: 9px; border: 1px dashed var(--border2); background: transparent; color: var(--text-muted); font-size: 13px; cursor: pointer; transition: .12s; }
+.cls-tree__add:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
+
+.cls-tn { position: relative; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; transition: .1s; min-width: 0; user-select: none; }
+.cls-tn:hover { background: var(--surface); }
+.cls-tn.active { background: var(--brand-soft); border-color: color-mix(in srgb, var(--brand) 40%, transparent); }
+.cls-tn__arrow { width: 14px; height: 14px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 8px; color: var(--text-muted); flex-shrink: 0; transition: .12s; }
+.cls-tn__arrow:hover { background: var(--surface); }
+.cls-tn__arrow.open { transform: rotate(90deg); }
+.cls-tn__arrow.leaf { visibility: hidden; }
+.cls-tn__fic { font-size: 15px; flex-shrink: 0; }
+.cls-tn b { font-size: 13px; font-weight: 500; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.cls-tn__add { width: 20px; height: 20px; border: 0; border-radius: 5px; background: transparent; color: var(--brand); font-size: 13px; line-height: 1; cursor: pointer; transition: .12s; flex-shrink: 0; display: flex; align-items: center; justify-content: center; padding: 0; opacity: .55; }
+.cls-tn__add:hover { background: var(--brand-soft); opacity: 1; }
+.cls-tn__del { width: 20px; height: 20px; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); font-size: 12px; cursor: pointer; transition: .12s; flex-shrink: 0; display: flex; align-items: center; justify-content: center; padding: 0; opacity: .55; }
+.cls-tn__del:hover { background: rgba(239, 68, 68, .12); color: var(--danger); opacity: 1; }
+.cls-tn__del:disabled { opacity: 0; cursor: default; }
+.cls-tn--child { padding-left: 24px; }
+.cls-tn--child::before { content: ""; position: absolute; left: 10px; top: 0; bottom: 0; width: 1px; background: var(--border2); }
+.cls-tn--child::after { content: ""; position: absolute; left: 10px; top: 50%; width: 11px; height: 1px; background: var(--border2); }
+
+/* 右侧编辑 */
+.cls-edit { padding: 18px 24px 20px; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; min-width: 0; background: var(--surface); }
+.cls-edit__head { display: flex; align-items: center; }
+.cls-edit__title { font-size: 15px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.cls-edit__fic { font-size: 16px; }
+.cls-edit__lvl { display: inline-flex; align-items: center; height: 20px; margin-left: 4px; padding: 0 9px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-size: 11px; flex-shrink: 0; }
+.cls-edit__empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 13px; }
+
+.cls-field { display: flex; flex-direction: column; gap: 7px; }
+.cls-field__head { display: flex; align-items: center; gap: 6px; }
+.cls-field__label { font-size: 13px; font-weight: 500; color: var(--text-regular); }
+.cls-field__lock { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); }
+.cls-field__k { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10.5px; background: var(--surface-sunken); border-radius: 4px; padding: 1px 5px; color: var(--text-muted); }
+.cls-field input { width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--text); font-size: 13px; outline: none; transition: border-color .15s, box-shadow .15s; font-family: inherit; box-sizing: border-box; }
+.cls-field input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+.cls-field input::placeholder { color: var(--text-faint); }
+.cls-field input:read-only { background: var(--surface-sunken); color: var(--text-muted); cursor: default; }
+.cls-field__mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+
+.cls-fallback { display: flex; align-items: flex-start; gap: 8px; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-sunken); cursor: pointer; }
+.cls-fallback input { margin: 3px 0 0; accent-color: var(--brand); flex-shrink: 0; }
+.cls-fallback b { display: block; font-size: 13px; font-weight: 600; color: var(--text); }
+.cls-fallback span { display: block; font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+.classification-help-button { margin-right: auto; }
+
+/* ── 帮助弹窗头部：标题 + 副标题 ── */
+.cls-help-head { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cls-help-head .modal-help-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
+.cls-help-head__sub { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+
+/* ── 帮助弹窗：区块排版 ── */
+.cls-help-sec { display: flex; flex-direction: column; gap: 10px; }
+.cls-help-sec + .cls-help-sec { margin-top: 16px; }
+.cls-help-sec__head { display: flex; align-items: center; gap: 8px; }
+.cls-help-sec__ic { width: 24px; height: 24px; border-radius: 7px; background: var(--brand-soft); color: var(--brand); display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
+.cls-help-sec__title { font-size: 14px; font-weight: 600; color: var(--text); }
+
+.cls-help-syntax { display: flex; flex-direction: column; gap: 8px; }
+.cls-help-syntax__row { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 10px; align-items: center; border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; background: var(--surface-sunken); }
+.cls-help-syntax__op { font-size: 12px; font-weight: 600; color: var(--brand); background: var(--brand-soft); border-radius: 6px; padding: 3px 8px; text-align: center; }
+.cls-help-syntax__ex { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cls-help-syntax__note { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+
+.cls-help-fields { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--text-regular); }
+.cls-help-fields code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--surface-sunken); border-radius: 5px; padding: 2px 7px; color: var(--text); }
+.cls-help-fields__tip { color: var(--text-muted); font-size: 12px; }
+
+/* ── bare 自绘弹窗：贴边结构 ── */
+.cls-modal { width: min(880px, 94vw); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-pop); display: flex; flex-direction: column; }
+.cls-modal__head { display: flex; align-items: center; justify-content: space-between; padding: 16px 22px; border-bottom: 1px solid var(--border); background: var(--panel-head-bg, var(--surface-sunken)); }
+.cls-modal__title { font-size: 15px; font-weight: 600; color: var(--text); }
+.cls-modal__close { width: 30px; height: 30px; border: 0; background: transparent; color: var(--text-muted); font-size: 16px; cursor: pointer; border-radius: 8px; }
+.cls-modal__close:hover { background: var(--surface); color: var(--text); }
+.cls-modal__foot { display: flex; align-items: center; gap: 10px; padding: 14px 22px 18px; border-top: 1px solid var(--border); }
+.classification-lookup { margin-top: 10px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-sunken); }
 .classification-lookup__intro { display: flex; align-items: baseline; gap: 8px; }
-.classification-lookup__intro span { color: var(--text-muted); font-size: 12px; }
+.classification-lookup__intro strong { font-size: 13px; font-weight: 600; }
+.classification-lookup__intro span { color: var(--text-muted); font-size: 12.5px; }
 .classification-lookup__form { display: grid; grid-template-columns: 110px minmax(180px, 1fr) auto; gap: 8px; margin-top: 9px; }
-.classification-lookup__form select, .classification-lookup__form input { box-sizing: border-box; min-width: 0; width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 9px; background: var(--surface); color: var(--text); }
+.classification-lookup__form select, .classification-lookup__form input { box-sizing: border-box; min-width: 0; width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 9px; background: var(--surface); color: var(--text); font-size: 13px; }
 .classification-detail { margin-top: 11px; padding-top: 11px; border-top: 1px solid var(--border); }
 .classification-detail__title { display: flex; align-items: baseline; gap: 8px; }
-.classification-detail__title span { color: var(--text-muted); font-size: 12px; }
+.classification-detail__title strong { font-size: 14px; font-weight: 600; }
+.classification-detail__title span { color: var(--text-muted); font-size: 12.5px; }
 .classification-detail__conditions { display: grid; gap: 6px; margin-top: 9px; }
 .classification-detail__conditions button { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; gap: 8px; align-items: center; width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); text-align: left; cursor: pointer; }
 .classification-detail__conditions button:hover { border-color: var(--brand); }
-.classification-detail__conditions span { color: var(--text-muted); font-size: 12px; }
+.classification-detail__conditions span { color: var(--text-muted); font-size: 12.5px; }
 .classification-detail__conditions code { overflow-wrap: anywhere; white-space: normal; }
 .classification-detail__conditions b { color: var(--brand); font-size: 12px; }
-.classification-detail__raw { margin-top: 9px; color: var(--text-regular); font-size: 12px; }
+.classification-detail__raw { margin-top: 9px; color: var(--text-regular); font-size: 12.5px; }
 .classification-detail__raw summary { cursor: pointer; color: var(--brand); }
-.classification-detail__raw pre { box-sizing: border-box; max-height: 280px; overflow: auto; margin: 8px 0 0; padding: 10px; border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 11px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
-.classification-editor { margin-top: 16px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-sunken); }
-.classification-table-head, .classification-row { display: grid; grid-template-columns: minmax(130px, .8fr) minmax(250px, 1.5fr) 32px; gap: 10px; align-items: center; }
-.classification-table-head { padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 12px; font-weight: 600; }
-.classification-group { padding: 10px 12px; border-bottom: 1px solid var(--border); }
-.classification-row + .classification-row { margin-top: 7px; }
-.classification-row input { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 9px; background: var(--surface); color: var(--text); }
-.classification-row input:read-only { background: var(--surface-sunken); color: var(--text-muted); cursor: default; }
-.classification-row--root > input:first-child { font-weight: 600; }
-.classification-row--child label { min-width: 0; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; color: var(--text-muted); }
-.classification-actions { display: flex; justify-content: flex-end; gap: 3px; }
-.classification-actions button, .classification-add { border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text-regular); cursor: pointer; }
-.classification-actions button { width: 27px; height: 32px; padding: 0; }
-.classification-actions button:disabled { opacity: .35; cursor: default; }
-.classification-actions button.danger { color: var(--danger); }
-.classification-fallback { display: flex; align-items: center; gap: 7px; margin: 8px 0 0 28px; color: var(--text-muted); font-size: 12px; cursor: pointer; }
-.classification-fallback input { margin: 0; accent-color: var(--brand); }
-.classification-add { margin: 10px 12px; padding: 7px 10px; font-size: 12px; }
-.classification-add--child { margin: 8px 0 0 28px; padding-block: 5px; }
-.classification-help-button { margin-right: auto; }
-.classification-help p { margin: 0; color: var(--text-regular); font-size: 12px; line-height: 1.65; }
-.classification-help p + p { margin-top: 5px; }
-.classification-help code { padding: 1px 4px; border-radius: 4px; background: var(--surface-sunken); color: var(--text); }
-.classification-help--after-query { margin-top: 12px; }
+.classification-detail__raw pre { box-sizing: border-box; max-height: 280px; overflow: auto; margin: 8px 0 0; padding: 10px; border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 760px) {
-  .classification-template-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .classification-template-tabs { flex-wrap: wrap; }
+  .classification-template-tab { flex: 1 1 45%; }
+  .cls-workspace { grid-template-columns: 1fr; }
+  .cls-tree { border-right: 0; border-bottom: 1px solid var(--border); }
   .classification-lookup__intro, .classification-detail__title { align-items: flex-start; flex-direction: column; gap: 2px; }
   .classification-lookup__form { grid-template-columns: 1fr; }
   .classification-detail__conditions button { grid-template-columns: 1fr auto; }
   .classification-detail__conditions span { grid-column: 1 / -1; }
-  .classification-table-head { display: none; }
-  .classification-row { grid-template-columns: 1fr; gap: 7px; }
-  .classification-actions { justify-content: flex-end; }
 }
 @media (max-width: 480px) {
-  .classification-template-tabs { grid-template-columns: 1fr; }
+  .classification-template-tabs { flex-direction: column; align-items: stretch; }
+  .classification-template-tab { border-bottom: 0; border-left: 2px solid transparent; align-items: flex-start; padding: 8px 10px; }
+  .classification-template-tab.active { border-left-color: var(--brand); border-bottom-color: transparent; }
 }
 </style>

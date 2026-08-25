@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { getApiErrorMessage } from "@/api/client";
 import { localUploadApi, type LocalUploadMapping } from "@/api/cloudTools";
 import { toast } from "@/composables/useToast";
 import AppButton from "@/components/base/AppButton.vue";
-import AppModal from "@/components/base/AppModal.vue";
 import CloudToolCard from "@/components/admin/CloudToolCard.vue";
+import ProxyWorkspace, { type ProxyField, type ProxyWorkspaceItem } from "@/components/admin/ProxyWorkspace.vue";
 
 const props = withDefaults(defineProps<{ searchQuery?: string }>(), { searchQuery: "" });
 
@@ -13,8 +13,30 @@ const localEnabled = ref(false);
 const localMappings = ref<LocalUploadMapping[]>([]);
 const localSaving = ref(false);
 const mappingOpen = ref(false);
-const newMappingName = ref("");
-const newMappingPath = ref("");
+const selectedName = ref("");
+const localForm = reactive<Record<string, string>>({
+  name: "",
+  path: "",
+});
+
+const workspaceItems = computed<ProxyWorkspaceItem[]>(() =>
+  localMappings.value.map((m) => ({
+    id: m.name,
+    name: m.name,
+    running: false,
+    subtitle: m.path,
+  })),
+);
+
+const workspaceFields: ProxyField[] = [
+  {
+    key: "path",
+    label: "容器内路径",
+    placeholder: "/app/data/updatefiles",
+    helpTitle: "容器内路径说明",
+    helpBody: "docker-compose 中映射到容器的路径（容器内那一侧），例如 <code>/app/data/updatefiles</code>。<br>前台从服务器上传时按左侧标签浏览，不会暴露服务器其他路径。",
+  },
+];
 
 function matches(title: string) {
   const q = props.searchQuery.trim().toLowerCase();
@@ -54,43 +76,79 @@ async function toggleEnabled() {
 
 function openMappings() {
   mappingOpen.value = true;
+  if (localMappings.value.length) {
+    selectMapping(localMappings.value[0].name);
+  } else {
+    selectedName.value = "";
+    Object.assign(localForm, { name: "", path: "" });
+  }
 }
 
-function closeMappings() {
-  mappingOpen.value = false;
+function selectMapping(name: string) {
+  const mapping = localMappings.value.find((m) => m.name === name);
+  if (!mapping) return;
+  selectedName.value = name;
+  Object.assign(localForm, { name: mapping.name, path: mapping.path });
 }
 
 function addMapping() {
-  const name = newMappingName.value.trim();
-  const path = newMappingPath.value.trim();
-  if (!name || !path.startsWith("/")) {
-    toast.error("请填写标签名和以 / 开头的容器内路径");
-    return;
-  }
-  if (localMappings.value.some((m) => m.name === name)) {
-    toast.error(`标签「${name}」已存在`);
-    return;
-  }
-  localMappings.value.push({ name, path });
-  newMappingName.value = "";
-  newMappingPath.value = "";
+  selectedName.value = "";
+  Object.assign(localForm, {
+    name: localMappings.value.length ? `映射 ${localMappings.value.length + 1}` : "映射 1",
+    path: "",
+  });
 }
 
-function removeMapping(name: string) {
-  localMappings.value = localMappings.value.filter((m) => m.name !== name);
-}
-
-async function saveMappings() {
+async function persist(message: string) {
   localSaving.value = true;
   try {
     const res = await localUploadApi.saveConfig({ enabled: localEnabled.value, mappings: localMappings.value });
     localMappings.value = res.mappings;
-    mappingOpen.value = false;
-    toast.success("映射目录已保存");
+    toast.success(message);
+    return true;
   } catch (e) {
     toast.error(getApiErrorMessage(e, "保存映射目录失败"));
+    return false;
   } finally {
     localSaving.value = false;
+  }
+}
+
+async function saveMappings() {
+  const name = localForm.name.trim();
+  const path = localForm.path.trim();
+  if (!name || !path.startsWith("/")) {
+    toast.error("请填写标签名和以 / 开头的容器内路径");
+    return;
+  }
+  const editing = localMappings.value.find((m) => m.name === selectedName.value);
+  if (!editing && localMappings.value.some((m) => m.name === name)) {
+    toast.error(`标签「${name}」已存在`);
+    return;
+  }
+  const next: LocalUploadMapping = { name, path };
+  if (editing) {
+    const index = localMappings.value.findIndex((m) => m.name === selectedName.value);
+    localMappings.value[index] = next;
+  } else {
+    localMappings.value.push(next);
+  }
+  if (await persist(editing ? "映射目录已保存" : "映射目录已添加")) {
+    selectedName.value = name;
+    mappingOpen.value = false;
+  }
+}
+
+async function removeMapping() {
+  const editing = localMappings.value.find((m) => m.name === selectedName.value);
+  if (!editing) return;
+  localMappings.value = localMappings.value.filter((m) => m.name !== editing.name);
+  if (await persist("映射目录已删除")) {
+    if (localMappings.value.length) {
+      selectMapping(localMappings.value[0].name);
+    } else {
+      selectedName.value = "";
+    }
   }
 }
 </script>
@@ -136,32 +194,29 @@ async function saveMappings() {
       </template>
     </CloudToolCard>
 
-    <AppModal :open="mappingOpen" title="从服务器上传 · 目录映射设置" size="md" @close="closeMappings">
-      <p class="local-mapping-tip">
-        在 docker-compose 中先映射宿主机目录，再按容器内路径添加标签。
-        前台从服务器上传时按标签浏览，不会暴露服务器其他路径。
-      </p>
-      <div class="local-mapping-list">
-        <div v-for="m in localMappings" :key="m.name" class="local-mapping-item">
-          <span class="local-mapping-item__name">{{ m.name }}</span>
-          <span class="local-mapping-item__path">{{ m.path }}</span>
-          <button class="local-mapping-item__del" type="button" title="删除" @click="removeMapping(m.name)">✕</button>
-        </div>
-        <div v-if="localMappings.length === 0" class="local-mapping-empty">还没有映射目录</div>
-      </div>
-      <div class="local-mapping-add">
-        <input v-model="newMappingName" type="text" placeholder="标签名，如：媒体库" />
-        <input v-model="newMappingPath" type="text" placeholder="容器内路径，如：/app/data/updatefiles" />
-        <AppButton variant="primary" @click="addMapping">添加</AppButton>
-      </div>
-      <p class="local-mapping-hint">示例：<code>- /vol1/1000/updatefiles:/app/data/updatefiles</code></p>
-      <template #footer>
-        <AppButton variant="secondary" @click="closeMappings">取消</AppButton>
-        <AppButton variant="primary" :disabled="localSaving" @click="saveMappings">
-          {{ localSaving ? "保存中…" : "保存" }}
-        </AppButton>
-      </template>
-    </AppModal>
+    <ProxyWorkspace
+      v-model="localForm"
+      :open="mappingOpen"
+      title="从服务器上传 · 目录映射设置"
+      caption="映射目录"
+      icon="📁"
+      :subtitle="selectedName ? `容器内路径 · ${localForm.path || '未填写'}` : ''"
+      :items="workspaceItems"
+      :selected-id="selectedName"
+      :fields="workspaceFields"
+      name-placeholder="标签名，如：媒体库"
+      :show-entry="false"
+      :show-test="false"
+      :saving="localSaving"
+      save-label="保存"
+      :deletable="Boolean(selectedName)"
+      :addable="true"
+      @select="selectMapping"
+      @add="addMapping"
+      @remove="removeMapping"
+      @save="saveMappings"
+      @cancel="mappingOpen = false"
+    />
   </div>
 </template>
 
@@ -204,101 +259,5 @@ async function saveMappings() {
 .check-toggle:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.local-mapping-tip {
-  font-size: 12px;
-  color: var(--text-muted);
-  background: var(--surface-sunken);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
-  margin: 0 0 12px;
-}
-
-.local-mapping-list {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 12px;
-  max-height: 240px;
-  overflow-y: auto;
-}
-
-.local-mapping-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
-  background: var(--surface-sunken);
-}
-
-.local-mapping-item__name {
-  font-weight: 600;
-  font-size: 13px;
-  flex-shrink: 0;
-}
-
-.local-mapping-item__path {
-  font-size: 12px;
-  color: var(--text-muted);
-  font-family: ui-monospace, Menlo, monospace;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.local-mapping-item__del {
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 13px;
-  padding: 4px 6px;
-  border-radius: var(--radius-sm);
-}
-
-.local-mapping-item__del:hover {
-  background: var(--border-soft);
-  color: var(--danger);
-}
-
-.local-mapping-empty {
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 13px;
-  padding: 18px 0;
-}
-
-.local-mapping-add {
-  display: flex;
-  gap: 8px;
-}
-
-.local-mapping-add input {
-  flex: 1;
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 7px 10px;
-  font-size: 13px;
-  background: var(--surface);
-  color: var(--text);
-}
-
-.local-mapping-hint {
-  margin: 10px 0 0;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.local-mapping-hint :deep(code) {
-  font-family: ui-monospace, Menlo, monospace;
-  background: var(--surface-sunken);
-  border: 1px solid var(--border-soft);
-  border-radius: 5px;
-  padding: 1px 5px;
 }
 </style>

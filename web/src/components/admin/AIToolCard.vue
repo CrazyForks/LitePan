@@ -1,29 +1,85 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { getApiErrorMessage } from "@/api/client";
-import { aiOrganizeApi, type AIOrganizeConfig } from "@/api/cloudTools";
+import {
+  aiOrganizeApi,
+  type AIOrganizeConfig,
+  type AIOrganizeInstanceUpdate,
+} from "@/api/cloudTools";
 import { toast } from "@/composables/useToast";
 import AppButton from "@/components/base/AppButton.vue";
-import AppModal from "@/components/base/AppModal.vue";
 import CloudToolCard from "@/components/admin/CloudToolCard.vue";
+import ProxyWorkspace, { type ProxyField, type ProxyWorkspaceItem } from "@/components/admin/ProxyWorkspace.vue";
 
 const props = withDefaults(defineProps<{ searchQuery?: string }>(), { searchQuery: "" });
 
-const aiConfig = ref<AIOrganizeConfig>({
-  enabled: false,
-  base_url: "https://api.deepseek.com",
-  api_key: "",
-  model: "deepseek-chat",
-});
-const aiDraft = ref<AIOrganizeConfig>({ ...aiConfig.value });
+const aiConfig = ref<AIOrganizeConfig>({ enabled: false, items: [] });
+const aiOpen = ref(false);
 const aiSaving = ref(false);
 const aiTesting = ref(false);
-const aiSettingsOpen = ref(false);
-const enableAfterSave = ref(false);
+const aiSelectedID = ref("");
+const aiDraft = reactive<Record<string, string>>({
+  name: "",
+  base_url: "",
+  model: "",
+  api_key: "",
+  default: "false",
+});
+
+const defaultInstance = computed(() => aiConfig.value.items.find((item) => item.default) || null);
+const activeModel = computed(() => defaultInstance.value?.model || "");
+const selectedInstance = computed(() =>
+  aiConfig.value.items.find((item) => item.id === aiSelectedID.value) || null,
+);
+
+const workspaceItems = computed<ProxyWorkspaceItem[]>(() =>
+  aiConfig.value.items.map((item) => ({
+    id: item.id,
+    name: item.name,
+    running: item.default,
+    subtitle: item.default ? "默认激活" : "备用",
+  })),
+);
+
+const workspaceFields: ProxyField[] = [
+  {
+    key: "base_url",
+    label: "API 地址",
+    placeholder: "https://api.deepseek.com",
+    helpTitle: "API 地址说明",
+    helpBody: "兼容 OpenAI / Anthropic 格式的 API 地址，例如 <code>https://api.deepseek.com</code>。",
+  },
+  {
+    key: "model",
+    label: "模型名称",
+    placeholder: "例如 deepseek-chat",
+    helpTitle: "模型名称说明",
+    helpBody: "使用的模型名称，例如 <code>deepseek-chat</code> 或 <code>gpt-4o</code>。",
+  },
+  {
+    key: "api_key",
+    label: "API Key",
+    type: "password",
+    placeholder: "sk-...",
+    helpTitle: "API Key 说明",
+    helpBody: "调用模型 API 的密钥。",
+  },
+  {
+    key: "default",
+    label: "默认激活",
+    type: "switch",
+    switchLabel: "默认激活",
+    switchHint: "运行时只使用这条配置；切换后保存即生效。",
+  },
+];
 
 function matches(title: string) {
   const q = props.searchQuery.trim().toLowerCase();
   return !q || title.toLowerCase().includes(q);
+}
+
+function configComplete(values: Record<string, string>) {
+  return Boolean(values.base_url.trim() && values.api_key.trim() && values.model.trim());
 }
 
 async function load() {
@@ -36,49 +92,124 @@ async function load() {
 
 onMounted(load);
 
-function openSettings(pendingEnable = false) {
-  enableAfterSave.value = pendingEnable;
-  aiDraft.value = { ...aiConfig.value };
-  aiSettingsOpen.value = true;
-}
-
-function closeSettings() {
-  aiSettingsOpen.value = false;
-  enableAfterSave.value = false;
-}
-
-function configComplete(config: AIOrganizeConfig) {
-  return Boolean(config.base_url.trim() && config.api_key.trim() && config.model.trim());
-}
-
-async function toggleEnabled() {
-  if (!aiConfig.value.enabled && !configComplete(aiConfig.value)) {
-    openSettings(true);
-    toast.info("先填写 API 地址、API Key 和模型名称");
-    return;
+function openWorkspace() {
+  aiOpen.value = true;
+  if (aiConfig.value.items.length) {
+    selectInstance(aiConfig.value.items[0].id);
+  } else {
+    aiSelectedID.value = "";
+    Object.assign(aiDraft, {
+      name: "DeepSeek",
+      base_url: "https://api.deepseek.com",
+      model: "deepseek-chat",
+      api_key: "",
+      default: "true",
+    });
   }
+}
+
+function selectInstance(id: string) {
+  const item = aiConfig.value.items.find((i) => i.id === id);
+  if (!item) return;
+  aiSelectedID.value = id;
+  Object.assign(aiDraft, {
+    name: item.name,
+    base_url: item.base_url,
+    model: item.model,
+    api_key: item.api_key,
+    default: String(item.default),
+  });
+}
+
+function addInstance() {
+  aiSelectedID.value = "";
+  Object.assign(aiDraft, {
+    name: aiConfig.value.items.length ? `模型 ${aiConfig.value.items.length + 1}` : "模型 1",
+    base_url: "https://api.deepseek.com",
+    model: "deepseek-chat",
+    api_key: "",
+    default: "false",
+  });
+}
+
+async function persist(items: AIOrganizeInstanceUpdate[], message: string, enabled = aiConfig.value.enabled) {
   aiSaving.value = true;
   try {
-    aiConfig.value = await aiOrganizeApi.saveConfig({
-      ...aiConfig.value,
-      enabled: !aiConfig.value.enabled,
-    });
-    toast.success(aiConfig.value.enabled ? "AI 辅助增强已启用" : "AI 辅助增强已停用");
+    aiConfig.value = await aiOrganizeApi.saveConfig({ enabled, items });
+    toast.success(message);
+    return true;
   } catch (e) {
-    toast.error(getApiErrorMessage(e, "修改开关失败"));
+    toast.error(getApiErrorMessage(e, "保存 AI 配置失败"));
+    return false;
   } finally {
     aiSaving.value = false;
   }
 }
 
-async function testConfig() {
-  if (!configComplete(aiDraft.value)) {
-    toast.error("请先填完模型配置");
+function itemsFromInstances(instances: AIOrganizeConfig["items"]): AIOrganizeInstanceUpdate[] {
+  return instances.map((item) => ({
+    id: item.id,
+    name: item.name,
+    base_url: item.base_url,
+    api_key: item.api_key,
+    model: item.model,
+    default: item.default,
+  }));
+}
+
+async function save() {
+  if (!aiDraft.name.trim() || !configComplete(aiDraft)) {
+    toast.error("请填写配置名称、API 地址、API Key 和模型名称");
+    return;
+  }
+  const items = itemsFromInstances(aiConfig.value.items);
+  const next: AIOrganizeInstanceUpdate = {
+    name: aiDraft.name,
+    base_url: aiDraft.base_url,
+    api_key: aiDraft.api_key,
+    model: aiDraft.model,
+    default: aiDraft.default === "true",
+  };
+  const editing = aiConfig.value.items.find((item) => item.id === aiSelectedID.value);
+  if (editing) {
+    next.id = editing.id;
+    const index = items.findIndex((item) => item.id === editing.id);
+    items[index] = next;
+  } else {
+    items.push(next);
+  }
+  // 默认激活是单选：当前项设为默认时，其余项必须同时清除默认标记，
+  // 否则后端会因多条默认标记收敛到错误的一条。
+  if (next.default) {
+    for (const item of items) {
+      if (item.id !== next.id) item.default = false;
+    }
+  }
+  if (await persist(items, editing ? "AI 模型配置已保存" : "AI 模型配置已添加")) {
+    if (editing) {
+      aiSelectedID.value = editing.id;
+    } else {
+      const saved = aiConfig.value.items.find((item) => item.name === next.name && item.base_url === next.base_url) || aiConfig.value.items[0];
+      aiSelectedID.value = saved?.id || "";
+    }
+    aiOpen.value = false;
+  }
+}
+
+async function test() {
+  if (!configComplete(aiDraft)) {
+    toast.error("请先填完 API 地址、API Key 和模型名称");
     return;
   }
   aiTesting.value = true;
   try {
-    await aiOrganizeApi.testConfig(aiDraft.value);
+    await aiOrganizeApi.testConfig({
+      id: aiSelectedID.value || undefined,
+      name: aiDraft.name,
+      base_url: aiDraft.base_url,
+      api_key: aiDraft.api_key,
+      model: aiDraft.model,
+    });
     toast.success("连接成功，模型已正确返回 JSON");
   } catch (e) {
     toast.error(getApiErrorMessage(e, "连接测试失败"));
@@ -87,25 +218,35 @@ async function testConfig() {
   }
 }
 
-async function saveConfig() {
-  if (!configComplete(aiDraft.value)) {
-    toast.error("请填完 API 地址、API Key 和模型名称");
+async function removeInstance() {
+  const editing = aiConfig.value.items.find((item) => item.id === aiSelectedID.value);
+  if (!editing) return;
+  const items = itemsFromInstances(aiConfig.value.items.filter((item) => item.id !== editing.id));
+  if (await persist(items, "AI 模型配置已删除")) {
+    if (aiConfig.value.items.length) {
+      aiSelectedID.value = aiConfig.value.items[0].id;
+      selectInstance(aiConfig.value.items[0].id);
+    } else {
+      aiSelectedID.value = "";
+    }
+  }
+}
+
+async function toggleEnabled() {
+  const items = itemsFromInstances(aiConfig.value.items);
+  if (!aiConfig.value.enabled && (!items.length || !configCompleteFromInstances(items))) {
+    toast.info("请先添加并填完 AI 模型配置");
+    aiOpen.value = true;
+    if (!aiConfig.value.items.length) addInstance();
     return;
   }
-  aiSaving.value = true;
-  try {
-    aiConfig.value = await aiOrganizeApi.saveConfig({
-      ...aiDraft.value,
-      enabled: enableAfterSave.value || aiDraft.value.enabled,
-    });
-    aiSettingsOpen.value = false;
-    enableAfterSave.value = false;
-    toast.success(aiConfig.value.enabled ? "模型配置已保存并启用" : "模型配置已保存");
-  } catch (e) {
-    toast.error(getApiErrorMessage(e, "保存模型配置失败"));
-  } finally {
-    aiSaving.value = false;
-  }
+  await persist(items, aiConfig.value.enabled ? "AI 辅助增强已停用" : "AI 辅助增强已启用", !aiConfig.value.enabled);
+}
+
+function configCompleteFromInstances(items: AIOrganizeInstanceUpdate[]) {
+  const def = items.find((item) => item.default) || items[0];
+  if (!def) return false;
+  return Boolean(def.base_url.trim() && def.api_key.trim() && def.model.trim());
 }
 </script>
 
@@ -117,7 +258,7 @@ async function saveConfig() {
       driver="目录整理 · 低置信作品补判"
       logo-src="/logos/AI.png"
       logo-alt="AI"
-      :stat-value="aiConfig.model || '待配置'"
+      :stat-value="activeModel || '待配置'"
       :compact-stat="true"
     >
       <template #toggle>
@@ -144,36 +285,36 @@ async function saveConfig() {
       </template>
       将内置规则无法识别或置信度较低的作品交给 AI 补判，调用失败时自动回退原有识别流程。
       <template #actions>
-        <AppButton size="sm" variant="secondary" :disabled="aiSaving" @click="openSettings(false)">
+        <AppButton size="sm" variant="secondary" :disabled="aiSaving" @click="openWorkspace">
           模型设置
         </AppButton>
       </template>
     </CloudToolCard>
 
-    <AppModal :open="aiSettingsOpen" title="AI 辅助识别 · 模型设置" size="md" @close="closeSettings">
-      <label class="ai-settings-field">
-        <span>API 地址</span>
-        <input v-model.trim="aiDraft.base_url" type="url" placeholder="https://api.deepseek.com" />
-      </label>
-      <label class="ai-settings-field">
-        <span>模型名称</span>
-        <input v-model.trim="aiDraft.model" type="text" placeholder="例如 deepseek-chat" />
-      </label>
-      <label class="ai-settings-field">
-        <span>API Key</span>
-        <input v-model.trim="aiDraft.api_key" type="password" autocomplete="new-password" placeholder="sk-..." />
-      </label>
-      <p class="ai-settings-hint">同一目录树在 24 小时内重新生成计划时会复用识别结果。</p>
-      <template #footer>
-        <AppButton class="ai-settings-test" variant="secondary" :disabled="aiTesting || aiSaving" @click="testConfig">
-          {{ aiTesting ? "测试中…" : "测试连接" }}
-        </AppButton>
-        <AppButton variant="secondary" :disabled="aiSaving" @click="closeSettings">取消</AppButton>
-        <AppButton variant="primary" :disabled="aiSaving" @click="saveConfig">
-          {{ aiSaving ? "保存中…" : enableAfterSave ? "保存并启用" : "保存" }}
-        </AppButton>
-      </template>
-    </AppModal>
+    <ProxyWorkspace
+      v-model="aiDraft"
+      :open="aiOpen"
+      title="AI 辅助识别 · 模型设置"
+      caption="AI 模型配置"
+      icon="🤖"
+      :subtitle="selectedInstance ? (selectedInstance.default ? '默认激活 · 运行时使用' : '备用配置') : ''"
+      :items="workspaceItems"
+      :selected-id="aiSelectedID"
+      :fields="workspaceFields"
+      name-placeholder="例如：DeepSeek"
+      :show-entry="false"
+      :testing="aiTesting"
+      :saving="aiSaving"
+      save-label="保存"
+      :deletable="Boolean(selectedInstance)"
+      :addable="true"
+      @select="selectInstance"
+      @add="addInstance"
+      @remove="removeInstance"
+      @test="test"
+      @save="save"
+      @cancel="aiOpen = false"
+    />
   </div>
 </template>
 
@@ -216,41 +357,5 @@ async function saveConfig() {
 .check-toggle:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.ai-settings-field {
-  display: grid;
-  gap: 6px;
-  margin-top: 12px;
-  color: var(--text-regular);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.ai-settings-field input {
-  width: 100%;
-  box-sizing: border-box;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 9px 11px;
-  font-size: 13px;
-  background: var(--surface);
-  color: var(--text);
-}
-
-.ai-settings-field input:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 14%, transparent);
-}
-
-.ai-settings-hint {
-  margin: 10px 0 0;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.ai-settings-test {
-  margin-right: auto;
 }
 </style>

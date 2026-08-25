@@ -2,6 +2,7 @@ import { http } from "./client";
 
 export interface FnosConfig {
   enabled: boolean;
+  name: string;
   fnos_url: string;
   proxy_port: string;
   strm_path_maps: string;
@@ -14,6 +15,7 @@ export interface FnosConfig {
 
 export interface FnosConfigUpdate {
   enabled: boolean;
+  name: string;
   fnos_url: string;
   proxy_port: string;
   strm_path_maps: string;

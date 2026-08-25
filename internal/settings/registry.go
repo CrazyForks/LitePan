@@ -32,6 +32,7 @@ const (
 	KeyEmbyEnabled                 = "emby_enabled"
 	KeyEmbyProxyInstances          = "emby_proxy_instances"
 	KeyFnosEnabled                 = "fnos_enabled"
+	KeyFnosName                    = "fnos_name"
 	KeyFnosURL                     = "fnos_url"
 	KeyFnosProxyPort               = "fnos_proxy_port"
 	KeyFnosStrmPathMaps            = "fnos_strm_path_maps"
@@ -74,6 +75,7 @@ const (
 	KeyMOMaxWorksPerRun        = "mo_max_works_per_run"
 	KeyMOOverwriteExisting     = "mo_overwrite_existing"
 	KeyAIOrganizeEnabled       = "ai_organize_enabled"
+	KeyAIOrganizeInstances     = "ai_organize_instances"
 	KeyAIOrganizeBaseURL       = "ai_organize_base_url"
 	KeyAIOrganizeAPIKey        = "ai_organize_api_key"
 	KeyAIOrganizeModel         = "ai_organize_model"
@@ -172,6 +174,7 @@ func defaultSpecs() []Spec {
 		{Key: KeyEmbyEnabled, Type: TypeBool, Default: "false", Hidden: true},
 		{Key: KeyEmbyProxyInstances, Type: TypeString, Default: "[]", Sensitive: true, Hidden: true},
 		boolSpec(KeyFnosEnabled, "fnos", "启用飞牛影视反代", "开启后且填写反代端口时，LitePan 会启动飞牛影视反代服务。", "false"),
+		stringSpec(KeyFnosName, "fnos", "飞牛影视配置名称", "飞牛影视反代配置的名称，仅用于界面区分。", "飞牛影视"),
 		stringSpec(KeyFnosURL, "fnos", "飞牛影视地址", "飞牛影视服务地址，默认端口 8005，例如 http://192.168.1.10:8005。", ""),
 		stringSpec(KeyFnosProxyPort, "fnos", "反代端口", "可留空。填写并启用后，LitePan 会在该端口启动飞牛影视反代服务。", ""),
 		stringSpec(KeyFnosStrmPathMaps, "fnos", "飞牛 STRM 目录", "填写 Docker 中映射到 /app/strm 的左边路径。例：/vol1/.../LitePanGO:/app/strm → 填 /vol1/.../LitePanGO。两边相同可留空。", ""),
@@ -216,6 +219,13 @@ func defaultSpecs() []Spec {
 			Type:    TypeBool,
 			Default: "false",
 			Hidden:  true,
+		},
+		{
+			Key:       KeyAIOrganizeInstances,
+			Type:      TypeString,
+			Default:   "[]",
+			Sensitive: true,
+			Hidden:    true,
 		},
 		{
 			Key:     KeyAIOrganizeBaseURL,

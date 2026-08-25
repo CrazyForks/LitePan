@@ -88,6 +88,7 @@ type Options struct {
 
 type Config struct {
 	Enabled           bool   `json:"enabled"`
+	Name              string `json:"name"`
 	FnosURL           string `json:"fnos_url"`
 	Port              string `json:"proxy_port"`
 	PathMaps          string `json:"strm_path_maps"`
@@ -100,6 +101,7 @@ type Config struct {
 
 type UpdateRequest struct {
 	Enabled           bool                     `json:"enabled"`
+	Name              string                   `json:"name"`
 	FnosURL           string                   `json:"fnos_url"`
 	Port              jsonvalue.FlexibleString `json:"proxy_port"`
 	PathMaps          string                   `json:"strm_path_maps"`
@@ -172,6 +174,7 @@ func (s *Service) Update(ctx context.Context, in UpdateRequest) (Config, error) 
 	}
 	if err := s.settings.Update(ctx, map[string]string{
 		settings.KeyFnosEnabled:           strconv.FormatBool(in.Enabled),
+		settings.KeyFnosName:              normalizeConfigName(in.Name),
 		settings.KeyFnosURL:               fnosURL,
 		settings.KeyFnosProxyPort:         port,
 		settings.KeyFnosStrmPathMaps:      pathMaps,
@@ -255,6 +258,7 @@ func ConfigFromUpdate(in UpdateRequest) (Config, error) {
 	}
 	return Config{
 		Enabled:           in.Enabled,
+		Name:              normalizeConfigName(in.Name),
 		FnosURL:           fnosURL,
 		Port:              port,
 		PathMaps:          normalizeHostStrmRoots(in.PathMaps),
@@ -350,6 +354,7 @@ func (s *Service) configFromSettings() Config {
 	}
 	return Config{
 		Enabled:           s.settings.Bool(settings.KeyFnosEnabled),
+		Name:              normalizeConfigName(s.settings.String(settings.KeyFnosName)),
 		FnosURL:           strings.TrimRight(strings.TrimSpace(s.settings.String(settings.KeyFnosURL)), "/"),
 		Port:              strings.TrimSpace(s.settings.String(settings.KeyFnosProxyPort)),
 		PathMaps:          strings.TrimSpace(s.settings.String(settings.KeyFnosStrmPathMaps)),
@@ -1170,6 +1175,15 @@ func normalizeFnosURL(raw string, required bool) (string, error) {
 		return "", domain.Errorf(domain.CodeValidation, "飞牛影视地址格式不正确，示例：http://192.168.1.10:8005")
 	}
 	return v, nil
+}
+
+// normalizeConfigName 归一化配置名称：空名回落默认显示名，避免界面出现空白名称。
+func normalizeConfigName(raw string) string {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return "飞牛影视"
+	}
+	return name
 }
 
 func isLitePanSTRMURL(value string) bool {

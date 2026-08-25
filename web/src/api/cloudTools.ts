@@ -45,11 +45,27 @@ export interface LocalUploadCreatePayload {
   items: { rel_path: string; is_dir: boolean }[];
 }
 
-export interface AIOrganizeConfig {
-  enabled: boolean;
+export interface AIOrganizeInstance {
+  id: string;
+  name: string;
   base_url: string;
   api_key: string;
   model: string;
+  default: boolean;
+}
+
+export interface AIOrganizeConfig {
+  enabled: boolean;
+  items: AIOrganizeInstance[];
+}
+
+export interface AIOrganizeInstanceUpdate {
+  id?: string;
+  name: string;
+  base_url: string;
+  api_key: string;
+  model: string;
+  default?: boolean;
 }
 
 export type ClassificationTemplateKind = "media" | "region" | "genre" | "custom";
@@ -147,9 +163,9 @@ export const localUploadApi = {
 
 export const aiOrganizeApi = {
   getConfig: () => http.get<AIOrganizeConfig>("/admin/tools/ai-organize/config"),
-  saveConfig: (payload: AIOrganizeConfig) =>
+  saveConfig: (payload: { enabled: boolean; items: AIOrganizeInstanceUpdate[] }) =>
     http.put<AIOrganizeConfig>("/admin/tools/ai-organize/config", payload),
-  testConfig: (payload: AIOrganizeConfig) =>
+  testConfig: (payload: AIOrganizeInstanceUpdate) =>
     http.post<{ ok: boolean }>("/admin/tools/ai-organize/test", payload),
 };
 
