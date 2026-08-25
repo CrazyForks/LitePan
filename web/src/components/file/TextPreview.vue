@@ -49,7 +49,7 @@ const markdown = new MarkdownIt({
   linkify: true,
   typographer: false,
 });
-markdown.use(markdownItAnchor, { permalink: false });
+markdown.use(markdownItAnchor);
 
 markdown.renderer.rules.link_open = (tokens, index, options, _env, self) => {
   tokens[index].attrSet("target", "_blank");
@@ -59,7 +59,7 @@ markdown.renderer.rules.link_open = (tokens, index, options, _env, self) => {
 markdown.renderer.rules.image = (tokens, index) => {
   const token = tokens[index];
   const label = token.content || token.attrGet("src") || "图片";
-  return `<span class="markdown-image-note">[图片：${markdown.utils.escapeHtml(label)}]</span>`;
+  return `<span class="markdown-image-note">[图片：${markdown.utils.escapeHtml(String(label))}]</span>`;
 };
 
 const markdownDocument = computed(() => {
@@ -69,9 +69,9 @@ const markdownDocument = computed(() => {
   tokens.forEach((token, index) => {
     if (token.type !== "heading_open") return;
     const inline = tokens[index + 1];
-    const id = token.attrGet("id") || "";
+    const id = String(token.attrGet("id") || "");
     if (id && inline?.type === "inline") {
-      headings.push({ id, level: Number(token.tag.slice(1)) || 1, title: inline.content });
+      headings.push({ id, level: Number(String(token.tag).slice(1)) || 1, title: String(inline.content) });
     }
   });
   const html = markdown.renderer.render(tokens, markdown.options, env);

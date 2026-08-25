@@ -12,7 +12,7 @@ COPY web/ ./
 RUN npm run build
 
 
-FROM golang:1.26.4-bookworm AS build
+FROM golang:1.26.6-bookworm AS build
 
 WORKDIR /src
 
