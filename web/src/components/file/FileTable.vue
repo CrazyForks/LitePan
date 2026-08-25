@@ -30,6 +30,8 @@ const props = defineProps<{
   moveFile: (file: FileItem) => void;
   copyFile: (file: FileItem) => void;
   nameAlignFile: (file: FileItem) => void;
+  coverExtractEnabled: boolean;
+  coverExtractFile: (file: FileItem) => void;
   dragActive?: boolean;
   activeDropTargetId?: string;
   dragUnlockedTargetId?: string;
@@ -66,6 +68,8 @@ const inline = useFileTableInline({
   moveFile: (file) => props.moveFile(file),
   copyFile: (file) => props.copyFile(file),
   nameAlignFile: (file) => props.nameAlignFile(file),
+  coverExtractEnabled: toRef(props, "coverExtractEnabled"),
+  coverExtractFile: (file) => props.coverExtractFile(file),
 });
 
 const {

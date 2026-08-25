@@ -29,6 +29,7 @@ import (
 	"litepan/internal/cache"
 	"litepan/internal/cacheretention"
 	"litepan/internal/classifyorganize"
+	"litepan/internal/coverextract"
 	"litepan/internal/crosstransfer"
 	"litepan/internal/domain"
 	"litepan/internal/embyproxy"
@@ -88,6 +89,7 @@ type Deps struct {
 	Announcement      *announcement.Service
 	BackupRestore     *backuprestore.Service
 	SpaceCleanup      *spacecleanup.Service
+	CoverExtract      *coverextract.Service
 	DataDir           string
 	StrmDir           string
 	OnSettingsUpdated func(map[string]string)
@@ -128,6 +130,7 @@ type Handler struct {
 	announcement      *announcement.Service
 	backupRestore     *backuprestore.Service
 	spaceCleanup      *spacecleanup.Service
+	coverExtract      *coverextract.Service
 	dataDir           string
 	strmDir           string
 	onSettingsUpdated func(map[string]string)
@@ -176,6 +179,7 @@ func NewRouter(d Deps) http.Handler {
 		announcement:      d.Announcement,
 		backupRestore:     d.BackupRestore,
 		spaceCleanup:      d.SpaceCleanup,
+		coverExtract:      d.CoverExtract,
 		dataDir:           d.DataDir,
 		strmDir:           d.StrmDir,
 		onSettingsUpdated: d.OnSettingsUpdated,
@@ -188,6 +192,7 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(chimw.Recoverer)
 
 	r.Route("/api", func(r chi.Router) {
+		r.Get("/internal/cover-source/{token}", h.coverExtractSource)
 		r.Get("/health", h.health)
 		r.Get("/auth/status", h.authStatus)
 		r.Post("/auth/login", h.authLogin)
@@ -347,6 +352,20 @@ func NewRouter(d Deps) http.Handler {
 					r.Post("/scan", h.scanSpaceCleanup)
 					r.Post("/execute", h.executeSpaceCleanup)
 					r.Get("/report", h.latestSpaceCleanupReport)
+				})
+				r.Route("/tools/cover-extract", func(r chi.Router) {
+					r.Put("/enabled", h.updateCoverExtractEnabled)
+					r.Get("/files", h.listCoverExtractFiles)
+					r.Post("/files", h.addCoverExtractFile)
+					r.Delete("/files", h.clearCoverExtractFiles)
+					r.Delete("/files/{id}", h.removeCoverExtractFile)
+					r.Put("/files/{id}/target", h.updateCoverExtractTarget)
+					r.Post("/extract", h.extractCoverFrames)
+					r.Get("/images/{id}", h.coverExtractImage)
+					r.Post("/save", h.saveCoverFrame)
+					r.Post("/save-composed", h.saveComposedCover)
+					r.Get("/runtime", h.coverExtractRuntime)
+					r.Post("/runtime/download", h.downloadCoverExtractRuntime)
 				})
 				r.Route("/media-organize", func(r chi.Router) {
 					r.Get("/tasks", h.listMediaOrganizeTasks)

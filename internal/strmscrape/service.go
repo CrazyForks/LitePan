@@ -299,6 +299,7 @@ func (s *Service) applyRematch(ctx context.Context, req RematchRequest, root str
 	if err != nil {
 		return nil, err
 	}
+	clearManualComplete(g)
 	s.upsertIndexItem(scrapeCtx, req.StrmTaskID, root, g)
 	item := buildItem(req.StrmTaskID, root, g)
 	return &item, nil
@@ -332,15 +333,31 @@ func (s *Service) MarkNormal(ctx context.Context, req MarkNormalRequest) (*Item,
 		return nil, err
 	}
 	mediaType := resolveWorkMediaType(g)
+	if requested := strings.ToLower(strings.TrimSpace(req.MediaType)); requested == MediaTypeTV || requested == MediaTypeMovie {
+		mediaType = requested
+	}
+	if req.ClearMatch {
+		if err := clearOwnedMetadata(g); err != nil {
+			return nil, domain.Errorf(domain.CodeDriverError, "清理错误匹配元数据：%v", err)
+		}
+		if err := writeManualComplete(g, mediaType); err != nil {
+			return nil, domain.Errorf(domain.CodeDriverError, "保存手动完成状态：%v", err)
+		}
+		s.upsertIndexItem(ctx, req.StrmTaskID, root, g)
+		item := buildItem(req.StrmTaskID, root, g)
+		return &item, nil
+	}
 	if pending, ok := readPendingState(g); ok && pending.Status == PendingDoubt {
 		if !workHasNFO(g, mediaType) || !workHasPoster(g, mediaType) {
 			return nil, domain.Errorf(domain.CodeValidation, "%v", errRootMetaIncomplete)
 		}
 		confirmExistingMatch(g, mediaType)
-	} else {
+	} else if workHasNFO(g, mediaType) && workHasPoster(g, mediaType) {
 		if err := markWorkNormal(g, mediaType); err != nil {
 			return nil, domain.Errorf(domain.CodeValidation, "%v", err)
 		}
+	} else if err := writeManualComplete(g, mediaType); err != nil {
+		return nil, domain.Errorf(domain.CodeDriverError, "保存手动完成状态：%v", err)
 	}
 	s.upsertIndexItem(ctx, req.StrmTaskID, root, g)
 	item := buildItem(req.StrmTaskID, root, g)
@@ -362,6 +379,12 @@ func (s *Service) Rescrape(ctx context.Context, req RescrapeRequest) (*Item, boo
 	}
 	mediaType := resolveWorkMediaType(g)
 	meta, ok := readWorkNFOMeta(g, mediaType)
+	if _, manual := readManualComplete(g); manual && (!ok || strings.TrimSpace(meta.TMDBID) == "") {
+		clearManualComplete(g)
+		s.upsertIndexItem(ctx, req.StrmTaskID, root, g)
+		item := buildItem(req.StrmTaskID, root, g)
+		return &item, false, nil
+	}
 	if !ok || strings.TrimSpace(meta.TMDBID) == "" {
 		return nil, false, domain.Errorf(domain.CodeValidation, "缺少 TMDB ID，请先重新匹配")
 	}

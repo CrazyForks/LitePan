@@ -197,6 +197,9 @@ func (s *Service) writeMatchedOpts(ctx context.Context, client *tmdb.Client, g w
 		} else if err := writeMovieNFO(nfo, info.Title, info.TMDBID, info.Plot, info.Year); err != nil {
 			return 0, err
 		}
+		if err := recordOwnedMetadata(g, nfo); err != nil {
+			return 0, err
+		}
 	}
 	if (overwrite || !fileExists(poster)) && strings.TrimSpace(info.PosterPath) != "" {
 		data, err := client.DownloadImage(ctx, info.PosterPath, "w500")
@@ -204,6 +207,9 @@ func (s *Service) writeMatchedOpts(ctx context.Context, client *tmdb.Client, g w
 			return 0, err
 		}
 		if err := writeImageFile(poster, data); err != nil {
+			return 0, err
+		}
+		if err := recordOwnedMetadata(g, poster); err != nil {
 			return 0, err
 		}
 	}
@@ -216,6 +222,7 @@ func (s *Service) writeMatchedOpts(ctx context.Context, client *tmdb.Client, g w
 	if withTVExtras || !needTVExtras {
 		finalizeAfterScrape(g, mediaType, epTMDB, info.Doubt)
 	}
+	clearManualComplete(g)
 	return epTMDB, nil
 }
 
@@ -310,7 +317,8 @@ func finaleEpisodeNumber(detail *tmdbSeasonDetail) int {
 	return best
 }
 
-func (s *Service) writeSeasonPosters(ctx context.Context, client *tmdb.Client, showDir, tmdbID string, overwrite bool) error {
+func (s *Service) writeSeasonPosters(ctx context.Context, client *tmdb.Client, g workGroup, tmdbID string, overwrite bool) error {
+	showDir := g.absDir
 	seasons := listLocalSeasonNumbers(showDir)
 	if len(seasons) == 0 {
 		return nil
@@ -344,8 +352,14 @@ func (s *Service) writeSeasonPosters(ctx context.Context, client *tmdb.Client, s
 		if !overwrite && fileExists(out) {
 			continue
 		}
-		if err := s.writeOptionalArtwork(ctx, client, posterPath, out, fmt.Sprintf("第 %d 季海报", season)); err != nil {
+		written, err := s.writeOptionalArtwork(ctx, client, posterPath, out, fmt.Sprintf("第 %d 季海报", season))
+		if err != nil {
 			return err
+		}
+		if written {
+			if err := recordOwnedMetadata(g, out); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -424,13 +438,13 @@ func (s *Service) newTMDBClient() *tmdb.Client {
 		Password: cfg.ProxyPassword,
 	})
 	return tmdb.NewClient(tmdb.Options{
-		APIKey:        apiKey,
-		Language:      cfg.TmdbLanguage,
-		ProxyURL:      proxy,
-		Timeout:       20 * time.Second,
-		MaxRetries:    2,
+		APIKey:         apiKey,
+		Language:       cfg.TmdbLanguage,
+		ProxyURL:       proxy,
+		Timeout:        20 * time.Second,
+		MaxRetries:     2,
 		RetryBaseDelay: time.Second,
-		APIBaseHost:   cfg.TmdbAPIHost,
-		ImageBaseHost: cfg.TmdbImageHost,
+		APIBaseHost:    cfg.TmdbAPIHost,
+		ImageBaseHost:  cfg.TmdbImageHost,
 	})
 }

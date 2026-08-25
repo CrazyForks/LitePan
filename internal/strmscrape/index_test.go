@@ -41,7 +41,7 @@ func TestIndexUpsertAndList(t *testing.T) {
 	year := 2021
 	it := Item{
 		ID: "abc", Title: "天龙八部", Year: &year, MediaType: MediaTypeTV,
-		Status: ItemStatusOK, HasNFO: true, HasPoster: true, HasPending: true,
+		Status: ItemStatusOK, HasNFO: true, HasPoster: true, HasPending: true, ManualDone: true,
 		TMDBID: "1", FolderName: "天龙八部 (2021)", FileCount: 2,
 		EpLocal: 1, EpTMDB: 40, TVState: TVStateUpdating, AddedAt: "2026-01-01T00:00:00Z",
 	}
@@ -73,7 +73,7 @@ func TestIndexUpsertAndList(t *testing.T) {
 		t.Fatalf("len=%d", len(result.Items))
 	}
 	got := result.Items[0]
-	if got.Title != "天龙八部" || got.EpTMDB != 40 || !got.HasPending {
+	if got.Title != "天龙八部" || got.EpTMDB != 40 || !got.HasPending || !got.ManualDone {
 		t.Fatalf("got=%+v", got)
 	}
 	if got.Year == nil || *got.Year != 2021 {

@@ -20,7 +20,7 @@ type Query = Record<string, string | number | boolean | undefined>;
 interface RequestOptions {
   query?: Query;
   body?: unknown;
-  form?: URLSearchParams;
+  form?: URLSearchParams | FormData;
   skipAuthRedirect?: boolean;
   signal?: AbortSignal;
 }
@@ -132,6 +132,6 @@ export const http = {
   put: <T>(path: string, body?: unknown) => request<T>("PUT", path, { body }),
   del: <T>(path: string, body?: unknown, query?: Query) =>
     request<T>("DELETE", path, { body, query }),
-  form: <T>(path: string, form: URLSearchParams) =>
+  form: <T>(path: string, form: URLSearchParams | FormData) =>
     request<T>("POST", path, { form, skipAuthRedirect: path.startsWith("/auth/") }),
 };

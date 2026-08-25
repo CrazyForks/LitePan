@@ -52,6 +52,7 @@ const (
 	KeyStrmTool115TreeEnabled      = "strm_tool_115_tree_enabled"
 	KeyLocalUploadEnabled          = "local_upload_enabled"
 	KeyLocalUploadMappings         = "local_upload_mappings"
+	KeyCoverExtractEnabled         = "cover_extract_enabled"
 	KeyQuarkTVEnabled              = "quark_tv_enabled"
 	KeyStrmScrapeWriteMode         = "strm_scrape_write_mode"
 
@@ -277,6 +278,12 @@ func defaultSpecs() []Spec {
 			Key:     KeyLocalUploadMappings,
 			Type:    TypeString,
 			Default: "[]",
+			Hidden:  true,
+		},
+		{
+			Key:     KeyCoverExtractEnabled,
+			Type:    TypeBool,
+			Default: "false",
 			Hidden:  true,
 		},
 		{

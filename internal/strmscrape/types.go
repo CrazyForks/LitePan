@@ -24,6 +24,7 @@ type Item struct {
 	HasNFO     bool   `json:"has_nfo"`
 	HasPoster  bool   `json:"has_poster"`
 	HasPending bool   `json:"has_pending"`
+	ManualDone bool   `json:"manual_done"`
 	TMDBID     string `json:"tmdb_id,omitempty"`
 	PosterURL  string `json:"poster_url,omitempty"`
 	FolderName string `json:"folder_name,omitempty"`
@@ -117,6 +118,8 @@ type RematchRequest struct {
 type MarkNormalRequest struct {
 	StrmTaskID int64  `json:"strm_task_id"`
 	ItemID     string `json:"item_id"`
+	MediaType  string `json:"media_type,omitempty"`
+	ClearMatch bool   `json:"clear_match,omitempty"`
 }
 
 type RescrapeRequest struct {

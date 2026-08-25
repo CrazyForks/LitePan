@@ -419,7 +419,7 @@ async function refreshAll() {
 
 function statusTitle(status: StrmScrapeItemStatus) {
   if (status === "doubt") return "自动匹配结果需要确认；正确可点「确认」，不正确可点「匹配」";
-  if (status === "miss") return "待刮削：根目录缺 nfo/海报，或短剧等需「设为完结」";
+  if (status === "miss") return "待刮削：根目录缺 nfo/海报，或未收录作品可「完成」";
   return "根目录 nfo / 海报已齐备";
 }
 
@@ -443,10 +443,12 @@ function episodeProgressText(item: StrmScrapeItem) {
 function canMarkEnded(item: StrmScrapeItem) {
   return Boolean(
     item.status !== "doubt" &&
-      item.has_nfo &&
-      item.has_poster &&
       (item.has_pending || item.status === "miss"),
   );
+}
+
+function markActionLabel(item: StrmScrapeItem) {
+  return item.has_nfo && item.has_poster ? "完结" : "完成";
 }
 
 function canConfirmDoubt(item: StrmScrapeItem) {
@@ -455,11 +457,9 @@ function canConfirmDoubt(item: StrmScrapeItem) {
 
 function canRescrape(item: StrmScrapeItem) {
   return Boolean(
-    item.has_nfo &&
-      item.has_poster &&
-      !item.has_pending &&
+    !item.has_pending &&
       item.status === "ok" &&
-      String(item.tmdb_id || "").trim(),
+      (item.manual_done || (item.has_nfo && item.has_poster && String(item.tmdb_id || "").trim())),
   );
 }
 
@@ -471,6 +471,7 @@ function isItemBusy(item: StrmScrapeItem) {
 }
 
 function statusMarkTitle(item: StrmScrapeItem) {
+  if (item.manual_done) return "已手动完成";
   if (item.status === "doubt") return statusTitle(item.status);
   if (item.tv_state === "updating") return "已刮削 · 追更中";
   return statusTitle(item.status);
@@ -587,15 +588,51 @@ async function applyMatch() {
   }
 }
 
+async function clearMatchAndComplete() {
+  const item = matchItem.value;
+  if (!item || !selectedTaskId.value || matchApplying.value) return;
+  try {
+    await confirm({
+      title: "取消错误匹配",
+      message: `确认「${item.title}」在 TMDB 中没有对应影片？将清理由 STRM 刮削生成的匹配元数据并标记完成，网盘文件和 STRM 文件不受影响。`,
+      icon: "warning",
+      confirmText: "取消匹配并完成",
+      danger: true,
+    });
+  } catch {
+    return;
+  }
+  matchApplying.value = true;
+  try {
+    const mediaType = matchSearchType.value === "auto" ? item.media_type : matchSearchType.value;
+    const updated = await markStrmScrapeNormal({
+      strm_task_id: selectedTaskId.value,
+      item_id: item.id,
+      media_type: mediaType,
+      clear_match: true,
+    });
+    if (!replaceItem(updated)) await loadItems({ silent: true, preserveLoaded: true });
+    toast.success("已取消匹配并标记完成");
+    closeRematch();
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "取消匹配失败"));
+  } finally {
+    matchApplying.value = false;
+  }
+}
+
 async function markEnded(item: StrmScrapeItem) {
   if (!selectedTaskId.value || !canMarkEnded(item)) return;
   const title = (item.title || item.folder_name || "该影片").trim();
+  const manual = markActionLabel(item) === "完成";
   try {
     await confirm({
-      title: "设为完结",
-      message: `将「${title}」标记为完结：之后即使 TMDB 或本地有新集，刮削也不会再处理该目录。需要时可用「重新刮削」。确定继续？`,
+      title: manual ? "标记完成" : "设为完结",
+      message: manual
+        ? `将「${title}」标记为完成：该作品将不再自动匹配 TMDB，需要时可用「重新刮削」恢复。确定继续？`
+        : `将「${title}」标记为完结：之后即使 TMDB 或本地有新集，刮削也不会再处理该目录。需要时可用「重新刮削」。确定继续？`,
       icon: "warning",
-      confirmText: "设为完结",
+      confirmText: manual ? "标记完成" : "设为完结",
       danger: false,
     });
   } catch {
@@ -604,9 +641,9 @@ async function markEnded(item: StrmScrapeItem) {
   markingNormalId.value = item.id;
   try {
     await applyNormalState(item);
-    toast.success("已设为完结");
+    toast.success(manual ? "已标记完成" : "已设为完结");
   } catch (e) {
-    toast.error(getApiErrorMessage(e, "设为完结失败"));
+    toast.error(getApiErrorMessage(e, manual ? "标记完成失败" : "设为完结失败"));
   } finally {
     markingNormalId.value = "";
   }
@@ -630,6 +667,7 @@ async function applyNormalState(item: StrmScrapeItem) {
   const updated = await markStrmScrapeNormal({
     strm_task_id: selectedTaskId.value,
     item_id: item.id,
+    media_type: item.media_type,
   });
   if (!replaceItem(updated)) {
     await loadItems({ silent: true, preserveLoaded: true });
@@ -651,7 +689,7 @@ async function rescrapeItem(item: StrmScrapeItem) {
       return;
     }
     if (!replaceItem(result.item)) await loadItems({ silent: true, preserveLoaded: true });
-    toast.success("已重新刮削");
+    toast.success(item.manual_done ? "已恢复待刮削" : "已重新刮削");
   } catch (e) {
     toast.error(getApiErrorMessage(e, "重新刮削失败"));
   } finally {
@@ -1012,11 +1050,11 @@ defineExpose({
                     type="button"
                     class="scrape-card__act scrape-card__act--ghost"
                     :disabled="running || markingNormalId === item.id || Boolean(rescrapingId)"
-                    :title="markingNormalId === item.id ? '处理中…' : '设为完结'"
+                    :title="markingNormalId === item.id ? '处理中…' : markActionLabel(item) === '完成' ? '标记完成' : '设为完结'"
                     @click="markEnded(item)"
                   >
                     <i class="fas fa-flag-checkered"></i>
-                    <span>{{ markingNormalId === item.id ? "…" : "完结" }}</span>
+                    <span>{{ markingNormalId === item.id ? "…" : markActionLabel(item) }}</span>
                   </button>
                   <button
                     v-else-if="canRescrape(item)"
@@ -1124,6 +1162,16 @@ defineExpose({
           </p>
         </div>
         <div class="scrape-match__foot">
+          <AppButton
+            v-if="String(matchItem.tmdb_id || '').trim()"
+            class="scrape-match__clear"
+            type="button"
+            variant="danger"
+            :disabled="matchApplying"
+            @click="clearMatchAndComplete"
+          >
+            无匹配
+          </AppButton>
           <AppButton type="button" variant="secondary" @click="closeRematch">取消</AppButton>
           <AppButton
             type="button"
@@ -1898,6 +1946,9 @@ defineExpose({
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+.scrape-match__clear {
+  margin-right: auto;
 }
 @media (max-width: 560px) {
   .scrape-match__grid {

@@ -17,10 +17,14 @@ func buildItem(taskID int64, root string, g workGroup) Item {
 	hasNFO := workHasNFO(g, mediaType)
 	hasPoster := workHasPoster(g, mediaType)
 	pending, hasPending := readPendingState(g)
+	_, manualComplete := readManualComplete(g)
+	if manualComplete {
+		hasPending = false
+	}
 
-	// 根元数据齐全即视为已刮削，追更和存疑由 pending 区分。
+	// 手动完成是独立终态；普通作品仍由根元数据和 pending 共同判断。
 	status := ItemStatusMiss
-	rootReady := hasNFO && hasPoster
+	rootReady := manualComplete || (hasNFO && hasPoster)
 	if rootReady {
 		switch {
 		case hasPending && pending.Status == PendingDoubt:
@@ -48,7 +52,7 @@ func buildItem(taskID int64, root string, g workGroup) Item {
 		stem := strings.TrimSuffix(filepath.Base(g.entries[0].absPath), filepath.Ext(g.entries[0].absPath))
 		tmdbID = rules.FindTMDBIDInName(stem)
 	}
-	if nfoMeta, ok := readWorkNFOMeta(g, mediaType); ok {
+	if nfoMeta, ok := readWorkNFOMeta(g, mediaType); ok && !manualComplete {
 		if nfoMeta.Title != "" {
 			title = nfoMeta.Title
 		}
@@ -58,6 +62,9 @@ func buildItem(taskID int64, root string, g workGroup) Item {
 		if nfoMeta.Year != nil {
 			year = nfoMeta.Year
 		}
+	}
+	if manualComplete {
+		tmdbID = ""
 	}
 
 	var relDir string
@@ -86,7 +93,7 @@ func buildItem(taskID int64, root string, g workGroup) Item {
 			if pending.Status == PendingUpdating || (epTMDB > 0 && epLocal < epTMDB) {
 				tvState = TVStateUpdating
 			}
-		} else if hasNFO && hasPoster {
+		} else if manualComplete || (hasNFO && hasPoster) {
 			tvState = TVStateEnded
 		}
 	}
@@ -101,6 +108,7 @@ func buildItem(taskID int64, root string, g workGroup) Item {
 		HasNFO:     hasNFO,
 		HasPoster:  hasPoster,
 		HasPending: hasPending,
+		ManualDone: manualComplete,
 		TMDBID:     tmdbID,
 		FolderName: folderName,
 		FileCount:  len(g.entries),
@@ -130,6 +138,12 @@ type workNFOMeta struct {
 }
 
 func resolveWorkMediaType(g workGroup) string {
+	if manual, ok := readManualComplete(g); ok {
+		mediaType := strings.ToLower(strings.TrimSpace(manual.MediaType))
+		if mediaType == MediaTypeTV || mediaType == MediaTypeMovie {
+			return mediaType
+		}
+	}
 	if g.flatFile == "" && fileExists(filepath.Join(g.absDir, "tvshow.nfo")) {
 		return MediaTypeTV
 	}
@@ -143,6 +157,9 @@ func resolveWorkMediaType(g workGroup) string {
 
 // workNeedsScrape：有 pending 必刮；无 pending 则仅当根未齐时刮。
 func workNeedsScrape(g workGroup, mediaType string) bool {
+	if _, ok := readManualComplete(g); ok {
+		return false
+	}
 	if hasPendingMarker(g) {
 		return true
 	}

@@ -24,6 +24,8 @@ export function useFileTableInline(options: {
   moveFile: (file: FileItem) => void;
   copyFile: (file: FileItem) => void;
   nameAlignFile: (file: FileItem) => void;
+  coverExtractEnabled: Ref<boolean>;
+  coverExtractFile: (file: FileItem) => void;
 }) {
   const renameInputRef = ref<HTMLInputElement | null>(null);
   const createFolderInputRef = ref<HTMLInputElement | null>(null);
@@ -131,6 +133,9 @@ export function useFileTableInline(options: {
     if (!options.isAdmin.value) return [];
     const items: ContextMenuItem[] = [];
     if (!file.is_dir) items.push({ action: "download", label: "下载" });
+    if (options.coverExtractEnabled.value && !file.is_dir && /\.(mp4|mkv|mov|webm)$/i.test(file.name)) {
+      items.push({ action: "cover-extract", label: "生成视频海报" });
+    }
     if (!file.is_dir && options.files.value.filter((item) => !item.is_dir).length >= 3) {
       items.push({ action: "name-align", label: "命名对齐" });
     }
@@ -246,6 +251,7 @@ export function useFileTableInline(options: {
 
     if (action === "download") options.downloadFile(file);
     if (action === "name-align") options.nameAlignFile(file);
+    if (action === "cover-extract") options.coverExtractFile(file);
     if (action === "rename") void startInlineRename(file);
     if (action === "delete") void startInlineDelete(file);
     if (action === "move") options.moveFile(file);

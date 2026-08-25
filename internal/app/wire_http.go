@@ -13,6 +13,7 @@ import (
 	"litepan/internal/buildinfo"
 	"litepan/internal/cache"
 	"litepan/internal/config"
+	"litepan/internal/coverextract"
 	"litepan/internal/logx"
 	"litepan/internal/notification"
 	"litepan/internal/settings"
@@ -110,6 +111,10 @@ func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core
 	if err != nil {
 		return nil, err
 	}
+	coverExtractSvc, err := coverextract.New(coverextract.Options{DataDir: cfg.DataDir, ListenAddr: cfg.ListenAddr, Files: svc.files, Playback: svc.playback})
+	if err != nil {
+		return nil, err
+	}
 	router := api.NewRouter(api.Deps{
 		Logs:              logs,
 		AccountSvc:        svc.account,
@@ -144,6 +149,7 @@ func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core
 		Announcement:      announcement.New(announcement.DefaultURL, logs.For(logx.ModuleAPI)),
 		BackupRestore:     backupRestoreSvc,
 		SpaceCleanup:      spaceCleanupSvc,
+		CoverExtract:      coverExtractSvc,
 		DataDir:           cfg.DataDir,
 		StrmDir:           cfg.StrmDir,
 		OnSettingsUpdated: cacheSettingsHook(core.cache, st.settings, cfg.DataDir),

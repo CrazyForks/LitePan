@@ -2,6 +2,7 @@ package strmscrape
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -52,6 +53,98 @@ func TestConfirmExistingMatchClearsDoubtWhenMetadataComplete(t *testing.T) {
 	confirmExistingMatch(g, MediaTypeTV)
 	if _, ok := readPendingState(g); ok {
 		t.Fatal("确认相同匹配后应清除存疑状态")
+	}
+}
+
+func TestMarkNormalAllowsUnmatchedWorkAndRescrapeRestoresIt(t *testing.T) {
+	strmRoot := t.TempDir()
+	outputFolder := "本地短剧"
+	root := strm.TaskOutputDir(strmRoot, outputFolder)
+	show := filepath.Join(root, "自制短剧")
+	mustMkdir(t, show)
+	mustWrite(t, filepath.Join(show, "S01E01.strm"), "x")
+	works, err := scanWorks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := &domain.StrmTask{ID: 9, OutputFolder: outputFolder}
+	strmSvc := strm.NewService(strm.ServiceOptions{
+		Repo:    &rematchTaskRepo{task: task},
+		StrmDir: strmRoot,
+	})
+	svc := New(Options{Strm: strmSvc, StrmDir: strmRoot, DataDir: t.TempDir()})
+
+	item, err := svc.MarkNormal(context.Background(), MarkNormalRequest{
+		StrmTaskID: 9,
+		ItemID:     pathToItemID(works[0].relKey),
+		MediaType:  MediaTypeTV,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !item.ManualDone || item.Status != ItemStatusOK || item.TMDBID != "" {
+		t.Fatalf("未匹配作品未进入手动完成：%+v", item)
+	}
+
+	item, started, err := svc.Rescrape(context.Background(), RescrapeRequest{
+		StrmTaskID: 9,
+		ItemID:     pathToItemID(works[0].relKey),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started || item.ManualDone || item.Status != ItemStatusMiss {
+		t.Fatalf("重新刮削应先恢复为待刮削：started=%v item=%+v", started, item)
+	}
+}
+
+func TestClearMatchOnlyRemovesScraperOwnedMetadata(t *testing.T) {
+	strmRoot := t.TempDir()
+	outputFolder := "错误匹配"
+	root := strm.TaskOutputDir(strmRoot, outputFolder)
+	show := filepath.Join(root, "自制作品")
+	mustMkdir(t, show)
+	mustWrite(t, filepath.Join(show, "S01E01.strm"), "x")
+	ownedNFO := filepath.Join(show, "tvshow.nfo")
+	ownedPoster := filepath.Join(show, "poster.jpg")
+	userFile := filepath.Join(show, "fanart.jpg")
+	mustWrite(t, ownedNFO, "<tvshow><title>错误作品</title><tmdbid>123</tmdbid></tvshow>\n")
+	mustWrite(t, ownedPoster, "wrong")
+	mustWrite(t, userFile, "keep")
+	works, err := scanWorks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := works[0]
+	if err := recordOwnedMetadata(g, ownedNFO); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordOwnedMetadata(g, ownedPoster); err != nil {
+		t.Fatal(err)
+	}
+	task := &domain.StrmTask{ID: 10, OutputFolder: outputFolder}
+	strmSvc := strm.NewService(strm.ServiceOptions{Repo: &rematchTaskRepo{task: task}, StrmDir: strmRoot})
+	svc := New(Options{Strm: strmSvc, StrmDir: strmRoot, DataDir: t.TempDir()})
+
+	item, err := svc.MarkNormal(context.Background(), MarkNormalRequest{
+		StrmTaskID: 10,
+		ItemID:     pathToItemID(g.relKey),
+		MediaType:  MediaTypeTV,
+		ClearMatch: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !item.ManualDone || item.TMDBID != "" || item.Title != "自制作品" {
+		t.Fatalf("错误匹配未正确取消：%+v", item)
+	}
+	for _, path := range []string{ownedNFO, ownedPoster} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("刮削元数据未清理：%s", path)
+		}
+	}
+	if _, err := os.Stat(userFile); err != nil {
+		t.Fatalf("用户元数据不应删除：%v", err)
 	}
 }
 

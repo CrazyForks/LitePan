@@ -21,6 +21,7 @@ export interface StrmScrapeItem {
   has_nfo: boolean;
   has_poster: boolean;
   has_pending?: boolean;
+  manual_done?: boolean;
   tmdb_id?: string;
   poster_url?: string;
   folder_name?: string;
@@ -140,7 +141,12 @@ export function rematchStrmScrapeItem(input: {
   return http.post<StrmScrapeRematchResult>("/admin/strm-scrape/rematch", input);
 }
 
-export function markStrmScrapeNormal(input: { strm_task_id: number; item_id: string }) {
+export function markStrmScrapeNormal(input: {
+  strm_task_id: number;
+  item_id: string;
+  media_type?: string;
+  clear_match?: boolean;
+}) {
   return http.post<StrmScrapeItem>("/admin/strm-scrape/mark-normal", input);
 }
 

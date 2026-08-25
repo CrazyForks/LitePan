@@ -16,7 +16,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const indexSchemaVersion = "1"
+const indexSchemaVersion = "2"
 
 // TaskIndexPath 返回任务刮削索引库路径：data/strmscrape/{task_id}.sqlite
 func TaskIndexPath(dataDir string, taskID int64) string {
@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS items (
   has_nfo INTEGER NOT NULL DEFAULT 0,
   has_poster INTEGER NOT NULL DEFAULT 0,
   has_pending INTEGER NOT NULL DEFAULT 0,
+  manual_done INTEGER NOT NULL DEFAULT 0,
   tmdb_id TEXT NOT NULL DEFAULT '',
   poster_rel TEXT NOT NULL DEFAULT '',
   folder_name TEXT NOT NULL DEFAULT '',
@@ -229,9 +230,9 @@ func upsertItemTx(tx *sql.Tx, it Item, posterRel string) error {
 	_, err := tx.Exec(`
 INSERT INTO items (
   id, rel_dir, strm_name, title, year, media_type, status,
-  has_nfo, has_poster, has_pending, tmdb_id, poster_rel, folder_name,
+  has_nfo, has_poster, has_pending, manual_done, tmdb_id, poster_rel, folder_name,
   file_count, ep_local, ep_tmdb, ep_scraped, tv_state, added_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   rel_dir=excluded.rel_dir,
   strm_name=excluded.strm_name,
@@ -242,6 +243,7 @@ ON CONFLICT(id) DO UPDATE SET
   has_nfo=excluded.has_nfo,
   has_poster=excluded.has_poster,
   has_pending=excluded.has_pending,
+  manual_done=excluded.manual_done,
   tmdb_id=excluded.tmdb_id,
   poster_rel=excluded.poster_rel,
   folder_name=excluded.folder_name,
@@ -252,7 +254,7 @@ ON CONFLICT(id) DO UPDATE SET
   tv_state=excluded.tv_state,
   added_at=excluded.added_at
 `, it.ID, it.RelDir, it.StrmName, it.Title, year, it.MediaType, it.Status,
-		boolToInt(it.HasNFO), boolToInt(it.HasPoster), boolToInt(it.HasPending),
+		boolToInt(it.HasNFO), boolToInt(it.HasPoster), boolToInt(it.HasPending), boolToInt(it.ManualDone),
 		it.TMDBID, posterRel, it.FolderName, it.FileCount, it.EpLocal, it.EpTMDB,
 		it.EpScraped, it.TVState, it.AddedAt)
 	return err
@@ -340,11 +342,11 @@ func scanIndexItems(rows *sql.Rows, strmTaskID int64) ([]Item, error) {
 	for rows.Next() {
 		var it Item
 		var year sql.NullInt64
-		var hasNFO, hasPoster, hasPending int
+		var hasNFO, hasPoster, hasPending, manualDone int
 		var posterRel string
 		if err := rows.Scan(
 			&it.ID, &it.RelDir, &it.StrmName, &it.Title, &year, &it.MediaType, &it.Status,
-			&hasNFO, &hasPoster, &hasPending, &it.TMDBID, &posterRel, &it.FolderName,
+			&hasNFO, &hasPoster, &hasPending, &manualDone, &it.TMDBID, &posterRel, &it.FolderName,
 			&it.FileCount, &it.EpLocal, &it.EpTMDB, &it.EpScraped, &it.TVState, &it.AddedAt,
 		); err != nil {
 			return nil, err
@@ -352,6 +354,7 @@ func scanIndexItems(rows *sql.Rows, strmTaskID int64) ([]Item, error) {
 		it.HasNFO = hasNFO != 0
 		it.HasPoster = hasPoster != 0
 		it.HasPending = hasPending != 0
+		it.ManualDone = manualDone != 0
 		if year.Valid {
 			y := int(year.Int64)
 			it.Year = &y
@@ -397,7 +400,7 @@ func (s *Service) listIndexItems(strmTaskID int64, query ItemListQuery) (ItemLis
 	}
 	querySQL := `
 SELECT id, rel_dir, strm_name, title, year, media_type, status,
-       has_nfo, has_poster, has_pending, tmdb_id, poster_rel, folder_name,
+       has_nfo, has_poster, has_pending, manual_done, tmdb_id, poster_rel, folder_name,
        file_count, ep_local, ep_tmdb, ep_scraped, tv_state, added_at
 FROM items
 `
@@ -439,6 +442,9 @@ func (s *Service) ensureIndexLocked(ctx context.Context, strmTaskID int64, root 
 	}
 	defer db.Close()
 	if ver, ok := readIndexMeta(db, "schema"); !ok || ver != indexSchemaVersion {
+		// 任务索引是可重建缓存，不做列迁移；先关闭并删除旧库，兼容 Windows 文件锁。
+		_ = db.Close()
+		RemoveTaskIndex(s.dataDir, strmTaskID)
 		return s.rebuildIndexLocked(ctx, strmTaskID)
 	}
 	if stored, ok := readIndexMeta(db, "root"); ok && stored != "" {
