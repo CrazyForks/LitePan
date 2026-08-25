@@ -24,6 +24,9 @@ const (
 	scanLifetime     = 15 * time.Minute
 	maxScanPlans     = 8
 	backupTempMinAge = time.Hour
+	// coverExtractTempMinAge 封面提取临时文件（保存上传中转 / ffmpeg 下载中转）视为残留的年龄阈值。
+	// 正常流程这些文件随用随删，超过 1 小时未被引用即视为异常中断残留。
+	coverExtractTempMinAge = time.Hour
 )
 
 type Service struct {
@@ -70,6 +73,7 @@ func (s *Service) Scan(ctx context.Context) (Report, error) {
 	items = append(items, scrapeItems...)
 	items = append(items, s.scanUploadTemps()...)
 	items = append(items, s.scanOfflineTemps(ctx)...)
+	items = append(items, s.scanCoverExtractTemps()...)
 
 	if s.opts.BackupTempScan != nil {
 		entries, scanErr := s.opts.BackupTempScan(ctx, backupTempMinAge)
@@ -104,6 +108,7 @@ func (s *Service) Scan(ctx context.Context) (Report, error) {
 		items = append(items, logItems...)
 	}
 	items = append(items, s.scanCache(ctx)...)
+	items = append(items, s.scanCoverExtractSession()...)
 
 	if s.opts.DB != nil {
 		reclaimable, dbErr := s.opts.DB.ReclaimableBytes(ctx)

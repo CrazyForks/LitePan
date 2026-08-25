@@ -25,7 +25,7 @@ const emit = defineEmits<{ "update:searchOpen": [boolean] }>();
 const { runLoad } = useSettingsLoad();
 
 const searchQuery = ref("");
-const cardTitles = ["Emby 反代", "飞牛影视反代", "115 STRM 增强", "夸克 STRM 接管", "AI 辅助识别", "目录整理分类", "从服务器上传", "垃圾清理", "视频海报生成"];
+const cardTitles = ["Emby 反代", "飞牛影视反代", "115 STRM 增强", "夸克 STRM 接管", "AI 辅助识别", "目录整理分类", "从服务器上传", "垃圾清理工具", "视频海报生成"];
 
 function matches(title: string) {
   const q = searchQuery.value.trim().toLowerCase();

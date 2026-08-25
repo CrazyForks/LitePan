@@ -2,6 +2,7 @@ package spacecleanup
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -199,6 +200,57 @@ func treeContainsOnlySystemJunk(root string) bool {
 	return onlyJunk
 }
 
+// scanCoverExtractTemps 扫描封面提取崩溃残留：data/coverextract 的 cover-*.jpg 与 data/tools 的 ffmpeg-*.gz / ffmpeg-*.tmp（超过 1 小时即视为异常中断残留）。
+func (s *Service) scanCoverExtractTemps() []planItem {
+	var out []planItem
+	out = append(out, s.scanDirStaleFiles(filepath.Join(s.opts.DataDir, "coverextract"), "cover-", "封面提取残留文件")...)
+	out = append(out, s.scanDirStaleFiles(filepath.Join(s.opts.DataDir, "tools"), "ffmpeg-", "封面提取残留文件")...)
+	return out
+}
+
+// scanDirStaleFiles 扫描 root 下以 prefix 开头、修改时间超过 1 小时的普通文件（不跟随符号链接）。
+func (s *Service) scanDirStaleFiles(root, prefix, name string) []planItem {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	cut := time.Now().Add(-coverExtractTempMinAge)
+	var out []planItem
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		if !strings.HasPrefix(entry.Name(), prefix) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if !info.ModTime().Before(cut) {
+			continue // 太新，可能是正在进行的操作
+		}
+		path := filepath.Clean(filepath.Join(root, entry.Name()))
+		out = append(out, planItem{
+			Item: Item{
+				ID:              itemID(kindCoverExtract, path),
+				Category:        CategoryTemp,
+				Name:            name,
+				Path:            path,
+				Reason:          "封面提取过程中异常中断留下的临时文件，超过 1 小时未被引用",
+				SizeBytes:       info.Size(),
+				FileCount:       1,
+				DefaultSelected: true,
+				Risk:            RiskSafe,
+			},
+			Kind:       kindCoverExtract,
+			TargetPath: path,
+			RootPath:   filepath.Clean(root),
+		})
+	}
+	return out
+}
+
 func (s *Service) scanUploadTemps() []planItem {
 	root := filepath.Join(s.opts.DataDir, "upload_tasks")
 	active := map[string]struct{}{}
@@ -289,6 +341,29 @@ func (s *Service) scanOfflineTemps(ctx context.Context) []planItem {
 		}
 	}
 	return out
+}
+
+// scanCoverExtractSession 列出视频海报生成的内存会话占用；清空需重新取帧，标为"会重建"且默认不勾选。
+func (s *Service) scanCoverExtractSession() []planItem {
+	if s.opts.CoverExtractStats == nil {
+		return nil
+	}
+	files, frames, bytes := s.opts.CoverExtractStats()
+	if files == 0 && frames == 0 {
+		return nil
+	}
+	return []planItem{{Item: Item{
+		ID:              itemID(kindCoverSession, "cover-extract-session"),
+		Category:        CategoryCache,
+		Name:            "视频海报生成内存会话",
+		Path:            "(内存)",
+		Reason:          fmt.Sprintf("清空待处理列表（%d 个视频）与候选帧（%d 张），释放内存；清空后需重新取帧", files, frames),
+		SizeBytes:       0,
+		MemoryBytes:     bytes,
+		FileCount:       int64(files),
+		DefaultSelected: false,
+		Risk:            RiskRebuild,
+	}, Kind: kindCoverSession}}
 }
 
 func (s *Service) scanLogs() ([]planItem, error) {

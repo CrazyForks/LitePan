@@ -103,6 +103,8 @@ func (s *Service) cleanupOne(ctx context.Context, item planItem) CleanupItemResu
 		result, err = s.cleanupScrapeIndex(ctx, item)
 	case kindUploadTemp:
 		result, err = s.cleanupUploadTemp(item)
+	case kindCoverExtract:
+		result, err = s.cleanupCoverExtractTemp(item)
 	case kindOfflineTemp:
 		result, err = s.cleanupOfflineTemp(ctx, item)
 	case kindBackupTemp:
@@ -115,6 +117,8 @@ func (s *Service) cleanupOne(ctx context.Context, item planItem) CleanupItemResu
 		result, err = s.cleanupMetadataCache(item)
 	case kindFuseCache:
 		result, err = s.cleanupFuseCache(ctx, item)
+	case kindCoverSession:
+		result, err = s.cleanupCoverSession(item)
 	case kindDatabase:
 		result, err = s.cleanupDatabase(ctx, item)
 	default:
@@ -236,6 +240,33 @@ func (s *Service) cleanupScrapeIndex(ctx context.Context, item planItem) (Cleanu
 		result.Status = "cleaned"
 	}
 	return result, nil
+}
+
+// cleanupCoverExtractTemp 删除封面提取残留临时文件；执行前复核路径为根目录直接子文件且修改时间仍超 1 小时。
+func (s *Service) cleanupCoverExtractTemp(item planItem) (CleanupItemResult, error) {
+	result := CleanupItemResult{ID: item.ID, Name: item.Name}
+	path := filepath.Clean(item.TargetPath)
+	root := filepath.Clean(item.RootPath)
+	if !directChildOf(root, path) {
+		return result, fmt.Errorf("封面提取临时路径无效")
+	}
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		result.Status, result.Message = "skipped", "文件已不存在"
+		return result, nil
+	}
+	if err != nil {
+		return result, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		result.Status, result.Message = "skipped", "符号链接不参与清理"
+		return result, nil
+	}
+	if !info.ModTime().Before(time.Now().Add(-coverExtractTempMinAge)) {
+		result.Status, result.Message = "skipped", "文件较新，可能正在使用"
+		return result, nil
+	}
+	return removeRegularFile(result, path)
 }
 
 func (s *Service) cleanupUploadTemp(item planItem) (CleanupItemResult, error) {
@@ -369,6 +400,21 @@ func (s *Service) cleanupFuseCache(ctx context.Context, item planItem) (CleanupI
 		return result, err
 	}
 	result.Status, result.FreedBytes, result.Files = "cleaned", stats.UsedBytes, stats.Blocks
+	return result, nil
+}
+
+func (s *Service) cleanupCoverSession(item planItem) (CleanupItemResult, error) {
+	result := CleanupItemResult{ID: item.ID, Name: item.Name}
+	if s.opts.ClearCoverExtract == nil {
+		result.Status, result.Message = "skipped", "视频海报生成服务未就绪"
+		return result, nil
+	}
+	files, frames, freed := s.opts.ClearCoverExtract()
+	if files == 0 && frames == 0 {
+		result.Status, result.Message = "skipped", "视频海报生成会话已为空"
+		return result, nil
+	}
+	result.Status, result.MemoryBytes, result.Files = "cleaned", freed, int64(files)
 	return result, nil
 }
 

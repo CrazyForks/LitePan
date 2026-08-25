@@ -51,6 +51,10 @@ func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core
 	if err != nil {
 		return nil, err
 	}
+	coverExtractSvc, err := coverextract.New(coverextract.Options{DataDir: cfg.DataDir, ListenAddr: cfg.ListenAddr, Files: svc.files, Playback: svc.playback})
+	if err != nil {
+		return nil, err
+	}
 	spaceCleanupSvc, err := spacecleanup.New(spacecleanup.Options{
 		DataDir:   cfg.DataDir,
 		StrmDir:   cfg.StrmDir,
@@ -98,6 +102,12 @@ func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core
 			}
 			return svc.fuseReadCache.ClearAll(ctx)
 		},
+		CoverExtractStats: func() (int, int, int64) {
+			return coverExtractSvc.Stats()
+		},
+		ClearCoverExtract: func() (int, int, int64) {
+			return coverExtractSvc.ClearWithStats()
+		},
 		AfterMetadataClear: func() {
 			core.listHits.Reset()
 			svc.playback.InvalidateAll()
@@ -108,10 +118,6 @@ func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core
 			}
 		},
 	})
-	if err != nil {
-		return nil, err
-	}
-	coverExtractSvc, err := coverextract.New(coverextract.Options{DataDir: cfg.DataDir, ListenAddr: cfg.ListenAddr, Files: svc.files, Playback: svc.playback})
 	if err != nil {
 		return nil, err
 	}

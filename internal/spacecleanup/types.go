@@ -24,12 +24,14 @@ const (
 	kindSystemFile   = "system_file"
 	kindScrapeIndex  = "scrape_index"
 	kindUploadTemp   = "upload_temp"
+	kindCoverExtract = "cover_extract_temp"
 	kindOfflineTemp  = "offline_temp"
 	kindBackupTemp   = "backup_temp"
 	kindExpiredLog   = "expired_log"
 	kindExpiredCache = "expired_cache"
 	kindMetadata     = "metadata_cache"
 	kindFuseCache    = "fuse_cache"
+	kindCoverSession = "cover_session"
 	kindDatabase     = "database"
 )
 
@@ -131,6 +133,8 @@ type Options struct {
 	BackupTempClean    func(context.Context, []string, time.Duration) (int, int64, error)
 	FuseCacheStats     func(context.Context) (FuseStats, error)
 	ClearFuseCache     func(context.Context) error
+	CoverExtractStats  func() (files, frames int, bytes int64)
+	ClearCoverExtract  func() (files, frames int, bytes int64)
 	AfterMetadataClear func()
 }
 

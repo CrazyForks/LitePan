@@ -226,7 +226,6 @@ func (s *Service) Remove(id string) {
 	}
 }
 
-// RemoveFrame 移除某视频的单个候选画面（同时释放图片缓存）。
 func (s *Service) RemoveFrame(sessionID, frameID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -252,12 +251,28 @@ func (s *Service) RemoveFrame(sessionID, frameID string) error {
 	return nil
 }
 func (s *Service) Clear() {
+	_, _, _ = s.ClearWithStats()
+}
+
+// Stats 返回当前内存会话占用（文件数、候选帧数、图片字节数），供清理工具只读统计。
+func (s *Service) Stats() (files, frames int, bytes int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return len(s.files), len(s.frames), s.imageLen
+}
+
+// ClearWithStats 清空全部会话并返回释放统计（待处理文件、候选帧、图片字节），供清理工具使用。
+func (s *Service) ClearWithStats() (files, frames int, bytes int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	files = len(s.files)
+	frames = len(s.frames)
+	bytes = s.imageLen
 	s.files = map[string]*SessionFile{}
 	s.frames = map[string]*imageEntry{}
 	s.tokens = map[string]*sourceToken{}
 	s.imageLen = 0
+	return files, frames, bytes
 }
 
 func (s *Service) Runtime() map[string]any {
@@ -347,8 +362,7 @@ func (s *Service) Save(ctx context.Context, req SaveRequest) (SaveResult, error)
 	return s.saveData(ctx, local, data, req.Overwrite)
 }
 
-// SaveComposed 保存浏览器 Canvas 生成的最终海报。候选帧仍用于校验会话归属，
-// 避免客户端绕过取帧流程向任意网盘目录写入图片。
+// SaveComposed 保存 Canvas 生成的最终海报；候选帧校验会话归属，防客户端绕过取帧流程写入任意目录。
 func (s *Service) SaveComposed(ctx context.Context, req SaveRequest, data []byte) (SaveResult, error) {
 	if len(data) == 0 || int64(len(data)) > MaxPosterBytes {
 		return SaveResult{}, domain.Errorf(domain.CodeValidation, "合成海报大小无效")

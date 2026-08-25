@@ -345,17 +345,17 @@ async function executeCleanup() {
 </script>
 
 <template>
-  <div v-show="matches('垃圾清理')">
+  <div v-show="matches('垃圾清理工具')">
     <CloudToolCard
       :enabled="true"
-      name="垃圾清理"
+      name="垃圾清理工具"
       driver="本地数据 · 扫描预览后清理"
       logo-src="/logos/cleanup.png"
-      logo-alt="垃圾清理"
+      logo-alt="垃圾清理工具"
       :stat-value="statValue"
       :stat-label="statLabel"
     >
-      扫描 STRM 残留、临时文件、日志和缓存，勾选后安全清理本地空间。
+      扫描 STRM 残留、上传与下载临时文件、历史日志和缓存占用，按风险分级预览，勾选后安全清理本地空间。
       <template #actions>
         <AppButton size="sm" variant="secondary" :disabled="scanning" @click="openTool">
           {{ scanning ? "扫描中…" : "开始扫描" }}

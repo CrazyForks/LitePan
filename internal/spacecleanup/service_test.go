@@ -297,3 +297,160 @@ func writeTestFile(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+func TestScanAndCleanCoverExtractTemps(t *testing.T) {
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	strmDir := filepath.Join(root, "strm")
+	coverDir := filepath.Join(dataDir, "coverextract")
+	toolsDir := filepath.Join(dataDir, "tools")
+	for _, dir := range []string{coverDir, toolsDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 正式二进制与正在使用的文件
+	writeTestFile(t, filepath.Join(toolsDir, "ffmpeg"), "binary")
+	writeTestFile(t, filepath.Join(coverDir, "cover-fresh.jpg"), "fresh")
+	// 过期残留
+	staleJpg := filepath.Join(coverDir, "cover-stale.jpg")
+	staleGz := filepath.Join(toolsDir, "ffmpeg-abc.gz")
+	staleTmp := filepath.Join(toolsDir, "ffmpeg-abc.tmp")
+	writeTestFile(t, staleJpg, "stale")
+	writeTestFile(t, staleGz, "stale")
+	writeTestFile(t, staleTmp, "stale")
+	old := time.Now().Add(-2 * time.Hour)
+	for _, p := range []string{staleJpg, staleGz, staleTmp} {
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	repo := &strmTaskRepoStub{}
+	service, err := New(Options{DataDir: dataDir, StrmDir: strmDir, StrmTasks: repo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := service.Scan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := reportItems(report)
+
+	if _, ok := findItemByPath(items, filepath.Join(toolsDir, "ffmpeg")); ok {
+		t.Fatal("tools/ffmpeg 正式二进制不应进入清理项")
+	}
+	if _, ok := findItemByPath(items, filepath.Join(coverDir, "cover-fresh.jpg")); ok {
+		t.Fatal("新生成的 cover-*.jpg 不应进入清理项")
+	}
+	for _, p := range []string{staleJpg, staleGz, staleTmp} {
+		item, ok := findItemByPath(items, p)
+		if !ok {
+			t.Fatalf("过期残留 %s 应进入清理项", p)
+		}
+		if !item.DefaultSelected || item.Risk != RiskSafe {
+			t.Fatalf("过期残留 %s 应默认可安全清理：%+v", p, item)
+		}
+	}
+
+	// 只选中三个过期残留执行清理
+	var ids []string
+	for _, p := range []string{staleJpg, staleGz, staleTmp} {
+		item, _ := findItemByPath(items, p)
+		ids = append(ids, item.ID)
+	}
+	exec, err := service.Cleanup(context.Background(), CleanupRequest{ScanID: report.ScanID, ItemIDs: ids})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exec.CleanedItems != 3 {
+		t.Fatalf("应清理 3 个残留，实际 %d", exec.CleanedItems)
+	}
+	for _, p := range []string{staleJpg, staleGz, staleTmp} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("残留文件应已删除：%s", p)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(toolsDir, "ffmpeg")); err != nil {
+		t.Fatalf("正式 ffmpeg 不应被删除：%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(coverDir, "cover-fresh.jpg")); err != nil {
+		t.Fatalf("新文件不应被删除：%v", err)
+	}
+}
+
+// TestScanCleanCoverExtractSession 验证视频海报生成内存会话可被列出与清理：
+// 有内容时列为"会重建"且默认不勾选；清理释放内存统计；空会话不列出。
+func TestScanCleanCoverExtractSession(t *testing.T) {
+	root := t.TempDir()
+	dataDir := filepath.Join(root, "data")
+	strmDir := filepath.Join(root, "strm")
+	repo := &strmTaskRepoStub{}
+	stats := func() (int, int, int64) { return 2, 5, 42 << 20 }
+	cleared := 0
+	service, err := New(Options{
+		DataDir:           dataDir,
+		StrmDir:           strmDir,
+		StrmTasks:         repo,
+		CoverExtractStats: func() (int, int, int64) { return stats() },
+		ClearCoverExtract: func() (int, int, int64) {
+			cleared++
+			return stats()
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := service.Scan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, ok := findItemByName(reportItems(report), "视频海报生成内存会话")
+	if !ok {
+		t.Fatal("有会话内容时应列出视频海报生成内存会话")
+	}
+	if item.DefaultSelected || item.Risk != RiskRebuild {
+		t.Fatalf("内存会话应标为会重建且默认不勾选：%+v", item)
+	}
+	if item.MemoryBytes != 42<<20 {
+		t.Fatalf("内存字节统计不符：%d", item.MemoryBytes)
+	}
+	exec, err := service.Cleanup(context.Background(), CleanupRequest{ScanID: report.ScanID, ItemIDs: []string{item.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exec.CleanedItems != 1 || exec.MemoryFreedBytes != 42<<20 {
+		t.Fatalf("清理结果不符：cleaned=%d memory=%d", exec.CleanedItems, exec.MemoryFreedBytes)
+	}
+	if cleared != 1 {
+		t.Fatalf("应调用一次清理，实际 %d", cleared)
+	}
+
+	// 空会话不再列出
+	service2, err := New(Options{
+		DataDir:           dataDir,
+		StrmDir:           strmDir,
+		StrmTasks:         repo,
+		CoverExtractStats: func() (int, int, int64) { return 0, 0, 0 },
+		ClearCoverExtract: func() (int, int, int64) { return 0, 0, 0 },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, err := service2.Scan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findItemByName(reportItems(empty), "视频海报生成内存会话"); ok {
+		t.Fatal("空会话不应列出")
+	}
+}
+
+func findItemByName(items []Item, name string) (Item, bool) {
+	for _, it := range items {
+		if it.Name == name {
+			return it, true
+		}
+	}
+	return Item{}, false
+}

@@ -16,8 +16,6 @@ import (
 	"litepan/internal/settings"
 )
 
-// ── 海报默认样式持久化 ──
-
 var (
 	coverStyleShapeSet = map[string]struct{}{"slant": {}, "straight": {}}
 	coverHexColorRe    = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
