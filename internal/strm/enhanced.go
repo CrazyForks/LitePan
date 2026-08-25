@@ -108,7 +108,8 @@ func scanEnhancedTask(
 
 // pruneDirCache 清理“任务根范围内、本次清单未出现”的 pid→路径 记录：
 // 目录被删除（含其所有子路径）后，下次增强扫描即被清除，不需要定时任务。
-// 清单为空或任务根为网盘根时跳过，避免 API 异常误清或跨任务误删。
+// 清单为空、任务根为网盘根、或本次清单覆盖的目录数相对缓存明显缩水时跳过：
+// 空清单与缩水清单都可能来自 115 分页异常/限流导致的拉取不完整，误清映射只会放大路径漂移。
 func pruneDirCache(ctx context.Context, deps ScanDeps, task *domain.StrmTask, entries []driver.FullListEntry) error {
 	if deps.DirCache == nil || len(entries) == 0 {
 		return nil
@@ -129,6 +130,11 @@ func pruneDirCache(ctx context.Context, deps ScanDeps, task *domain.StrmTask, en
 		if pid := strings.TrimSpace(e.ParentID); pid != "" {
 			seen[pid] = struct{}{}
 		}
+	}
+	// 规模保护：本次清单实际覆盖的目录数不足已有缓存的一半时，判定为拉取不完整，
+	// 跳过清理，避免把未扫到的目录误判为“已删除”而清掉映射。
+	if len(seen) > 0 && len(seen) < len(existing)/2 {
+		return nil
 	}
 	var stale []string
 	for _, rec := range existing {

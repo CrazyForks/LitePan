@@ -13,12 +13,15 @@ const fullListPageSize = 1150
 
 // ListAllFiles 使用 cur=0 让服务端递归展开 rootID 下全部文件，分页拉取。
 // 该模式不返回文件夹，条目自带 pid，由上层结合 pid→路径 缓存还原目录结构。
-// 拉取完整性不做 count 严格校验：接口 count 可能因厂商缓存/并发滞后而不可信，
-// 误删风险统一由上层清理前的规模保护承担。
+// 完整性策略：第一页即拿到接口 Count 作为总数，按“页数 = 总数/页大小”固定拉满每一页，
+// 不再用“本页不足页大小就提前停”的短页判断——115 单页可能因厂商缓存/并发滞后返回不足
+// 一页但后面仍有数据，短页提前停会导致清单不完整，进而让上层把未扫到的目录误判为已删除。
+// 每页仍以空页作为兜底终点，避免依赖不可信的 Count 死循环。
 func (d *Driver) ListAllFiles(ctx context.Context, rootID string) ([]driver.FullListEntry, error) {
 	root := d.normalizeParent(rootID)
 	var entries []driver.FullListEntry
 	offset := 0
+	total := int64(-1)
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -37,6 +40,9 @@ func (d *Driver) ListAllFiles(ctx context.Context, rootID string) ([]driver.Full
 		if len(page.Data) == 0 {
 			break
 		}
+		if total < 0 && page.Count > 0 {
+			total = page.Count
+		}
 		for _, f := range page.Data {
 			if isTrashed(f) {
 				continue
@@ -52,10 +58,7 @@ func (d *Driver) ListAllFiles(ctx context.Context, rootID string) ([]driver.Full
 			})
 		}
 		offset += len(page.Data)
-		if page.Count > 0 && int64(offset) >= page.Count {
-			break
-		}
-		if len(page.Data) < fullListPageSize {
+		if total > 0 && int64(offset) >= total {
 			break
 		}
 	}
