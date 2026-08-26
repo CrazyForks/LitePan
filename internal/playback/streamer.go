@@ -24,7 +24,15 @@ func (s *Service) serveStream(w http.ResponseWriter, r *http.Request, req Reques
 		return s.serveLocalFile(w, r, res, name, localPath, intent)
 	}
 
-	lh := &linkHolder{svc: s, link: res.Link, accountID: req.AccountID, fileID: req.FileID, ua: ua, refreshLeft: 2}
+	lh := &linkHolder{
+		svc:         s,
+		link:        res.Link,
+		accountID:   req.AccountID,
+		fileID:      req.FileID,
+		ua:          ua,
+		playback:    intent.allowsPlaybackResolve(),
+		refreshLeft: 2,
+	}
 	partSize := res.Link.ChunkSize
 	if partSize <= 0 {
 		partSize = defaultPartSize

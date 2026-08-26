@@ -56,6 +56,7 @@ const (
 	KeyCoverExtractEnabled         = "cover_extract_enabled"
 	KeyCoverExtractStyle           = "cover_extract_style"
 	KeyQuarkTVEnabled              = "quark_tv_enabled"
+	KeyQuarkTVProxyClients         = "quark_tv_proxy_clients"
 	KeyStrmScrapeWriteMode         = "strm_scrape_write_mode"
 
 	KeyMOProxyEnabled          = "mo_proxy_enabled"
@@ -308,6 +309,12 @@ func defaultSpecs() []Spec {
 			Key:     KeyQuarkTVEnabled,
 			Type:    TypeBool,
 			Default: "false",
+			Hidden:  true,
+		},
+		{
+			Key:     KeyQuarkTVProxyClients,
+			Type:    TypeString,
+			Default: "vidhub",
 			Hidden:  true,
 		},
 	}

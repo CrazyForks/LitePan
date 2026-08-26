@@ -16,7 +16,7 @@ import QuarkTVBindModal from "@/components/admin/QuarkTVBindModal.vue";
 
 const props = withDefaults(defineProps<{ searchQuery?: string }>(), { searchQuery: "" });
 
-const qtvStatus = ref<QuarkTVStatus>({ enabled: false, available: false, bindings: [] });
+const qtvStatus = ref<QuarkTVStatus>({ enabled: false, available: false, proxy_clients: "", bindings: [] });
 const qtvSaving = ref(false);
 const qtvAccounts = ref<QuarkTVAccount[]>([]);
 const qtvBindOpen = ref(false);
@@ -26,6 +26,7 @@ const qtvSelectedID = ref("");
 const qtvForm = reactive({
   preferred_resolution: "4k",
   allow_dolby: "false",
+  proxy_clients: "",
 });
 
 const settingsChanged = computed(() => {
@@ -33,7 +34,8 @@ const settingsChanged = computed(() => {
   if (!binding) return false;
   return (
     qtvForm.preferred_resolution !== normalizeResolutionForUI(binding.preferred_resolution || "auto") ||
-    qtvForm.allow_dolby !== String(!!binding.allow_dolby)
+    qtvForm.allow_dolby !== String(!!binding.allow_dolby) ||
+    normalizeClientKeywords(qtvForm.proxy_clients) !== normalizeClientKeywords(qtvStatus.value.proxy_clients)
   );
 });
 
@@ -84,6 +86,13 @@ const workspaceFields = computed<ProxyField[]>(() => [
     switchHint: "开启后优先尝试杜比视界；不可用时会自动降级到上面的清晰度偏好。",
     disabled: dolbyControlDisabled.value,
   },
+  {
+    key: "proxy_clients",
+    label: "本机代理客户端",
+    helpTitle: "本机代理客户端",
+    helpBody: "部分播放器不兼容夸克 TV 转码。命中的客户端会跳过 TV 接管，改由夸克驱动本机代理播放。多个名称用分号分隔，例如 vidhub；客户端名称可在 Debug 日志中查看。Emby 等经媒体服务器拉流的客户端无法按名称识别，如遇兼容问题请关闭夸克 TV 接管。",
+    placeholder: "例如：vidhub",
+  },
 ]);
 
 function matches(title: string) {
@@ -92,7 +101,7 @@ function matches(title: string) {
 }
 
 async function load() {
-  qtvStatus.value = await quarkTVApi.status().catch(() => ({ enabled: false, available: false, bindings: [] }));
+  qtvStatus.value = await quarkTVApi.status().catch(() => ({ enabled: false, available: false, proxy_clients: "", bindings: [] }));
 }
 
 onMounted(() => {
@@ -133,6 +142,7 @@ function selectBinding(id: string) {
   qtvSelectedID.value = id;
   qtvForm.preferred_resolution = normalizeResolutionForUI(binding.preferred_resolution || "auto");
   qtvForm.allow_dolby = String(!!binding.allow_dolby);
+  qtvForm.proxy_clients = qtvStatus.value.proxy_clients || "";
 }
 
 function displayMembership(binding: QuarkTVBinding | null) {
@@ -162,6 +172,20 @@ function normalizeResolutionForUI(value: string) {
   }
 }
 
+function normalizeClientKeywords(value: string) {
+  const seen = new Set<string>();
+  return value
+    .split(/[;；]/)
+    .map((item) => item.trim())
+    .filter((item) => {
+      const key = item.toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .join(";");
+}
+
 async function openBind() {
   try {
     const res = await quarkTVApi.accounts();
@@ -183,7 +207,7 @@ function closeBind() {
 
 async function onBound() {
   qtvBindOpen.value = false;
-  const st = await quarkTVApi.status().catch(() => ({ enabled: false, available: false, bindings: [] }));
+  const st = await quarkTVApi.status().catch(() => ({ enabled: false, available: false, proxy_clients: "", bindings: [] }));
   qtvStatus.value = st;
   if (st.bindings.length) {
     selectBinding(String(st.bindings[st.bindings.length - 1].account_id));
@@ -234,14 +258,17 @@ async function saveSettings() {
   if (!binding) return;
   qtvSavingSettings.value = true;
   try {
-    const updated = await quarkTVApi.updateBindingSettings({
+    const result = await quarkTVApi.updateBindingSettings({
       account_id: binding.account_id,
       preferred_resolution: qtvForm.preferred_resolution,
       allow_dolby: qtvForm.allow_dolby === "true",
+      proxy_clients: qtvForm.proxy_clients,
     });
     qtvStatus.value.bindings = qtvStatus.value.bindings.map((item) =>
-      item.account_id === updated.account_id ? updated : item,
+      item.account_id === result.binding.account_id ? result.binding : item,
     );
+    qtvStatus.value.proxy_clients = result.proxy_clients;
+    qtvForm.proxy_clients = result.proxy_clients;
     toast.success("播放设置已保存");
   } catch (e) {
     toast.error(getApiErrorMessage(e, "保存播放设置失败"));

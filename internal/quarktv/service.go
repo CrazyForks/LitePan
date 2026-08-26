@@ -14,6 +14,7 @@ import (
 	"litepan/internal/domain"
 	"litepan/internal/driver"
 	"litepan/internal/eventbus"
+	"litepan/internal/proxybase"
 	"litepan/internal/settings"
 )
 
@@ -119,14 +120,20 @@ type BindingView struct {
 
 // Status 是卡片状态。
 type Status struct {
-	Enabled   bool          `json:"enabled"`
-	Available bool          `json:"available"`
-	Bindings  []BindingView `json:"bindings"`
+	Enabled      bool          `json:"enabled"`
+	Available    bool          `json:"available"`
+	ProxyClients string        `json:"proxy_clients"`
+	Bindings     []BindingView `json:"bindings"`
 }
 
 // Status 汇总卡片状态。
 func (s *Service) Status(ctx context.Context) (Status, error) {
-	st := Status{Enabled: s.Enabled(), Available: s.bindings != nil, Bindings: []BindingView{}}
+	st := Status{
+		Enabled:      s.Enabled(),
+		Available:    s.bindings != nil,
+		ProxyClients: s.ProxyClients(),
+		Bindings:     []BindingView{},
+	}
 	if s.accounts == nil || s.bindings == nil {
 		return st, nil
 	}
@@ -289,6 +296,7 @@ func (s *Service) DeleteBinding(ctx context.Context, accountID int64) error {
 type BindingSettings struct {
 	PreferredResolution string `json:"preferred_resolution"`
 	AllowDolby          bool   `json:"allow_dolby"`
+	ProxyClients        string `json:"proxy_clients"`
 }
 
 func (s *Service) UpdateBindingSettings(ctx context.Context, accountID int64, in BindingSettings) (*BindingView, error) {
@@ -310,6 +318,13 @@ func (s *Service) UpdateBindingSettings(ctx context.Context, accountID int64, in
 	if err := s.bindings.Upsert(ctx, b); err != nil {
 		return nil, err
 	}
+	if s.settings != nil {
+		if err := s.settings.Update(ctx, map[string]string{
+			settings.KeyQuarkTVProxyClients: proxybase.NormalizeClientKeywords(in.ProxyClients),
+		}); err != nil {
+			return nil, err
+		}
+	}
 	acc, err := s.accounts.Get(ctx, accountID)
 	if err != nil {
 		return nil, err
@@ -328,10 +343,23 @@ func (s *Service) UpdateBindingSettings(ctx context.Context, accountID int64, in
 	}, nil
 }
 
+// ProxyClients 返回跳过 TV 转码、改走夸克驱动本机代理的客户端关键字列表。
+func (s *Service) ProxyClients() string {
+	if s.settings == nil {
+		return ""
+	}
+	return proxybase.NormalizeClientKeywords(s.settings.String(settings.KeyQuarkTVProxyClients))
+}
+
 // ResolveHook 是播放解析接管钩子；返回 handled=true 表示用 TV 直链替换原解析。
 // 仅接管“播放”场景（前台预览/STRM 等），WebDAV、FUSE 等字节级读取（playback=false）不接管。
+// 例外客户端（本机代理客户端列表）按 User-Agent 匹配，命中则跳过 TV 接管。
 func (s *Service) ResolveHook(ctx context.Context, accountID int64, driverType, fileID, ua string, playback bool) (*domain.DownloadInfo, bool, error) {
 	if !playback || driverType != driverQuark || !s.Enabled() || s.bindings == nil {
+		return nil, false, nil
+	}
+	if proxybase.MatchesClientText(s.ProxyClients(), ua) {
+		s.log.Debug("夸克 TV 播放命中本机代理客户端", "account_id", accountID, "user_agent", ua)
 		return nil, false, nil
 	}
 	b, err := s.bindings.Get(ctx, accountID)

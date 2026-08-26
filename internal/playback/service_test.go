@@ -73,6 +73,53 @@ func TestIsInlinePreviewType(t *testing.T) {
 	}
 }
 
+func TestIntentAllowsPlaybackResolve(t *testing.T) {
+	tests := []struct {
+		name   string
+		intent Intent
+		want   bool
+	}{
+		{name: "普通播放", intent: Intent{}, want: true},
+		{name: "WebDAV 读取原始文件", intent: Intent{WebDAV: true}, want: false},
+		{name: "海报取帧读取原始文件", intent: Intent{OriginalFile: true}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.intent.allowsPlaybackResolve(); got != tt.want {
+				t.Fatalf("allowsPlaybackResolve()=%v，期望 %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveCacheVariantSeparatesPlaybackAndOriginal(t *testing.T) {
+	playbackKey := resolveCacheVariant("FFmpeg", true)
+	originalKey := resolveCacheVariant("FFmpeg", false)
+	if playbackKey == originalKey {
+		t.Fatal("播放与原始文件解析不应共用缓存变体")
+	}
+}
+
+func TestShouldRefreshUpstreamStatus(t *testing.T) {
+	tests := map[int]bool{
+		http.StatusUnauthorized:                 true,
+		http.StatusForbidden:                    true,
+		http.StatusNotFound:                     true,
+		http.StatusRequestTimeout:               true,
+		http.StatusTooManyRequests:              true,
+		http.StatusInternalServerError:          true,
+		http.StatusBadGateway:                   true,
+		http.StatusBadRequest:                   false,
+		http.StatusRequestedRangeNotSatisfiable: false,
+	}
+	for status, want := range tests {
+		if got := shouldRefreshUpstreamStatus(status); got != want {
+			t.Errorf("shouldRefreshUpstreamStatus(%d)=%v，期望 %v", status, got, want)
+		}
+	}
+}
+
 func TestWriteRedirectDisablesCaching(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/files/download", nil)
 	recorder := httptest.NewRecorder()

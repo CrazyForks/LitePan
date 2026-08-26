@@ -2,12 +2,8 @@ package guangya
 
 import (
 	"context"
-	"fmt"
-	"io"
 	"strings"
 	"time"
-
-	"net/http"
 
 	"litepan/internal/domain"
 	"litepan/internal/driver"
@@ -20,25 +16,10 @@ const (
 )
 
 const (
-	downloadURLProbeRetries = 3
-	downloadURLProbeBytes   = 256 << 10
-	downloadURLProbeMinSize = 16 << 20
-	downloadURLProbePerURL  = 2
-	downloadPartSize        = 10 * 1024 * 1024
-	downloadConcurrency     = 1
+	downloadURLFetchAttempts = 3
+	downloadURLRetryDelay    = 500 * time.Millisecond
+	downloadPartSize         = 10 * 1024 * 1024
 )
-
-var downloadThawWaitMax = 45 * time.Second
-
-var downloadThawWaitSchedule = []time.Duration{
-	2 * time.Second,
-	5 * time.Second,
-	10 * time.Second,
-	10 * time.Second,
-	10 * time.Second,
-}
-
-const defaultProbeUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 type downloadLink struct {
 	URL        string
@@ -55,96 +36,29 @@ func pickDownloadURL(data *downloadData) string {
 
 func (d *Driver) fetchDownloadData(ctx context.Context, fileID string) (downloadData, error) {
 	var data downloadData
-	if err := d.apiRequest(ctx, pathDownloadURL, map[string]any{"fileId": fileID}, &data); err != nil {
-		return downloadData{}, err
+	for attempt := 0; attempt < downloadURLFetchAttempts; attempt++ {
+		data = downloadData{}
+		if err := d.apiRequest(ctx, pathDownloadURL, map[string]any{"fileId": fileID}, &data); err != nil {
+			return downloadData{}, err
+		}
+		if pickDownloadURL(&data) != "" {
+			return data, nil
+		}
+		if attempt+1 < downloadURLFetchAttempts {
+			if err := sleepCtx(ctx, downloadURLRetryDelay*time.Duration(attempt+1)); err != nil {
+				return downloadData{}, err
+			}
+		}
 	}
-	if pickDownloadURL(&data) == "" {
-		return downloadData{}, domain.Errorf(domain.CodeDriverError, "光鸭下载地址为空")
-	}
-	return data, nil
+	return downloadData{}, domain.Errorf(domain.CodeDriverError, "光鸭下载地址为空，重试 %d 次后仍未就绪", downloadURLFetchAttempts)
 }
 
-func (d *Driver) fetchDownloadLink(ctx context.Context, fileID string, fileSize int64, thawProbe bool, ua string) (downloadLink, bool, error) {
+func (d *Driver) fetchDownloadLink(ctx context.Context, fileID string) (downloadLink, error) {
 	data, err := d.fetchDownloadData(ctx, fileID)
 	if err != nil {
-		return downloadLink{}, false, err
+		return downloadLink{}, err
 	}
-	url := pickDownloadURL(&data)
-	exp := data.linkExpiration()
-	if !thawProbe || fileSize < downloadURLProbeMinSize {
-		return downloadLink{URL: url, Expiration: exp}, true, nil
-	}
-
-	deadline := time.Now().Add(downloadThawWaitMax)
-	waitIdx := 0
-	ua = probeUserAgent(ua)
-
-	for urlRound := 0; urlRound < downloadURLProbeRetries; urlRound++ {
-		for !time.Now().After(deadline) {
-			if d.probeDownloadRange(ctx, url, ua) {
-				return downloadLink{URL: url, Expiration: exp}, true, nil
-			}
-			wait := thawWaitAt(waitIdx)
-			waitIdx++
-			if err := sleepCtx(ctx, wait); err != nil {
-				return downloadLink{}, false, err
-			}
-		}
-		if urlRound+1 >= downloadURLProbeRetries {
-			break
-		}
-		data, err = d.fetchDownloadData(ctx, fileID)
-		if err != nil {
-			return downloadLink{}, false, err
-		}
-		url = pickDownloadURL(&data)
-		exp = data.linkExpiration()
-	}
-	return downloadLink{URL: url, Expiration: exp}, false, nil
-}
-
-func probeUserAgent(ua string) string {
-	if ua = strings.TrimSpace(ua); ua != "" {
-		return ua
-	}
-	return defaultProbeUserAgent
-}
-
-func thawWaitAt(idx int) time.Duration {
-	if idx < len(downloadThawWaitSchedule) {
-		return downloadThawWaitSchedule[idx]
-	}
-	return 10 * time.Second
-}
-
-func (d *Driver) probeDownloadRange(ctx context.Context, url, ua string) bool {
-	for i := 0; i < downloadURLProbePerURL; i++ {
-		if d.probeDownloadRangeOnce(ctx, url, ua) {
-			return true
-		}
-	}
-	return false
-}
-
-func (d *Driver) probeDownloadRangeOnce(ctx context.Context, url, ua string) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return false
-	}
-	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", downloadURLProbeBytes-1))
-	req.Header.Set("User-Agent", ua)
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Encoding", "identity")
-	resp, err := d.client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		return false
-	}
-	n, err := io.Copy(io.Discard, io.LimitReader(resp.Body, downloadURLProbeBytes))
-	return err == nil && n > 0
+	return downloadLink{URL: pickDownloadURL(&data), Expiration: data.linkExpiration()}, nil
 }
 
 func (d *Driver) ResolveDownload(ctx context.Context, req driver.DownloadRequest) (*domain.DownloadInfo, error) {
@@ -168,34 +82,17 @@ func (d *Driver) ResolveDownload(ctx context.Context, req driver.DownloadRequest
 		fileName = entry.FileName
 	}
 
-	thawProbe := size >= downloadURLProbeMinSize
-	link, ready, err := d.fetchDownloadLink(ctx, fileID, size, thawProbe, req.UA)
+	link, err := d.fetchDownloadLink(ctx, fileID)
 	if err != nil {
 		return nil, err
 	}
-	if !ready {
-		if mode == domain.DownloadProxy {
-			return nil, domain.Errorf(domain.CodeDriverError, "光鸭 CDN 归档解冻超时，请稍后重试")
-		}
-		return &domain.DownloadInfo{
-			URL:         link.URL,
-			Mode:        mode,
-			Size:        size,
-			FileName:    fileName,
-			Expiration:  link.Expiration,
-			ForceProxy:  true,
-			ChunkSize:   downloadPartSize,
-			Concurrency: downloadConcurrency,
-		}, nil
-	}
 	return &domain.DownloadInfo{
-		URL:         link.URL,
-		Mode:        mode,
-		Size:        size,
-		FileName:    fileName,
-		Expiration:  link.Expiration,
-		ChunkSize:   downloadPartSize,
-		Concurrency: downloadConcurrency,
+		URL:        link.URL,
+		Mode:       mode,
+		Size:       size,
+		FileName:   fileName,
+		Expiration: link.Expiration,
+		ChunkSize:  downloadPartSize,
 	}, nil
 }
 

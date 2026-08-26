@@ -160,7 +160,13 @@ func MatchesClientKeywords(r *http.Request, value string) bool {
 	if r == nil {
 		return false
 	}
-	haystack := strings.ToLower(EmbyClientName(r) + "\n" + r.UserAgent())
+	return MatchesClientText(value, EmbyClientName(r), r.UserAgent())
+}
+
+// MatchesClientText 判断一组客户端标识文本是否命中关键字列表。
+// 用于只拿得到 User-Agent、无法访问完整 HTTP 请求的播放解析钩子。
+func MatchesClientText(value string, candidates ...string) bool {
+	haystack := strings.ToLower(strings.Join(candidates, "\n"))
 	for _, keyword := range splitClientKeywords(value) {
 		if strings.Contains(haystack, strings.ToLower(keyword)) {
 			return true

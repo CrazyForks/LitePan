@@ -133,6 +133,7 @@ func (h *Handler) updateQuarkTVBindingSettings(w http.ResponseWriter, r *http.Re
 		AccountID           int64  `json:"account_id"`
 		PreferredResolution string `json:"preferred_resolution"`
 		AllowDolby          bool   `json:"allow_dolby"`
+		ProxyClients        string `json:"proxy_clients"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		writeErr(w, err)
@@ -145,13 +146,17 @@ func (h *Handler) updateQuarkTVBindingSettings(w http.ResponseWriter, r *http.Re
 	updated, err := h.quarktv.UpdateBindingSettings(r.Context(), in.AccountID, quarktv.BindingSettings{
 		PreferredResolution: in.PreferredResolution,
 		AllowDolby:          in.AllowDolby,
+		ProxyClients:        in.ProxyClients,
 	})
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	if h.playback != nil {
-		h.playback.InvalidateAccount(in.AccountID)
+		h.playback.InvalidateAll()
 	}
-	writeOK(w, updated)
+	writeOK(w, map[string]any{
+		"binding":       updated,
+		"proxy_clients": h.quarktv.ProxyClients(),
+	})
 }

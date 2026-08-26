@@ -457,7 +457,11 @@ func (s *Service) ServeSource(w http.ResponseWriter, r *http.Request, token stri
 		return cur.Read <= cur.MaxRead
 	}}
 	// 必须由 LitePan 代理字节，否则 302 后 FFmpeg 会绕过读取预算。
-	return s.opts.Playback.ServeHTTP(cw, r, playback.Request{AccountID: accountID, FileID: fileID}, playback.Intent{FileName: "source", ForceProxy: true})
+	return s.opts.Playback.ServeHTTP(cw, r, playback.Request{AccountID: accountID, FileID: fileID}, playback.Intent{
+		FileName:     "source",
+		ForceProxy:   true,
+		OriginalFile: true,
+	})
 }
 
 type countingWriter struct {

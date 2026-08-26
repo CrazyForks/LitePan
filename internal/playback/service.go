@@ -59,7 +59,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, req Request,
 		return err
 	}
 	ua := r.UserAgent()
-	res, err := s.Resolve(r.Context(), req.AccountID, req.FileID, ua, false, !intent.WebDAV)
+	res, err := s.Resolve(r.Context(), req.AccountID, req.FileID, ua, false, intent.allowsPlaybackResolve())
 	if err != nil {
 		return err
 	}
@@ -83,7 +83,7 @@ func (s *Service) Resolve(ctx context.Context, accountID int64, fileID, ua strin
 		return s.resolveFresh(ctx, accountID, fileID, ua, playback)
 	}
 
-	key := cache.DownloadURLKey(accountID, fileID, ua)
+	key := cache.DownloadURLKey(accountID, fileID, resolveCacheVariant(ua, playback))
 	if refresh {
 		s.cache.InvalidateKey(key)
 	} else if res, ok := cache.GetAs[Resolved](s.cache, key); ok {
@@ -111,6 +111,14 @@ func (s *Service) Resolve(ctx context.Context, accountID int64, fileID, ua strin
 		return Resolved{}, err
 	}
 	return res, nil
+}
+
+// resolveCacheVariant 将播放直链与原始文件直链隔离，避免同一 UA 的缓存串用。
+func resolveCacheVariant(ua string, playback bool) string {
+	if playback {
+		return ua + "\x00playback"
+	}
+	return ua + "\x00original"
 }
 
 func (s *Service) resolveFresh(ctx context.Context, accountID int64, fileID, ua string, playback bool) (Resolved, error) {

@@ -30,6 +30,7 @@ type linkHolder struct {
 	accountID   int64
 	fileID      string
 	ua          string
+	playback    bool
 	refreshLeft int
 }
 
@@ -50,7 +51,7 @@ func (lh *linkHolder) refreshAfterFailure(ctx context.Context, failed domain.Dow
 		return lh.link, false, nil
 	}
 	lh.refreshLeft--
-	res, err := lh.svc.Resolve(ctx, lh.accountID, lh.fileID, lh.ua, true, false)
+	res, err := lh.svc.Resolve(ctx, lh.accountID, lh.fileID, lh.ua, true, lh.playback)
 	if err != nil {
 		return lh.link, false, err
 	}
@@ -206,16 +207,26 @@ func (s *Service) pipeUpstreamRange(ctx context.Context, w io.Writer, lh *linkHo
 	for try := 0; try < 2; try++ {
 		resp, err := s.doRangeRequest(ctx, lh.accountID, link, start, end)
 		if err != nil {
+			if try == 0 && ctx.Err() == nil {
+				newLink, refreshed, rerr := lh.refreshAfterFailure(ctx, link)
+				if rerr != nil {
+					return rerr
+				}
+				if refreshed {
+					link = newLink
+					continue
+				}
+			}
 			return err
 		}
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		if shouldRefreshUpstreamStatus(resp.StatusCode) {
 			resp.Body.Close()
 			newLink, refreshed, rerr := lh.refreshAfterFailure(ctx, link)
 			if rerr != nil {
 				return rerr
 			}
 			if !refreshed {
-				return domain.Errorf(domain.CodeDriverError, "上游认证失败")
+				return domain.Errorf(domain.CodeDriverError, "上游临时地址刷新后仍不可用")
 			}
 			link = newLink
 			continue
@@ -260,6 +271,17 @@ func (s *Service) pipeUpstreamRange(ctx context.Context, w io.Writer, lh *linkHo
 		return domain.Errorf(domain.CodeDriverError, "上游 Range 数据不完整：收到 %d，期望 %d", written, want)
 	}
 	return domain.Errorf(domain.CodeDriverError, "上游 Range 数据不完整")
+}
+
+// shouldRefreshUpstreamStatus 只对可能由临时直链过期或上游短暂异常造成的状态刷新地址。
+// 其他 4xx 通常是请求本身有误，重试没有意义。
+func shouldRefreshUpstreamStatus(status int) bool {
+	return status == http.StatusUnauthorized ||
+		status == http.StatusForbidden ||
+		status == http.StatusNotFound ||
+		status == http.StatusRequestTimeout ||
+		status == http.StatusTooManyRequests ||
+		status >= http.StatusInternalServerError
 }
 
 type growBuffer struct {

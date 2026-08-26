@@ -118,6 +118,7 @@ export interface QuarkTVBinding {
 export interface QuarkTVStatus {
   enabled: boolean;
   available: boolean;
+  proxy_clients: string;
   bindings: QuarkTVBinding[];
 }
 
@@ -141,6 +142,12 @@ export interface QuarkTVBindingSettingsPayload {
   account_id: number;
   preferred_resolution: string;
   allow_dolby: boolean;
+  proxy_clients: string;
+}
+
+export interface QuarkTVBindingSettingsResult {
+  binding: QuarkTVBinding;
+  proxy_clients: string;
 }
 
 export const cloudToolsApi = {
@@ -187,7 +194,7 @@ export const quarkTVApi = {
   bindPoll: (token: string) =>
     http.post<QuarkTVBindPoll>("/admin/tools/quarktv/bind/poll", { token }),
   updateBindingSettings: (payload: QuarkTVBindingSettingsPayload) =>
-    http.put<QuarkTVBinding>("/admin/tools/quarktv/binding/settings", payload),
+    http.put<QuarkTVBindingSettingsResult>("/admin/tools/quarktv/binding/settings", payload),
   unbind: (accountId: number) =>
     http.del<{ removed: boolean }>("/admin/tools/quarktv/bind", { account_id: accountId }),
 };
