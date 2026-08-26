@@ -377,3 +377,23 @@ func TestReplaceConfigsRejectsMissingPortWhenEnabled(t *testing.T) {
 		t.Fatalf("缺少端口错误=%v", err)
 	}
 }
+
+func TestIsExpectedClientDisconnect(t *testing.T) {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if !isExpectedClientDisconnect(canceled, context.Canceled) {
+		t.Fatal("context canceled 应识别为客户端取消")
+	}
+	for _, err := range []error{
+		fmt.Errorf("write tcp: broken pipe"),
+		fmt.Errorf("readfrom tcp: connection reset by peer"),
+		fmt.Errorf("use of closed network connection"),
+	} {
+		if !isExpectedClientDisconnect(context.Background(), err) {
+			t.Fatalf("%q 应识别为客户端取消", err)
+		}
+	}
+	if isExpectedClientDisconnect(context.Background(), fmt.Errorf("upstream returned 401")) {
+		t.Fatal("真实上游错误不应被当成客户端取消")
+	}
+}

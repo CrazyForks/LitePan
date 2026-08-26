@@ -18,14 +18,16 @@ export interface ProxyField {
   helpTitle?: string;
   helpBody?: string;
   placeholder?: string;
-  type?: "text" | "password" | "select" | "switch";
+  type?: "text" | "password" | "select" | "switch" | "segmented-text";
   inputmode?: "text" | "numeric";
   options?: ProxyFieldOption[];
+  segmentKey?: string;
   // switch 专用
   switchLabel?: string;
   switchHint?: string;
   switchTag?: string;
   disabled?: boolean;
+  hidden?: boolean;
 }
 
 export interface ProxyWorkspaceItem {
@@ -198,11 +200,17 @@ function cancelName() {
             <button v-if="deletable" type="button" class="ws-del" @click="emit('remove')">{{ removeLabel }}</button>
           </div>
 
-          <div v-for="field in fields" :key="field.key" class="ws-field">
+          <div
+            v-for="field in fields"
+            :key="field.key"
+            class="ws-field"
+            :class="{ 'ws-field--hidden': field.hidden }"
+            :aria-hidden="field.hidden || undefined"
+          >
             <div class="ws-field__head">
               <span class="ws-field__label">{{ field.label }}</span>
               <SettingsHelpTooltip v-if="field.helpTitle" :title="field.helpTitle">
-                <p v-html="field.helpBody" />
+                <div v-html="field.helpBody" />
               </SettingsHelpTooltip>
             </div>
 
@@ -212,6 +220,27 @@ function cancelName() {
               v-model="form[field.key]"
               :options="field.options || []"
             />
+
+            <!-- 分段按钮 + 文本输入的一体式复合字段 -->
+            <div v-else-if="field.type === 'segmented-text' && field.segmentKey" class="ws-segmented-input">
+              <div class="ws-segmented-input__modes" role="group" :aria-label="field.label">
+                <button
+                  v-for="option in field.options || []"
+                  :key="option.value"
+                  type="button"
+                  :class="{ active: form[field.segmentKey] === option.value }"
+                  @click="form[field.segmentKey] = option.value"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
+              <input
+                v-model.trim="form[field.key]"
+                type="text"
+                :placeholder="field.placeholder"
+                autocomplete="off"
+              />
+            </div>
 
             <!-- 开关字段 -->
             <div v-else-if="field.type === 'switch'" class="ws-switch">
@@ -510,6 +539,10 @@ function cancelName() {
   align-items: center;
   gap: 6px;
 }
+.ws-field--hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
 .ws-field__label {
   font-size: 13px;
   font-weight: 500;
@@ -677,13 +710,69 @@ function cancelName() {
   left: 21px;
 }
 
+.ws-segmented-input {
+  display: flex;
+  min-width: 0;
+  height: 42px;
+  overflow: hidden;
+  border: 1px solid var(--brand);
+  border-radius: 10px;
+  background: var(--surface);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.ws-segmented-input:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+}
+.ws-segmented-input__modes {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-right: 1px solid var(--border);
+  background: var(--surface-sunken);
+}
+.ws-segmented-input__modes button {
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ws-segmented-input__modes button.active {
+  background: var(--surface);
+  color: var(--brand);
+  box-shadow: 0 1px 4px rgb(15 23 42 / 10%);
+}
+.ws-segmented-input > input {
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.ws-segmented-input > input:focus {
+  border: 0;
+  box-shadow: none;
+}
+
 .ws-foot {
   display: flex;
   align-items: center;
   gap: 10px;
   margin-top: auto;
   padding-top: 14px;
-  border-top: 1px solid var(--border);
 }
 .ws-foot__spacer {
   flex: 1;
@@ -716,6 +805,25 @@ function cancelName() {
   }
   .ws-side__cap {
     display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .ws-segmented-input {
+    height: auto;
+    flex-direction: column;
+  }
+  .ws-segmented-input__modes {
+    width: 100%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .ws-segmented-input__modes button {
+    flex: 1;
+  }
+  .ws-segmented-input > input {
+    width: 100%;
+    height: 42px;
   }
 }
 </style>

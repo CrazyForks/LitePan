@@ -605,6 +605,21 @@ func (c *Client) streaming(ctx context.Context, fid string) (*domain.DownloadInf
 }
 
 func (c *Client) streamingWithPreference(ctx context.Context, fid string, pref StreamingPreference) (*domain.DownloadInfo, error) {
+	result, err := c.streamingResultWithPreference(ctx, fid, pref)
+	if err != nil {
+		return nil, err
+	}
+	return result.Info, nil
+}
+
+// streamingResult 保留选中档位的元数据，仅供夸克 TV 内部的播放策略判断使用。
+// 不把 Format 塞进全驱动共用的 domain.DownloadInfo，避免单驱动细节污染公共层。
+type streamingResult struct {
+	Info   *domain.DownloadInfo
+	Format string
+}
+
+func (c *Client) streamingResultWithPreference(ctx context.Context, fid string, pref StreamingPreference) (*streamingResult, error) {
 	var out streamingResp
 	if err := c.do(ctx, http.MethodGet, "/file", url.Values{
 		"method":     {"streaming"},
@@ -628,10 +643,13 @@ func (c *Client) streamingWithPreference(ctx context.Context, fid string, pref S
 			"format", info.Format,
 		)
 	}
-	return &domain.DownloadInfo{
-		URL:        info.URL,
-		Mode:       domain.DownloadRedirect,
-		Expiration: downloadTTL,
+	return &streamingResult{
+		Info: &domain.DownloadInfo{
+			URL:        info.URL,
+			Mode:       domain.DownloadRedirect,
+			Expiration: downloadTTL,
+		},
+		Format: strings.ToLower(strings.TrimSpace(info.Format)),
 	}, nil
 }
 

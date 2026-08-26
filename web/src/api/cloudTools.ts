@@ -118,6 +118,8 @@ export interface QuarkTVBinding {
 export interface QuarkTVStatus {
   enabled: boolean;
   available: boolean;
+  play_mode: "split" | "adaptive" | "direct";
+  client_list_mode: "direct_list" | "proxy_list";
   proxy_clients: string;
   bindings: QuarkTVBinding[];
 }
@@ -142,11 +144,15 @@ export interface QuarkTVBindingSettingsPayload {
   account_id: number;
   preferred_resolution: string;
   allow_dolby: boolean;
+  play_mode: "split" | "adaptive" | "direct";
+  client_list_mode: "direct_list" | "proxy_list";
   proxy_clients: string;
 }
 
 export interface QuarkTVBindingSettingsResult {
   binding: QuarkTVBinding;
+  play_mode: "split" | "adaptive" | "direct";
+  client_list_mode: "direct_list" | "proxy_list";
   proxy_clients: string;
 }
 

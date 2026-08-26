@@ -794,11 +794,33 @@ func (s *Service) serveLitePanPlayback(w http.ResponseWriter, r *http.Request, l
 		return false
 	}
 	if err := s.playbackServe(w, r, playback.Request{AccountID: accountID, FileID: fileID}, playback.Intent{}); err != nil {
-		s.log.Warn("Emby 反代解析 LitePan STRM 失败", "url", litepanURL, "error", err)
+		if isExpectedClientDisconnect(r.Context(), err) {
+			s.log.Debug("Emby 反代播放请求已取消", "account_id", accountID, "file_id", fileID, "error", err)
+			return true
+		}
+		s.log.Warn("Emby 反代解析 LitePan STRM 失败", "account_id", accountID, "file_id", fileID, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return true
 	}
 	return true
+}
+
+// isExpectedClientDisconnect 识别播放器探测、跳转 Range 或重建播放链路时主动取消的旧请求。
+// 这类错误不代表解析或上游故障，不应记为 Warn，也不再尝试补写 500 响应。
+func isExpectedClientDisconnect(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, net.ErrClosed) || errors.Is(err, io.ErrClosedPipe) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{"broken pipe", "connection reset by peer", "use of closed network connection"} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg Config, fullPath string) {

@@ -56,6 +56,8 @@ const (
 	KeyCoverExtractEnabled         = "cover_extract_enabled"
 	KeyCoverExtractStyle           = "cover_extract_style"
 	KeyQuarkTVEnabled              = "quark_tv_enabled"
+	KeyQuarkTVPlayMode             = "quark_tv_play_mode"
+	KeyQuarkTVClientListMode       = "quark_tv_client_list_mode"
 	KeyQuarkTVProxyClients         = "quark_tv_proxy_clients"
 	KeyStrmScrapeWriteMode         = "strm_scrape_write_mode"
 
@@ -309,6 +311,18 @@ func defaultSpecs() []Spec {
 			Key:     KeyQuarkTVEnabled,
 			Type:    TypeBool,
 			Default: "false",
+			Hidden:  true,
+		},
+		{
+			Key:     KeyQuarkTVPlayMode,
+			Type:    TypeString,
+			Default: "adaptive",
+			Hidden:  true,
+		},
+		{
+			Key:     KeyQuarkTVClientListMode,
+			Type:    TypeString,
+			Default: "proxy_list",
 			Hidden:  true,
 		},
 		{

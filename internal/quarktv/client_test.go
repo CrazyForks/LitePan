@@ -204,3 +204,75 @@ func TestPickStreamingCandidatePrefersMP4OverM3U8(t *testing.T) {
 		t.Fatalf("mp4 中应选 4k，实际为 %q", got.Resolution)
 	}
 }
+
+func TestNormalizePlayMode(t *testing.T) {
+	tests := map[string]string{
+		"split":    PlayModeSplit,
+		"DIRECT":   PlayModeDirect,
+		"adaptive": PlayModeAdaptive,
+		"":         PlayModeAdaptive,
+		"unknown":  PlayModeAdaptive,
+	}
+	for input, want := range tests {
+		if got := normalizePlayMode(input); got != want {
+			t.Fatalf("normalizePlayMode(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestIsHLSFormat(t *testing.T) {
+	for _, format := range []string{"m3u8", "HLS", " hls "} {
+		if !isHLSFormat(format) {
+			t.Fatalf("isHLSFormat(%q) = false, want true", format)
+		}
+	}
+	for _, format := range []string{"mp4", "matroska,webm", ""} {
+		if isHLSFormat(format) {
+			t.Fatalf("isHLSFormat(%q) = true, want false", format)
+		}
+	}
+}
+
+func TestPlaybackModesAreIndependent(t *testing.T) {
+	if shouldBypassTVBeforeResolve(PlayModeSplit, ClientListDirect, "vidhub", "VidHub/2.0") {
+		t.Fatal("直连名单命中时应走夸克 TV")
+	}
+	if !shouldBypassTVBeforeResolve(PlayModeSplit, ClientListDirect, "vidhub", "Lavf/59.27.100") {
+		t.Fatal("直连名单未命中时应走本机代理")
+	}
+	if !shouldBypassTVBeforeResolve(PlayModeSplit, ClientListProxy, "vidhub", "VidHub/2.0") {
+		t.Fatal("代理名单命中时应走本机代理")
+	}
+	if shouldBypassTVBeforeResolve(PlayModeSplit, ClientListProxy, "vidhub", "OtherPlayer/1.0") {
+		t.Fatal("代理名单未命中时应走夸克 TV")
+	}
+	if shouldBypassTVBeforeResolve(PlayModeAdaptive, ClientListProxy, "vidhub", "VidHub/2.0") {
+		t.Fatal("智能变轨不应使用例外客户端")
+	}
+	if shouldBypassTVBeforeResolve(PlayModeDirect, ClientListProxy, "vidhub", "VidHub/2.0") {
+		t.Fatal("全部走 TV 不应使用例外客户端")
+	}
+	if !shouldFallbackSelectedFormat(PlayModeAdaptive, "m3u8") {
+		t.Fatal("智能变轨应在 HLS/M3U8 档位回落")
+	}
+	if shouldFallbackSelectedFormat(PlayModeAdaptive, "mp4") {
+		t.Fatal("智能变轨不应回落 MP4 档位")
+	}
+	if shouldFallbackSelectedFormat(PlayModeSplit, "m3u8") {
+		t.Fatal("策略分流不应按档位格式回落")
+	}
+	if shouldFallbackSelectedFormat(PlayModeDirect, "m3u8") {
+		t.Fatal("全部走 TV 不应按档位格式回落")
+	}
+}
+
+func TestNormalizeClientListMode(t *testing.T) {
+	if got := normalizeClientListMode("direct_list"); got != ClientListDirect {
+		t.Fatalf("normalizeClientListMode(direct_list) = %q", got)
+	}
+	for _, value := range []string{"", "proxy_list", "unknown"} {
+		if got := normalizeClientListMode(value); got != ClientListProxy {
+			t.Fatalf("normalizeClientListMode(%q) = %q, want %q", value, got, ClientListProxy)
+		}
+	}
+}

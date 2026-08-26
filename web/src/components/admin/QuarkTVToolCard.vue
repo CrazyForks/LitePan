@@ -16,7 +16,7 @@ import QuarkTVBindModal from "@/components/admin/QuarkTVBindModal.vue";
 
 const props = withDefaults(defineProps<{ searchQuery?: string }>(), { searchQuery: "" });
 
-const qtvStatus = ref<QuarkTVStatus>({ enabled: false, available: false, proxy_clients: "", bindings: [] });
+const qtvStatus = ref<QuarkTVStatus>({ enabled: false, available: false, play_mode: "adaptive", client_list_mode: "proxy_list", proxy_clients: "vidhub", bindings: [] });
 const qtvSaving = ref(false);
 const qtvAccounts = ref<QuarkTVAccount[]>([]);
 const qtvBindOpen = ref(false);
@@ -26,7 +26,9 @@ const qtvSelectedID = ref("");
 const qtvForm = reactive({
   preferred_resolution: "4k",
   allow_dolby: "false",
-  proxy_clients: "",
+  play_mode: "adaptive",
+  client_list_mode: "proxy_list",
+  proxy_clients: "vidhub",
 });
 
 const settingsChanged = computed(() => {
@@ -35,6 +37,8 @@ const settingsChanged = computed(() => {
   return (
     qtvForm.preferred_resolution !== normalizeResolutionForUI(binding.preferred_resolution || "auto") ||
     qtvForm.allow_dolby !== String(!!binding.allow_dolby) ||
+    qtvForm.play_mode !== qtvStatus.value.play_mode ||
+    qtvForm.client_list_mode !== qtvStatus.value.client_list_mode ||
     normalizeClientKeywords(qtvForm.proxy_clients) !== normalizeClientKeywords(qtvStatus.value.proxy_clients)
   );
 });
@@ -70,30 +74,52 @@ const workspaceItems = computed<ProxyWorkspaceItem[]>(() =>
   })),
 );
 
-const workspaceFields = computed<ProxyField[]>(() => [
-  {
-    key: "preferred_resolution",
-    label: "清晰度偏好",
+const workspaceFields = computed<ProxyField[]>(() => {
+  const fields: ProxyField[] = [
+    {
+      key: "preferred_resolution",
+      label: "清晰度偏好",
+      type: "select",
+      options: settingsResolutionOptions.value,
+    },
+    {
+      key: "allow_dolby",
+      label: "杜比视界",
+      type: "switch",
+      switchLabel: "杜比视界",
+      switchTag: "SVIP 限额",
+      switchHint: "开启后优先尝试杜比视界；不可用时会自动降级到上面的清晰度偏好。",
+      disabled: dolbyControlDisabled.value,
+    },
+  ];
+  fields.push({
+    key: "play_mode",
+    label: "接管模式",
     type: "select",
-    options: settingsResolutionOptions.value,
-  },
-  {
-    key: "allow_dolby",
-    label: "杜比视界",
-    type: "switch",
-    switchLabel: "杜比视界",
-    switchTag: "SVIP 限额",
-    switchHint: "开启后优先尝试杜比视界；不可用时会自动降级到上面的清晰度偏好。",
-    disabled: dolbyControlDisabled.value,
-  },
-  {
+    helpTitle: "接管模式",
+    helpBody: "<p><strong>策略分流：</strong>可选择「直连名单」或「代理名单」，再按播放器名称分别走夸克 TV 或本机代理。</p><p><strong>智能变轨：</strong>普通视频走夸克 TV，遇到 HLS 视频自动改走本机代理。</p><p><strong>强制直连：</strong>所有视频都走夸克 TV，不兼容时可能无法播放。</p>",
+    options: [
+      { value: "split", label: "策略分流" },
+      { value: "adaptive", label: "智能变轨" },
+      { value: "direct", label: "强制直连" },
+    ],
+  });
+  fields.push({
     key: "proxy_clients",
-    label: "本机代理客户端",
-    helpTitle: "本机代理客户端",
-    helpBody: "部分播放器不兼容夸克 TV 转码。命中的客户端会跳过 TV 接管，改由夸克驱动本机代理播放。多个名称用分号分隔，例如 vidhub；客户端名称可在 Debug 日志中查看。Emby 等经媒体服务器拉流的客户端无法按名称识别，如遇兼容问题请关闭夸克 TV 接管。",
+    label: "客户端分流",
+    type: "segmented-text",
+    segmentKey: "client_list_mode",
+    options: [
+      { value: "direct_list", label: "直连名单" },
+      { value: "proxy_list", label: "代理名单" },
+    ],
+    helpTitle: "客户端分流",
+    helpBody: "直连名单：名单里的播放器走夸克 TV，其他走本机代理。<br>代理名单：名单里的播放器走本机代理，其他走夸克 TV。<br>多个名称用分号分隔，不区分大小写。Emby 等由服务端 FFmpeg 拉流时，无法识别原播放器名称。",
     placeholder: "例如：vidhub",
-  },
-]);
+    hidden: qtvForm.play_mode !== "split",
+  });
+  return fields;
+});
 
 function matches(title: string) {
   const q = props.searchQuery.trim().toLowerCase();
@@ -101,7 +127,7 @@ function matches(title: string) {
 }
 
 async function load() {
-  qtvStatus.value = await quarkTVApi.status().catch(() => ({ enabled: false, available: false, proxy_clients: "", bindings: [] }));
+  qtvStatus.value = await quarkTVApi.status().catch(() => ({ enabled: false, available: false, play_mode: "adaptive" as const, client_list_mode: "proxy_list" as const, proxy_clients: "vidhub", bindings: [] }));
 }
 
 onMounted(() => {
@@ -142,7 +168,9 @@ function selectBinding(id: string) {
   qtvSelectedID.value = id;
   qtvForm.preferred_resolution = normalizeResolutionForUI(binding.preferred_resolution || "auto");
   qtvForm.allow_dolby = String(!!binding.allow_dolby);
-  qtvForm.proxy_clients = qtvStatus.value.proxy_clients || "";
+  qtvForm.play_mode = qtvStatus.value.play_mode || "adaptive";
+  qtvForm.client_list_mode = qtvStatus.value.client_list_mode || "proxy_list";
+  qtvForm.proxy_clients = qtvStatus.value.proxy_clients || "vidhub";
 }
 
 function displayMembership(binding: QuarkTVBinding | null) {
@@ -207,7 +235,7 @@ function closeBind() {
 
 async function onBound() {
   qtvBindOpen.value = false;
-  const st = await quarkTVApi.status().catch(() => ({ enabled: false, available: false, proxy_clients: "", bindings: [] }));
+  const st = await quarkTVApi.status().catch(() => ({ enabled: false, available: false, play_mode: "adaptive" as const, client_list_mode: "proxy_list" as const, proxy_clients: "vidhub", bindings: [] }));
   qtvStatus.value = st;
   if (st.bindings.length) {
     selectBinding(String(st.bindings[st.bindings.length - 1].account_id));
@@ -262,12 +290,16 @@ async function saveSettings() {
       account_id: binding.account_id,
       preferred_resolution: qtvForm.preferred_resolution,
       allow_dolby: qtvForm.allow_dolby === "true",
+		play_mode: qtvForm.play_mode as "split" | "adaptive" | "direct",
+		client_list_mode: qtvForm.client_list_mode as "direct_list" | "proxy_list",
       proxy_clients: qtvForm.proxy_clients,
     });
     qtvStatus.value.bindings = qtvStatus.value.bindings.map((item) =>
       item.account_id === result.binding.account_id ? result.binding : item,
     );
     qtvStatus.value.proxy_clients = result.proxy_clients;
+		qtvStatus.value.play_mode = result.play_mode;
+		qtvStatus.value.client_list_mode = result.client_list_mode;
     qtvForm.proxy_clients = result.proxy_clients;
     toast.success("播放设置已保存");
   } catch (e) {
