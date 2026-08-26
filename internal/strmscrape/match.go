@@ -197,9 +197,6 @@ func (s *Service) writeMatchedOpts(ctx context.Context, client *tmdb.Client, g w
 		} else if err := writeMovieNFO(nfo, info.Title, info.TMDBID, info.Plot, info.Year); err != nil {
 			return 0, err
 		}
-		if err := recordOwnedMetadata(g, nfo); err != nil {
-			return 0, err
-		}
 	}
 	if (overwrite || !fileExists(poster)) && strings.TrimSpace(info.PosterPath) != "" {
 		data, err := client.DownloadImage(ctx, info.PosterPath, "w500")
@@ -207,9 +204,6 @@ func (s *Service) writeMatchedOpts(ctx context.Context, client *tmdb.Client, g w
 			return 0, err
 		}
 		if err := writeImageFile(poster, data); err != nil {
-			return 0, err
-		}
-		if err := recordOwnedMetadata(g, poster); err != nil {
 			return 0, err
 		}
 	}
@@ -352,14 +346,8 @@ func (s *Service) writeSeasonPosters(ctx context.Context, client *tmdb.Client, g
 		if !overwrite && fileExists(out) {
 			continue
 		}
-		written, err := s.writeOptionalArtwork(ctx, client, posterPath, out, fmt.Sprintf("第 %d 季海报", season))
-		if err != nil {
+		if _, err := s.writeOptionalArtwork(ctx, client, posterPath, out, fmt.Sprintf("第 %d 季海报", season)); err != nil {
 			return err
-		}
-		if written {
-			if err := recordOwnedMetadata(g, out); err != nil {
-				return err
-			}
 		}
 	}
 	return nil

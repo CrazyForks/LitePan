@@ -337,7 +337,7 @@ func (s *Service) MarkNormal(ctx context.Context, req MarkNormalRequest) (*Item,
 		mediaType = requested
 	}
 	if req.ClearMatch {
-		if err := clearOwnedMetadata(g); err != nil {
+		if err := clearScrapedMetadata(g); err != nil {
 			return nil, domain.Errorf(domain.CodeDriverError, "清理错误匹配元数据：%v", err)
 		}
 		if err := writeManualComplete(g, mediaType); err != nil {

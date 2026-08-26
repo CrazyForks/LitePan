@@ -98,29 +98,33 @@ func TestMarkNormalAllowsUnmatchedWorkAndRescrapeRestoresIt(t *testing.T) {
 	}
 }
 
-func TestClearMatchOnlyRemovesScraperOwnedMetadata(t *testing.T) {
+func TestClearMatchRemovesMetadataByType(t *testing.T) {
 	strmRoot := t.TempDir()
 	outputFolder := "错误匹配"
 	root := strm.TaskOutputDir(strmRoot, outputFolder)
 	show := filepath.Join(root, "自制作品")
 	mustMkdir(t, show)
-	mustWrite(t, filepath.Join(show, "S01E01.strm"), "x")
+	strmPath := filepath.Join(show, "S01E01.strm")
 	ownedNFO := filepath.Join(show, "tvshow.nfo")
 	ownedPoster := filepath.Join(show, "poster.jpg")
-	userFile := filepath.Join(show, "fanart.jpg")
-	mustWrite(t, ownedNFO, "<tvshow><title>错误作品</title><tmdbid>123</tmdbid></tvshow>\n")
-	mustWrite(t, ownedPoster, "wrong")
-	mustWrite(t, userFile, "keep")
+	userPoster := filepath.Join(show, "fanart.jpg")
+	subtitle := filepath.Join(show, "S01E01.ass")
+	for path, body := range map[string]string{
+		strmPath:    "x",
+		ownedNFO:    "<tvshow><title>错误作品</title><tmdbid>123</tmdbid></tvshow>\n",
+		ownedPoster: "wrong",
+		userPoster:  "keep",
+		subtitle:    "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,字幕",
+	} {
+		mustWrite(t, path, body)
+	}
 	works, err := scanWorks(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	g := works[0]
-	if err := recordOwnedMetadata(g, ownedNFO); err != nil {
-		t.Fatal(err)
-	}
-	if err := recordOwnedMetadata(g, ownedPoster); err != nil {
-		t.Fatal(err)
+	if g.flatFile != "" || g.absDir != show {
+		t.Fatalf("workGroup 定位错误：%+v", g)
 	}
 	task := &domain.StrmTask{ID: 10, OutputFolder: outputFolder}
 	strmSvc := strm.NewService(strm.ServiceOptions{Repo: &rematchTaskRepo{task: task}, StrmDir: strmRoot})
@@ -138,13 +142,15 @@ func TestClearMatchOnlyRemovesScraperOwnedMetadata(t *testing.T) {
 	if !item.ManualDone || item.TMDBID != "" || item.Title != "自制作品" {
 		t.Fatalf("错误匹配未正确取消：%+v", item)
 	}
-	for _, path := range []string{ownedNFO, ownedPoster} {
+	for _, path := range []string{ownedNFO, ownedPoster, userPoster} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("刮削元数据未清理：%s", path)
+			t.Fatalf("元数据未清理：%s", path)
 		}
 	}
-	if _, err := os.Stat(userFile); err != nil {
-		t.Fatalf("用户元数据不应删除：%v", err)
+	for _, path := range []string{strmPath, subtitle} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("非元数据不应删除：%s: %v", path, err)
+		}
 	}
 }
 

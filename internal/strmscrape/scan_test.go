@@ -443,7 +443,7 @@ func TestManualCompleteSkipsUnmatchedWork(t *testing.T) {
 	}
 }
 
-func TestClearOwnedMetadataPreservesUserFiles(t *testing.T) {
+func TestClearScrapedMetadataByType(t *testing.T) {
 	root := t.TempDir()
 	show := filepath.Join(root, "错误匹配")
 	mustMkdir(t, show)
@@ -451,11 +451,13 @@ func TestClearOwnedMetadataPreservesUserFiles(t *testing.T) {
 	ownedNFO := filepath.Join(show, "tvshow.nfo")
 	ownedPoster := filepath.Join(show, "poster.jpg")
 	userPoster := filepath.Join(show, "fanart.jpg")
+	subtitle := filepath.Join(show, "S01E01.srt")
 	for path, body := range map[string]string{
 		strmPath:    "x",
 		ownedNFO:    "nfo",
 		ownedPoster: "poster",
 		userPoster:  "user",
+		subtitle:    "sub",
 	} {
 		mustWrite(t, path, body)
 	}
@@ -464,23 +466,17 @@ func TestClearOwnedMetadataPreservesUserFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	g := works[0]
-	if err := recordOwnedMetadata(g, ownedNFO); err != nil {
+	if err := clearScrapedMetadata(g); err != nil {
 		t.Fatal(err)
 	}
-	if err := recordOwnedMetadata(g, ownedPoster); err != nil {
-		t.Fatal(err)
-	}
-	if err := clearOwnedMetadata(g); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{ownedNFO, ownedPoster} {
+	for _, path := range []string{ownedNFO, ownedPoster, userPoster} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Fatalf("刮削器登记文件未清理：%s", path)
+			t.Fatalf("元数据未清理：%s", path)
 		}
 	}
-	for _, path := range []string{strmPath, userPoster} {
+	for _, path := range []string{strmPath, subtitle} {
 		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("用户文件不应被清理：%s: %v", path, err)
+			t.Fatalf("非元数据不应被清理：%s: %v", path, err)
 		}
 	}
 }

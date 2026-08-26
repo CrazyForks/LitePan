@@ -143,20 +143,11 @@ func (s *Service) writeTVExtras(ctx context.Context, client *tmdb.Client, g work
 				if err := writeSeasonNFO(seasonNFO, season, detail.Name, detail.Overview, detail.AirDate); err != nil {
 					return fmt.Errorf("写入第 %d 季 NFO：%w", season, err)
 				}
-				if err := recordOwnedMetadata(g, seasonNFO); err != nil {
-					return err
-				}
 			}
 			seasonPoster := filepath.Join(seasonDir, "poster.jpg")
 			if (overwrite || !fileExists(seasonPoster)) && detail.PosterPath != "" {
-				written, err := s.writeOptionalArtwork(ctx, client, detail.PosterPath, seasonPoster, fmt.Sprintf("第 %d 季目录海报", season))
-				if err != nil {
+				if _, err := s.writeOptionalArtwork(ctx, client, detail.PosterPath, seasonPoster, fmt.Sprintf("第 %d 季目录海报", season)); err != nil {
 					return err
-				}
-				if written {
-					if err := recordOwnedMetadata(g, seasonPoster); err != nil {
-						return err
-					}
 				}
 			}
 		}
@@ -180,20 +171,11 @@ func (s *Service) writeTVExtras(ctx context.Context, client *tmdb.Client, g work
 				if err := writeEpisodeNFO(epNFO, title, info.Title, ep.Overview, ep.AirDate, tmdbEpID, season, ep.EpisodeNumber); err != nil {
 					return fmt.Errorf("写入 S%02dE%02d NFO：%w", season, ep.EpisodeNumber, err)
 				}
-				if err := recordOwnedMetadata(g, epNFO); err != nil {
-					return err
-				}
 			}
 			thumb := stem + "-thumb.jpg"
 			if (overwrite || !fileExists(thumb)) && ep.StillPath != "" {
-				written, err := s.writeOptionalArtwork(ctx, client, ep.StillPath, thumb, fmt.Sprintf("S%02dE%02d 缩略图", season, ep.EpisodeNumber))
-				if err != nil {
+				if _, err := s.writeOptionalArtwork(ctx, client, ep.StillPath, thumb, fmt.Sprintf("S%02dE%02d 缩略图", season, ep.EpisodeNumber)); err != nil {
 					return err
-				}
-				if written {
-					if err := recordOwnedMetadata(g, thumb); err != nil {
-						return err
-					}
 				}
 				time.Sleep(interval)
 			}

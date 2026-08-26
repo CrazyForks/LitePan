@@ -2,15 +2,16 @@ package strmscrape
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
 const (
 	pendingMarkerName        = ".litepan-scrape-pending"
 	manualCompleteMarkerName = ".litepan-scrape-complete"
-	ownedMetadataMarkerName  = ".litepan-scrape-owned"
 
 	PendingRunning    = "running"
 	PendingUpdating   = "updating"
@@ -34,12 +35,6 @@ type manualCompleteState struct {
 	MediaType string `json:"media_type,omitempty"`
 }
 
-// ownedMetadataState 只登记 STRM 刮削器实际写入的文件。
-// 取消错误匹配时据此清理，避免删除用户从网盘同步或自行维护的元数据。
-type ownedMetadataState struct {
-	Files []string `json:"files"`
-}
-
 func workMarkerPath(g workGroup, name string) string {
 	if g.flatFile != "" {
 		stem := strings.TrimSuffix(g.flatFile, filepath.Ext(g.flatFile))
@@ -54,10 +49,6 @@ func pendingMarkerPath(g workGroup) string {
 
 func manualCompleteMarkerPath(g workGroup) string {
 	return workMarkerPath(g, manualCompleteMarkerName)
-}
-
-func ownedMetadataMarkerPath(g workGroup) string {
-	return workMarkerPath(g, ownedMetadataMarkerName)
 }
 
 func hasPendingMarker(g workGroup) bool {
@@ -101,87 +92,66 @@ func clearManualComplete(g workGroup) {
 	_ = os.Remove(manualCompleteMarkerPath(g))
 }
 
-func recordOwnedMetadata(g workGroup, path string) error {
-	rel, ok := ownedMetadataRel(g, path)
-	if !ok {
-		return nil
+// scrapeMetadataKeywordRe 匹配常见刮削元数据图片名（海报/背景/缩略图等）。
+var scrapeMetadataKeywordRe = regexp.MustCompile(`(?i)\b(poster|backdrop|fanart|folder|thumb|cover|season|banner|logo|landscape|keyart|clearart)\b`)
+
+// isScrapedMetadataFile 判断文件名是否为刮削元数据（.nfo 或常见海报图）。
+// .strm、字幕及其它文件一律不属于刮削元数据。
+func isScrapedMetadataFile(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	if ext == ".nfo" {
+		return true
 	}
-	state := ownedMetadataState{}
-	if data, err := os.ReadFile(ownedMetadataMarkerPath(g)); err == nil {
-		_ = json.Unmarshal(data, &state)
+	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" {
+		return false
 	}
-	for _, existing := range state.Files {
-		if existing == rel {
-			return nil
-		}
-	}
-	state.Files = append(state.Files, rel)
-	data, err := json.Marshal(state)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	return writeMarkerFile(ownedMetadataMarkerPath(g), data)
+	return scrapeMetadataKeywordRe.MatchString(name)
 }
 
-func clearOwnedMetadata(g workGroup) error {
-	data, err := os.ReadFile(ownedMetadataMarkerPath(g))
-	if err != nil {
-		if os.IsNotExist(err) {
+// clearScrapedMetadata 取消错误匹配时按类型清理刮削元数据：
+// 删除作品目录下（含季/集子目录）的 .nfo 与常见海报图，保留 .strm、字幕及其它文件。
+// 扁平单文件作品只清理该 strm 对应的元数据，避免误删同目录其它作品。
+func clearScrapedMetadata(g workGroup) error {
+	if g.flatFile != "" {
+		return clearFlatScrapedMetadata(g)
+	}
+	return filepath.WalkDir(g.absDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() || !isScrapedMetadataFile(d.Name()) {
 			return nil
-		}
-		return err
-	}
-	var state ownedMetadataState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return err
-	}
-	for _, rel := range state.Files {
-		path, ok := ownedMetadataPath(g, rel)
-		if !ok {
-			continue
-		}
-		info, statErr := os.Lstat(path)
-		if statErr != nil {
-			if os.IsNotExist(statErr) {
-				continue
-			}
-			return statErr
-		}
-		if info.IsDir() || strings.EqualFold(filepath.Ext(path), ".strm") {
-			continue
 		}
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return err
 		}
-	}
-	return os.Remove(ownedMetadataMarkerPath(g))
+		return nil
+	})
 }
 
-func ownedMetadataRel(g workGroup, path string) (string, bool) {
-	base, err := filepath.Abs(g.absDir)
+// clearFlatScrapedMetadata 清理扁平单文件作品的元数据（stem.nfo 与 stem-*.图片）。
+func clearFlatScrapedMetadata(g workGroup) error {
+	stem := strings.TrimSuffix(g.flatFile, filepath.Ext(g.flatFile))
+	if stem == "" {
+		return nil
+	}
+	dir := filepath.Dir(g.flatFile)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return "", false
+		return err
 	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", false
+	for _, d := range entries {
+		if d.IsDir() {
+			continue
+		}
+		name := d.Name()
+		if name == stem+".nfo" || (strings.HasPrefix(name, stem+"-") && isScrapedMetadataFile(name)) {
+			if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
 	}
-	rel, err := filepath.Rel(base, abs)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", false
-	}
-	return filepath.ToSlash(rel), true
-}
-
-func ownedMetadataPath(g workGroup, rel string) (string, bool) {
-	rel = filepath.FromSlash(strings.TrimSpace(rel))
-	if rel == "" || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", false
-	}
-	path := filepath.Join(g.absDir, rel)
-	_, ok := ownedMetadataRel(g, path)
-	return path, ok
+	return nil
 }
 
 func writePendingState(g workGroup, st scrapeState) error {
