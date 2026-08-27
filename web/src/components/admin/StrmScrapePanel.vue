@@ -8,12 +8,14 @@ import {
 import { fetchStrmTasks, type StrmTask } from "@/api/strm";
 import {
   fetchStrmScrapeItems,
+  fetchStrmScrapeScope,
   fetchStrmScrapeProgress,
   refreshStrmScrapeIndex,
   rematchStrmScrapeItem,
   rescrapeStrmScrapeItem,
   markStrmScrapeNormal,
   runStrmScrape,
+  saveStrmScrapeScope,
   stopStrmScrape,
   type StrmScrapeItem,
   type StrmScrapeItemListQuery,
@@ -24,6 +26,7 @@ import {
   type StrmScrapeProgress,
 } from "@/api/strmScrape";
 import AdminEmptyState from "@/components/admin/AdminEmptyState.vue";
+import StrmScrapeScopePicker from "@/components/admin/StrmScrapeScopePicker.vue";
 import AppButton from "@/components/base/AppButton.vue";
 import AppDropdown from "@/components/base/AppDropdown.vue";
 import AppIconButton from "@/components/base/AppIconButton.vue";
@@ -78,6 +81,9 @@ function saveSortKey(key: SortKey) {
 
 const tasks = ref<StrmTask[]>([]);
 const selectedTaskId = ref<number | null>(null);
+const scopeOpen = ref(false);
+const scopeLoading = ref(false);
+const excludedScopeDirs = ref<string[]>([]);
 const items = ref<StrmScrapeItem[]>([]);
 const stats = ref<StrmScrapeItemListStats>(emptyStats());
 const totalMatched = ref(0);
@@ -117,6 +123,38 @@ const taskOptions = computed(() =>
 const selectedTask = computed(() =>
   tasks.value.find((t) => Number(t.id) === Number(selectedTaskId.value)) || null,
 );
+const scopeLabel = computed(() =>
+  excludedScopeDirs.value.length ? `已排除 ${excludedScopeDirs.value.length} 个目录` : "全部目录",
+);
+
+async function loadScope() {
+  const taskId = selectedTaskId.value;
+  excludedScopeDirs.value = [];
+  if (!taskId) return;
+  try {
+    const data = await fetchStrmScrapeScope(taskId);
+    if (selectedTaskId.value === taskId) excludedScopeDirs.value = data.excluded_dirs ?? [];
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "读取刮削范围失败"));
+  }
+}
+
+async function saveScope(dirs: string[]) {
+  const taskId = selectedTaskId.value;
+  if (!taskId || scopeLoading.value) return;
+  scopeLoading.value = true;
+  try {
+    const data = await saveStrmScrapeScope(taskId, dirs);
+    excludedScopeDirs.value = data.excluded_dirs ?? [];
+    scopeOpen.value = false;
+    await loadItems();
+    toast.success("刮削范围已保存");
+  } catch (e) {
+    toast.error(getApiErrorMessage(e, "保存刮削范围失败"));
+  } finally {
+    scopeLoading.value = false;
+  }
+}
 
 const sortOptions: { value: SortKey; label: string }[] = [
   { value: "added_desc", label: "添加时间 · 新→旧" },
@@ -698,6 +736,7 @@ async function rescrapeItem(item: StrmScrapeItem) {
 }
 
 watch(selectedTaskId, () => {
+  void loadScope();
   if (!booted.value) return;
   filter.value = "all";
   typeFilter.value = "all";
@@ -768,6 +807,16 @@ defineExpose({
             @update:model-value="(v) => (selectedTaskId = Number(v) || null)"
           />
         </div>
+        <AppButton
+          v-if="selectedTaskId"
+          variant="secondary"
+          size="md"
+          class="scrape-panel__scope-button"
+          :disabled="running || scopeLoading"
+          @click="scopeOpen = true"
+        >
+          {{ scopeLabel }}
+        </AppButton>
       </div>
       <div class="scrape-panel__head-actions">
         <div class="scrape-search-expand" :class="{ 'scrape-search-expand--open': searchOpen }">
@@ -780,38 +829,42 @@ defineExpose({
             :tabindex="searchOpen ? 0 : -1"
             @keydown.escape.prevent="toggleSearch"
           />
-          <button
-            type="button"
-            class="scrape-icon-btn"
-            :class="{ 'scrape-icon-btn--active': searchOpen || Boolean(keyword) }"
-            :title="searchOpen ? '收起搜索' : '搜索片名'"
-            :aria-label="searchOpen ? '收起搜索' : '搜索片名'"
-            :aria-expanded="searchOpen"
-            @click="toggleSearch"
-          >
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-              <circle cx="7" cy="7" r="4.5" />
-              <path d="m10.5 10.5 3 3" />
-            </svg>
-          </button>
-        </div>
-        <AppDropdown v-model:open="sortMenuOpen" trigger="click" align="right">
-          <template #trigger="{ open, toggle }">
+          <span class="scrape-tip">
             <button
               type="button"
               class="scrape-icon-btn"
-              :title="currentSortLabel"
-              :aria-expanded="open"
-              aria-label="排序"
-              @click.stop="toggle"
+              :class="{ 'scrape-icon-btn--active': searchOpen || Boolean(keyword) }"
+              :aria-label="searchOpen ? '收起搜索' : '搜索片名'"
+              :aria-expanded="searchOpen"
+              @click="toggleSearch"
             >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
-                <path d="M2 4h10" />
-                <path d="M2 8h8" />
-                <path d="M2 12h6" />
-                <path d="m12 10 2 2 2-2" />
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <circle cx="7" cy="7" r="4.5" />
+                <path d="m10.5 10.5 3 3" />
               </svg>
             </button>
+            <span class="scrape-tip__bubble">{{ searchOpen ? "收起搜索" : "搜索片名" }}</span>
+          </span>
+        </div>
+        <AppDropdown v-model:open="sortMenuOpen" trigger="click" align="right">
+          <template #trigger="{ open, toggle }">
+            <span class="scrape-tip">
+              <button
+                type="button"
+                class="scrape-icon-btn"
+                :aria-expanded="open"
+                aria-label="排序"
+                @click.stop="toggle"
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+                  <path d="M2 4h10" />
+                  <path d="M2 8h8" />
+                  <path d="M2 12h6" />
+                  <path d="m12 10 2 2 2-2" />
+                </svg>
+              </button>
+              <span class="scrape-tip__bubble">{{ currentSortLabel }}</span>
+            </span>
           </template>
           <template #panel>
             <div class="scrape-sort-menu">
@@ -828,25 +881,41 @@ defineExpose({
             </div>
           </template>
         </AppDropdown>
-        <AppIconButton
-          icon="fa-sync-alt"
-          label="刷新"
-          variant="secondary"
-          size="md"
-          :disabled="refreshing"
-          title="重建刮削索引（扫描本地 STRM 目录）"
-          @click="refreshAll"
-        />
-        <AppIconButton
-          icon="settings"
-          label="STRM 刮削设置"
-          variant="secondary"
-          size="md"
-          title="STRM 刮削设置"
-          @click="emit('open-settings')"
-        />
+        <span class="scrape-tip scrape-tip--right">
+          <AppIconButton
+            icon="fa-sync-alt"
+            label="刷新"
+            variant="secondary"
+            size="md"
+            :disabled="refreshing"
+            no-native-title
+            @click="refreshAll"
+          />
+          <span class="scrape-tip__bubble">重建刮削索引（扫描本地 STRM 目录）</span>
+        </span>
+        <span class="scrape-tip scrape-tip--right">
+          <AppIconButton
+            icon="settings"
+            label="STRM 刮削设置"
+            variant="secondary"
+            size="md"
+            no-native-title
+            @click="emit('open-settings')"
+          />
+          <span class="scrape-tip__bubble">STRM 刮削设置</span>
+        </span>
       </div>
     </div>
+
+    <StrmScrapeScopePicker
+      v-if="selectedTaskId"
+      :open="scopeOpen"
+      :task-id="selectedTaskId"
+      :task-name="selectedTask?.name"
+      :excluded-dirs="excludedScopeDirs"
+      @close="scopeOpen = false"
+      @save="saveScope"
+    />
 
     <div v-if="running && progress" class="scrape-progress">
       <span class="scrape-progress__msg">{{ progress.message || "刮削进行中…" }}</span>
@@ -1268,6 +1337,9 @@ defineExpose({
   flex: 0 1 200px;
   min-width: 120px;
 }
+.scrape-panel__scope-button {
+  white-space: nowrap;
+}
 .scrape-panel__head-actions {
   display: flex;
   align-items: center;
@@ -1295,6 +1367,63 @@ defineExpose({
 .scrape-icon-btn svg {
   width: 16px;
   height: 16px;
+}
+
+/* 图标按钮 hover 气泡：替代浏览器原生 title 提示。
+   气泡向下展开（面板容器 overflow:hidden，向上冒会被裁切）。 */
+.scrape-tip {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.scrape-tip__bubble {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  padding: 5px 10px;
+  background: #1e293b;
+  color: #e2e8f0;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.scrape-tip__bubble::after {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-bottom-color: #1e293b;
+}
+.scrape-tip:hover .scrape-tip__bubble,
+.scrape-tip:focus-within .scrape-tip__bubble {
+  opacity: 1;
+}
+/* 靠右按钮：气泡右对齐，避免超出视口 */
+.scrape-tip--right .scrape-tip__bubble {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.scrape-tip--right .scrape-tip__bubble::after {
+  left: auto;
+  right: 8px;
+  transform: none;
+}
+.dark .scrape-tip__bubble {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+.dark .scrape-tip__bubble::after {
+  border-bottom-color: #e2e8f0;
 }
 .scrape-search-expand {
   display: inline-flex;

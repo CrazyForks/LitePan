@@ -106,6 +106,17 @@ type RunRequest struct {
 	WriteMode  string `json:"write_mode,omitempty"`
 }
 
+type Scope struct {
+	StrmTaskID   int64    `json:"strm_task_id"`
+	ExcludedDirs []string `json:"excluded_dirs"`
+}
+
+type ScopeDirectory struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	ModTime string `json:"mod_time,omitempty"`
+}
+
 type RematchRequest struct {
 	StrmTaskID int64  `json:"strm_task_id"`
 	ItemID     string `json:"item_id"`

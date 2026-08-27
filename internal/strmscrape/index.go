@@ -179,6 +179,7 @@ func (s *Service) rebuildIndexLocked(ctx context.Context, strmTaskID int64) erro
 	if err != nil {
 		return err
 	}
+	works = filterWorksByScope(works, s.GetScope(strmTaskID).ExcludedDirs)
 	items := make([]Item, 0, len(works))
 	rels := make([]string, 0, len(works))
 	for _, g := range works {

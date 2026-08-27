@@ -60,6 +60,7 @@ const (
 	KeyQuarkTVClientListMode       = "quark_tv_client_list_mode"
 	KeyQuarkTVProxyClients         = "quark_tv_proxy_clients"
 	KeyStrmScrapeWriteMode         = "strm_scrape_write_mode"
+	KeyStrmScrapeScopes            = "strm_scrape_scopes"
 
 	KeyMOProxyEnabled          = "mo_proxy_enabled"
 	KeyMOProxyURL              = "mo_proxy_url"
@@ -201,6 +202,7 @@ func defaultSpecs() []Spec {
 			{Value: "bidirectional", Label: "本地与云端互补"},
 		}),
 		stringSpec(KeyStrmScrapeWriteMode, "strm", "STRM 刮削写入策略", "missing_only=仅补缺；overwrite=覆盖已有 nfo/海报。", "missing_only"),
+		{Key: KeyStrmScrapeScopes, Type: TypeString, Default: "{}", Hidden: true},
 		boolSpec(KeyMOProxyEnabled, "media_organize", "启用代理", "TMDB 请求经代理出站。", "false"),
 		stringSpec(KeyMOProxyURL, "media_organize", "代理地址", "HTTP/HTTPS 代理地址，例如 http://127.0.0.1:7890。", ""),
 		stringSpec(KeyMOProxyUsername, "media_organize", "代理用户名", "代理认证用户名，无认证可留空。", ""),

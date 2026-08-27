@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"litepan/internal/domain"
 	"litepan/internal/strmscrape"
 )
 
@@ -53,6 +54,48 @@ func (h *Handler) updateStrmScrapeSettings(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	h.getStrmScrapeSettings(w, r)
+}
+
+func (h *Handler) getStrmScrapeScope(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.strmScrape != nil) {
+		return
+	}
+	taskID, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("strm_task_id")), 10, 64)
+	if taskID <= 0 {
+		writeErr(w, domain.Errorf(domain.CodeValidation, "strm_task_id 无效"))
+		return
+	}
+	writeOK(w, h.strmScrape.GetScope(taskID))
+}
+
+func (h *Handler) updateStrmScrapeScope(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.strmScrape != nil) {
+		return
+	}
+	var req strmscrape.Scope
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, err)
+		return
+	}
+	result, err := h.strmScrape.UpdateScope(r.Context(), req)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeOK(w, result)
+}
+
+func (h *Handler) listStrmScrapeScopeDirectories(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.strmScrape != nil) {
+		return
+	}
+	taskID, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("strm_task_id")), 10, 64)
+	dirs, err := h.strmScrape.ListScopeDirectories(r.Context(), taskID, r.URL.Query().Get("parent"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeOK(w, dirs)
 }
 
 func (h *Handler) runStrmScrape(w http.ResponseWriter, r *http.Request) {

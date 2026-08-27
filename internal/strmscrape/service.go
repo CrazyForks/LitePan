@@ -484,6 +484,7 @@ func (s *Service) run(ctx context.Context, req RunRequest) error {
 	if err != nil {
 		return err
 	}
+	works = filterWorksByScope(works, s.GetScope(req.StrmTaskID).ExcludedDirs)
 	if len(works) == 0 {
 		s.setProgress(func(p *Progress) {
 			p.Total = 0
@@ -491,10 +492,10 @@ func (s *Service) run(ctx context.Context, req RunRequest) error {
 			p.Skipped = 0
 			p.Failed = 0
 			p.CurrentItemID = ""
-			p.Message = "未找到 .strm 文件"
+			p.Message = "当前刮削范围内没有 .strm 文件"
 			p.Error = ""
 		})
-		return domain.Errorf(domain.CodeValidation, "输出目录中没有 .strm 文件：%s", root)
+		return domain.Errorf(domain.CodeValidation, "当前刮削范围内没有 .strm 文件：%s", root)
 	}
 	s.setProgress(func(p *Progress) {
 		p.Total = len(works)

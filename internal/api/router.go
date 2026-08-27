@@ -396,6 +396,9 @@ func NewRouter(d Deps) http.Handler {
 				r.Route("/strm-scrape", func(r chi.Router) {
 					r.Get("/settings", h.getStrmScrapeSettings)
 					r.Put("/settings", h.updateStrmScrapeSettings)
+					r.Get("/scope", h.getStrmScrapeScope)
+					r.Put("/scope", h.updateStrmScrapeScope)
+					r.Get("/scope/directories", h.listStrmScrapeScopeDirectories)
 					r.Post("/run", h.runStrmScrape)
 					r.Post("/stop", h.stopStrmScrape)
 					r.Get("/progress", h.getStrmScrapeProgress)

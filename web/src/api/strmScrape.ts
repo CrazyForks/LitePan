@@ -1,4 +1,5 @@
 import { http } from "./client";
+import type { FileItem } from "./types";
 
 export type StrmScrapeWriteMode = "missing_only" | "overwrite";
 export type StrmScrapeItemStatus = "ok" | "miss" | "doubt";
@@ -91,6 +92,36 @@ export interface StrmScrapeItemListResult {
   limit: number;
   has_more: boolean;
   stats: StrmScrapeItemListStats;
+}
+
+export interface StrmScrapeScope {
+  strm_task_id: number;
+  excluded_dirs: string[];
+}
+
+export function fetchStrmScrapeScope(strmTaskId: number) {
+  return http.get<StrmScrapeScope>("/admin/strm-scrape/scope", { strm_task_id: strmTaskId });
+}
+
+export function saveStrmScrapeScope(strmTaskId: number, excludedDirs: string[]) {
+  return http.put<StrmScrapeScope>("/admin/strm-scrape/scope", {
+    strm_task_id: strmTaskId,
+    excluded_dirs: excludedDirs,
+  });
+}
+
+export async function fetchStrmScrapeScopeDirectories(strmTaskId: number, parent = "") {
+  const items = await http.get<Array<{ id: string; name: string; mod_time?: string }>>(
+    "/admin/strm-scrape/scope/directories",
+    { strm_task_id: strmTaskId, parent },
+  );
+  return items.map<FileItem>((item) => ({
+    id: item.id,
+    name: item.name,
+    size: 0,
+    is_dir: true,
+    mod_time: item.mod_time,
+  }));
 }
 
 export function fetchStrmScrapeSettings() {

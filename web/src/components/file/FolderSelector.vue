@@ -46,12 +46,16 @@ const props = withDefaults(
     rootAnchor?: { parentId: string; path: string; label?: string };
     // 同层多选子目录。
     multiSelect?: boolean;
+    // 多选值仍表示被选中的目录，但复选框反向显示：未勾选代表命中该值。
+    inverseSelectionDisplay?: boolean;
     // 受控已选目录；传入后跨目录浏览保留，并由父组件汇总。
     selectedItems?: FolderSelection[];
     // 是否显示右上角关闭按钮（嵌套在自带关闭栏的容器里时可关）。
     showClose?: boolean;
     // 是否显示当前目录筛选搜索框。
     showSearch?: boolean;
+    // 由外层弹窗提供搜索框时，用该值控制当前目录筛选。
+    searchValue?: string;
     // 当前账号收藏夹，用于目录选择器内快速跳转。
     favorites?: BrowserFavoriteItem[];
     favoritesLoading?: boolean;
@@ -67,9 +71,11 @@ const props = withDefaults(
     initialPath: "",
     rootAnchor: undefined,
     multiSelect: false,
+    inverseSelectionDisplay: false,
     selectedItems: undefined,
     showClose: true,
     showSearch: true,
+    searchValue: undefined,
     favorites: undefined,
     favoritesLoading: false,
   },
@@ -84,6 +90,7 @@ const emit = defineEmits<{
   }];
   cancel: [];
   "update:selectedItems": [items: FolderSelection[]];
+  "update:searchValue": [value: string];
 }>();
 
 const loading = ref(false);
@@ -264,6 +271,33 @@ function isPartialSelected(dir: FileItem) {
   return selectionState(dir) === "partial";
 }
 
+function isDisplayChecked(dir: FileItem) {
+  return props.inverseSelectionDisplay ? selectionState(dir) === "none" : isSelected(dir);
+}
+
+function isDisplayPartial(dir: FileItem) {
+  return isPartialSelected(dir);
+}
+
+function toggleDisplaySelect(dir: FileItem) {
+  if (!props.inverseSelectionDisplay) {
+    toggleSelect(dir, !isSelected(dir));
+    return;
+  }
+  const item = selectionForDir(dir);
+  const state = selectionState(dir);
+  if (state === "covered") return;
+  if (state === "none") {
+    commitSelections(withHierarchyExclusive(activeSelections.value, item, true));
+    return;
+  }
+  const next = activeSelections.value.filter((selected) => {
+    if (String(selected.id) === item.id) return false;
+    return !isAncestorSelection(item, selected);
+  });
+  commitSelections(next);
+}
+
 function selectionKey(item: FolderSelection) {
   const id = normalizeSelectPath(item.id);
   if (id) return id;
@@ -392,6 +426,25 @@ const headerSelectState = computed<SelectState>(() => {
 
 function toggleSelectAllVisible() {
   if (!props.multiSelect || !sortedDirs.value.length) return;
+  if (props.inverseSelectionDisplay) {
+    if (headerSelectState.value === "none") {
+      let next = activeSelections.value;
+      for (const dir of sortedDirs.value) {
+        next = withHierarchyExclusive(next, selectionForDir(dir), true);
+      }
+      commitSelections(next);
+      return;
+    }
+    let next = activeSelections.value;
+    for (const dir of sortedDirs.value) {
+      const item = selectionForDir(dir);
+      next = next.filter(
+        (selected) => String(selected.id) !== item.id && !isAncestorSelection(item, selected),
+      );
+    }
+    commitSelections(next);
+    return;
+  }
   if (headerSelectState.value === "checked") {
     let next = activeSelections.value;
     for (const dir of sortedDirs.value) {
@@ -559,6 +612,20 @@ function selectCurrent() {
 }
 
 watch(
+  () => props.searchValue,
+  (value) => {
+    if (value === undefined || value === filterKeyword.value) return;
+    filterKeyword.value = value;
+  },
+  { immediate: true },
+);
+
+watch(filterKeyword, (value) => {
+  if (props.searchValue === undefined || value === props.searchValue) return;
+  emit("update:searchValue", value);
+});
+
+watch(
   () => [props.accountId, props.initialPath, props.initialBreadcrumb, props.rootAnchor] as const,
   () => {
     void resetAndLoad();
@@ -698,11 +765,13 @@ watch(
               <label
                 v-if="multiSelect"
                 class="checkbox-col"
-                :title="headerSelectState === 'checked' ? '取消全选' : '全选当前层'"
+                :title="inverseSelectionDisplay
+                  ? (headerSelectState === 'none' ? '排除当前层' : '包含当前层')
+                  : (headerSelectState === 'checked' ? '取消全选' : '全选当前层')"
               >
                 <input
                   type="checkbox"
-                  :checked="headerSelectState === 'checked'"
+                  :checked="inverseSelectionDisplay ? headerSelectState === 'none' : headerSelectState === 'checked'"
                   :indeterminate="headerSelectState === 'partial'"
                   :disabled="loading || !sortedDirs.length"
                   @change="toggleSelectAllVisible"
@@ -769,27 +838,29 @@ watch(
                   :key="dir.id"
                   class="folder-table-row"
                   :class="{
-                    selected: multiSelect && (isSelected(dir) || isPartialSelected(dir)),
+                    selected: multiSelect && !inverseSelectionDisplay && (isSelected(dir) || isPartialSelected(dir)),
                   }"
                   @click="openDir(dir)"
                 >
                   <label
                     v-if="multiSelect"
                     class="checkbox-col"
-                    :title="selectionState(dir) === 'covered'
-                      ? '已包含在上级目录中，请先取消上级目录'
-                      : selectionState(dir) === 'partial'
-                        ? '已选部分子目录，点击改为全选此目录'
-                        : `选择 ${dir.name}`"
+                    :title="inverseSelectionDisplay
+                      ? (selectionState(dir) === 'covered' ? '已被上级目录排除' : `勾选参与刮削，取消勾选则排除 ${dir.name}`)
+                      : (selectionState(dir) === 'covered'
+                        ? '已包含在上级目录中，请先取消上级目录'
+                        : selectionState(dir) === 'partial'
+                          ? '已选部分子目录，点击改为全选此目录'
+                          : `选择 ${dir.name}`)"
                     @click.stop
                   >
                     <input
                       type="checkbox"
-                      :checked="isSelected(dir)"
-                      :indeterminate="isPartialSelected(dir)"
+                      :checked="isDisplayChecked(dir)"
+                      :indeterminate="isDisplayPartial(dir)"
                       :disabled="selectionState(dir) === 'covered'"
                       :aria-label="`选择 ${dir.name}`"
-                      @change="toggleSelect(dir, ($event.target as HTMLInputElement).checked)"
+                      @change="toggleDisplaySelect(dir)"
                     />
                   </label>
                   <div class="folder-name-cell">
@@ -817,11 +888,13 @@ watch(
             <label
               v-if="multiSelect"
               class="checkbox-col"
-              :title="headerSelectState === 'checked' ? '取消全选' : '全选当前层'"
+              :title="inverseSelectionDisplay
+                ? (headerSelectState === 'none' ? '排除当前层' : '包含当前层')
+                : (headerSelectState === 'checked' ? '取消全选' : '全选当前层')"
             >
               <input
                 type="checkbox"
-                :checked="headerSelectState === 'checked'"
+                :checked="inverseSelectionDisplay ? headerSelectState === 'none' : headerSelectState === 'checked'"
                 :indeterminate="headerSelectState === 'partial'"
                 :disabled="loading || !sortedDirs.length"
                 @change="toggleSelectAllVisible"
@@ -888,27 +961,29 @@ watch(
                 :key="dir.id"
                 class="folder-table-row"
                 :class="{
-                  selected: multiSelect && (isSelected(dir) || isPartialSelected(dir)),
+                  selected: multiSelect && !inverseSelectionDisplay && (isSelected(dir) || isPartialSelected(dir)),
                 }"
                 @click="openDir(dir)"
               >
                 <label
                   v-if="multiSelect"
                   class="checkbox-col"
-                  :title="selectionState(dir) === 'covered'
-                    ? '已包含在上级目录中，请先取消上级目录'
-                    : selectionState(dir) === 'partial'
-                      ? '已选部分子目录，点击改为全选此目录'
-                      : `选择 ${dir.name}`"
+                  :title="inverseSelectionDisplay
+                    ? (selectionState(dir) === 'covered' ? '已被上级目录排除' : `勾选参与刮削，取消勾选则排除 ${dir.name}`)
+                    : (selectionState(dir) === 'covered'
+                      ? '已包含在上级目录中，请先取消上级目录'
+                      : selectionState(dir) === 'partial'
+                        ? '已选部分子目录，点击改为全选此目录'
+                        : `选择 ${dir.name}`)"
                   @click.stop
                 >
                   <input
                     type="checkbox"
-                    :checked="isSelected(dir)"
-                    :indeterminate="isPartialSelected(dir)"
+                    :checked="isDisplayChecked(dir)"
+                    :indeterminate="isDisplayPartial(dir)"
                     :disabled="selectionState(dir) === 'covered'"
                     :aria-label="`选择 ${dir.name}`"
-                    @change="toggleSelect(dir, ($event.target as HTMLInputElement).checked)"
+                    @change="toggleDisplaySelect(dir)"
                   />
                 </label>
                 <div class="folder-name-cell">
@@ -1344,6 +1419,51 @@ watch(
   font-weight: 500;
   text-align: left;
 }
+.folder-table-heading.col-modified {
+  justify-content: flex-end;
+  text-align: right;
+}
+/* 排序箭头：与数据行时间文字右边缘对齐。
+   表头是 inline-flex(gap 6px)，箭头占位 12px（8 宽 + 4 margin-left），
+   所以表头文字右缘 = 列右 - 18px；数据行用相同 padding-right 补偿，两者右边缘一致。 */
+.folder-selector .sort-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 10px;
+  margin-left: 4px;
+  position: relative;
+  vertical-align: middle;
+}
+.folder-selector .sort-indicator::before,
+.folder-selector .sort-indicator::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+}
+.folder-selector .sort-indicator::before {
+  top: 0;
+  border-bottom: 4px solid var(--border);
+}
+.folder-selector .sort-indicator::after {
+  bottom: 0;
+  border-top: 4px solid var(--border);
+}
+.folder-selector .sort-indicator.asc::before {
+  border-bottom-color: var(--text-regular);
+}
+.folder-selector .sort-indicator.asc::after {
+  border-top-color: var(--border);
+}
+.folder-selector .sort-indicator.desc::before {
+  border-bottom-color: var(--border);
+}
+.folder-selector .sort-indicator.desc::after {
+  border-top-color: var(--text-regular);
+}
 .folder-table-heading.active {
   color: var(--text-regular);
 }
@@ -1398,6 +1518,8 @@ watch(
   color: var(--text-muted);
   font-size: 13px;
   text-align: right;
+  /* 与表头「修改时间」文字右缘对齐：表头文字被排序箭头（gap 6 + 箭头 12）让出 18px */
+  padding-right: 18px;
 }
 
 .folder-create-row {
