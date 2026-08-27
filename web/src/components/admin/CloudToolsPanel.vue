@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { getApiErrorMessage } from "@/api/client";
 import {
   cloudToolsApi,
@@ -17,7 +17,6 @@ import CloudToolCard from "@/components/admin/CloudToolCard.vue";
 import LocalUploadToolCard from "@/components/admin/LocalUploadToolCard.vue";
 import ProxyToolsPanel from "@/components/admin/ProxyToolsPanel.vue";
 import QuarkTVToolCard from "@/components/admin/QuarkTVToolCard.vue";
-import "@/styles/admin-shared.css";
 
 const props = withDefaults(defineProps<{ searchOpen?: boolean }>(), { searchOpen: false });
 const emit = defineEmits<{ "update:searchOpen": [boolean] }>();
@@ -25,6 +24,7 @@ const emit = defineEmits<{ "update:searchOpen": [boolean] }>();
 const { runLoad } = useSettingsLoad();
 
 const searchQuery = ref("");
+const searchInputRef = ref<HTMLInputElement | null>(null);
 const cardTitles = ["Emby 反代", "飞牛影视反代", "115 STRM 增强", "夸克 STRM 接管", "AI 辅助识别", "目录整理分类", "从服务器上传", "垃圾清理工具", "视频海报生成"];
 
 function matches(title: string) {
@@ -44,8 +44,13 @@ function closeSearch() {
 
 watch(
   () => props.searchOpen,
-  (open) => {
-    if (!open) searchQuery.value = "";
+  async (open) => {
+    if (open) {
+      await nextTick();
+      searchInputRef.value?.focus();
+    } else {
+      searchQuery.value = "";
+    }
   },
 );
 
@@ -111,7 +116,7 @@ async function clearCache() {
     <div v-if="searchOpen" class="tool-search">
       <div class="tool-search__mask" @click="closeSearch" />
       <div class="tool-search__box">
-        <input v-model="searchQuery" autofocus placeholder="搜索工具，如：飞牛、Emby、反代" @keydown.esc="closeSearch" />
+        <input ref="searchInputRef" v-model="searchQuery" placeholder="搜索工具，如：飞牛、Emby、反代" @keydown.esc="closeSearch" />
         <button type="button" @click="closeSearch">×</button>
       </div>
     </div>

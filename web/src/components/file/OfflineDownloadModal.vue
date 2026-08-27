@@ -358,7 +358,6 @@ async function submit() {
     </div>
 
     <template #footer>
-      <AppButton variant="cancel" @click="emit('close')">取消</AppButton>
       <AppButton variant="primary" :disabled="submitDisabled" @click="submit">
         <SvgIcon name="cloud" :size="17" />
         {{ submitting ? "正在提交…" : "开始离线下载" }}

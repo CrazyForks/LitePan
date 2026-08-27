@@ -22,6 +22,7 @@ import AdminEnableToggle from "@/components/admin/AdminEnableToggle.vue";
 import AdminRowActions from "@/components/admin/AdminRowActions.vue";
 import AdminTableActionBtn from "@/components/admin/AdminTableActionBtn.vue";
 import SettingsCard from "@/components/admin/SettingsCard.vue";
+import "@/styles/admin-shared.css"; /* 使用 modal-form / modal-form__footer 布局，需显式引入共享样式 */
 import { useConfirm } from "@/composables/useConfirm";
 import { findDustTarget, useDustRemoval } from "@/composables/useDustRemoval";
 import { toast, copyTextToClipboard } from "@/composables/useToast";
@@ -324,20 +325,13 @@ defineExpose({ openCreate });
             <td>
               <AdminRowActions>
                 <div class="api-keys__actions">
-                  <button type="button" class="admin-table__action-btn" title="复制" @click="copyText(strmKey.key)">
-                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                      <rect x="5.5" y="5.5" width="8" height="8" rx="1.2" />
-                      <path d="M10.5 5.5V4.2c0-.7-.5-1.2-1.2-1.2H4.2c-.7 0-1.2.5-1.2 1.2v5.1c0 .7.5 1.2 1.2 1.2H5.5" />
-                    </svg>
-                  </button>
-                  <button type="button" class="admin-table__action-btn" title="更换 Key" :disabled="loading" @click="handleRotateStrm">
-                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                      <path d="M13 3v4H9" />
-                      <path d="M3 13V9h4" />
-                      <path d="M11.7 6A4.5 4.5 0 0 0 4 5.5L3 7" />
-                      <path d="M4.3 10A4.5 4.5 0 0 0 12 10.5l1-1.5" />
-                    </svg>
-                  </button>
+                  <AdminTableActionBtn icon="copy" title="复制" @click="copyText(strmKey.key)" />
+                  <AdminTableActionBtn
+                    icon="rotate"
+                    title="更换 Key"
+                    :disabled="loading"
+                    @click="handleRotateStrm"
+                  />
                 </div>
                 <template #menu>
                   <button type="button" class="admin-row-actions__item" @click="copyText(strmKey.key)">复制</button>
@@ -404,7 +398,6 @@ defineExpose({ openCreate });
           </FormField>
         </div>
       <div class="modal-form__footer">
-          <AppButton type="button" variant="secondary" @click="dialogOpen = false">取消</AppButton>
           <AppButton type="button" variant="primary" :disabled="saving" @click="saveKey">
             {{ saving ? "保存中…" : editingKey ? "保存秘钥" : "创建秘钥" }}
           </AppButton>

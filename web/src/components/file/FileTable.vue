@@ -1354,21 +1354,6 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
   color: #16a34a;
 }
 
-.drag-lock__text {
-  font-size: 12px;
-  line-height: 1;
-  font-weight: 650;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-shadow: 0 1px 2px color-mix(in srgb, var(--surface) 72%, transparent);
-}
-
-.drag-lock--ready .drag-lock__text {
-  color: #15803d;
-}
-
 @media (max-width: 768px) {
   .file-list {
     overflow-x: hidden;
@@ -1388,10 +1373,6 @@ function handleHeaderMenuKeydown(event: KeyboardEvent) {
 
   .drag-lock {
     gap: 7px;
-  }
-
-  .drag-lock__text {
-    font-size: 11px;
   }
 }
 </style>

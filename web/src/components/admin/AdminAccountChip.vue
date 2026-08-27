@@ -227,7 +227,6 @@ onBeforeUnmount(() => {
         @keydown.enter="confirmUnlock"
       />
       <div class="unlock-actions">
-        <AppButton variant="secondary" @click="unlockOpen = false">取消</AppButton>
         <AppButton variant="primary" @click="confirmUnlock">解锁</AppButton>
       </div>
     </div>

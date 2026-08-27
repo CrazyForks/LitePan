@@ -350,16 +350,6 @@ async function startLocalUpload() {
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
 }
-.local-upload-drawer__title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-}
-.local-upload-drawer__head-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
 .local-upload-drawer__close {
   border: none;
   background: transparent;

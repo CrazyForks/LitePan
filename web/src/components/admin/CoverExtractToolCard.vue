@@ -648,7 +648,7 @@ onUnmounted(() => {
 
 <template>
   <CloudToolCard v-show="visible" :enabled="enabled" name="视频海报生成" driver="视频截图· 保存到网盘" logo-src="/logos/CoverExtract.png" logo-alt="视频海报生成" :stat-value="files.length" stat-label="个待处理视频">
-    启用后，通过首页文件列表右键[生成视频海报]将待处理文件发送至此，适用于无法刮削作品生成海报。
+    启用后，首页文件列表右键[生成视频海报]将待处理项发送至此，用于无法刮削作品生成海报。
     <template #toggle><button class="check-toggle" type="button" :class="{ on: enabled }" :aria-label="enabled ? '停用视频海报生成' : '启用视频海报生成'" :disabled="toggleSaving" @click="toggleEnabled"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg></button></template>
     <template #actions><AppButton size="sm" @click="show">打开工具</AppButton></template>
   </CloudToolCard>

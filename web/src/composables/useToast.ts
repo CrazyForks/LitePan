@@ -11,7 +11,7 @@ export interface Toast {
 const toasts = reactive<Toast[]>([]);
 let seq = 0;
 
-function push(kind: ToastKind, message: string, duration = 3000): void {
+function push(kind: ToastKind, message: string, duration = 2000): void {
   const id = ++seq;
   toasts.push({ id, kind, message });
   window.setTimeout(() => remove(id), duration);
@@ -25,7 +25,7 @@ function remove(id: number): void {
 // 全局单例 toast，组件内 import 即用。
 export const toast = {
   success: (m: string) => push("success", m),
-  error: (m: string) => push("error", m, 4500),
+  error: (m: string) => push("error", m, 3500),
   info: (m: string) => push("info", m),
   warning: (m: string) => push("warning", m),
 };

@@ -355,7 +355,7 @@ async function executeCleanup() {
       :stat-value="statValue"
       :stat-label="statLabel"
     >
-      扫描 STRM 残留、上传与下载临时文件、历史日志和缓存占用，按风险分级预览，勾选后安全清理本地空间。
+      扫描 STRM 残留、上传与下载临时文件、历史日志和缓存占用，按风险分级预览，勾选后安全清除。
       <template #actions>
         <AppButton size="sm" variant="secondary" :disabled="scanning" @click="openTool">
           {{ scanning ? "扫描中…" : "开始扫描" }}

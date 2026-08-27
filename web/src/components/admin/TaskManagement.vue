@@ -43,7 +43,7 @@ import AppModal from "@/components/base/AppModal.vue";
 import BusySpinner from "@/components/base/BusySpinner.vue";
 import AppSelect from "@/components/base/AppSelect.vue";
 import AppStateBlock from "@/components/base/AppStateBlock.vue";
-import TimeWheelPicker from "@/components/base/TimeWheelPicker.vue";
+import TimeWindowField from "@/components/base/TimeWindowField.vue";
 import SettingsSegment from "@/components/admin/SettingsSegment.vue";
 import SettingsHelpTooltip from "@/components/admin/SettingsHelpTooltip.vue";
 import AdminTaskTabHeader from "@/components/admin/AdminTaskTabHeader.vue";
@@ -200,7 +200,6 @@ const strmRepairResult = ref<{ ok: boolean; updated?: number; message: string } 
 const pendingCreateBody = ref<StrmTaskInput | null>(null);
 const showAdvanced = ref(false);
 const pickerOpen = ref(false);
-const timePickerVisible = ref(false);
 
 const branchDialogOpen = ref(false);
 const branchLoading = ref(false);
@@ -410,7 +409,6 @@ async function handleDrawerSave() {
 
 const { timeWindowDisplay, timePickerMode, onTimeWheelConfirm } = useTimeWindowSchedule(form, {
   allowManual: true,
-  pickerVisible: timePickerVisible,
 });
 
 const editingTask = computed(() => {
@@ -1162,7 +1160,12 @@ watch(activeTab, (tab) => {
                       @click="handleForceStop(task)"
                     />
                     <div v-else class="strm-run-menu-wrap">
-                      <AdminTableActionBtn icon="play" title="立即执行" @click="handleRunButtonClick(task)" />
+                      <AdminTableActionBtn
+                        icon="play"
+                        title="立即执行"
+                        :no-tip="task.branch_check_enabled"
+                        @click="handleRunButtonClick(task)"
+                      />
                       <div v-if="task.branch_check_enabled" class="strm-run-menu">
                         <button type="button" @click="handleRun(task, 'full')">全部执行</button>
                         <button type="button" @click="handleRun(task, 'branch')">分支执行</button>
@@ -1263,8 +1266,7 @@ watch(activeTab, (tab) => {
 
         <div class="strm-form__row">
           <FormField label="分组目录">
-            <template #label>
-              分组目录
+            <template #help>
               <SettingsHelpTooltip title="分组目录说明">
                 <p>STRM 文件生成到哪个父文件夹下，用来把多个任务归进同一个媒体库目录。</p>
                 <p>留空 = 直接生成在 STRM 根目录；填「电影」= 生成到 /app/strm/电影/任务名/，支持多级「电影/港台」。</p>
@@ -1287,13 +1289,17 @@ watch(activeTab, (tab) => {
             <AppInput v-model="form.api_interval" type="number" min="0" max="5000" />
           </FormField>
           <FormField label="执行计划">
-            <button type="button" class="strm-time-display" @click="timePickerVisible = true">
-              <span>{{ timeWindowDisplay }}</span>
-              <svg class="strm-time-display__icon" viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="12" cy="12" r="8.5" />
-                <path d="M12 7.5v5l3.2 2" />
-              </svg>
-            </button>
+            <TimeWindowField
+              :display="timeWindowDisplay"
+              :start-time="form.time_start"
+              :end-time="form.time_end"
+              :all-day="form.time_window_mode === 'always'"
+              :allow-manual="true"
+              :mode="timePickerMode"
+              :manual-locked="Boolean(strmScheduleLockedReason)"
+              :manual-locked-reason="strmScheduleLockedReason || undefined"
+              @confirm="onTimeWheelConfirm"
+            />
           </FormField>
         </div>
 
@@ -1353,7 +1359,6 @@ watch(activeTab, (tab) => {
         </template>
 
         <div v-if="strmRepairPhase === 'idle'" class="modal-form__footer">
-          <AppButton type="button" variant="secondary" @click="closeTaskDialog">取消</AppButton>
           <AppButton type="button" variant="primary" :disabled="submitting" @click="submitTask">
             {{ submitting ? "保存中…" : "保存" }}
           </AppButton>
@@ -1531,20 +1536,6 @@ watch(activeTab, (tab) => {
       confirm-text="选择该分支"
       @close="branchPickerOpen = false"
       @resolve="onBranchFolderPicked"
-    />
-
-    <TimeWheelPicker
-      :visible="timePickerVisible"
-      :start-time="form.time_start"
-      :end-time="form.time_end"
-      :all-day="form.time_window_mode === 'always'"
-      :allow-daily="false"
-      :allow-manual="true"
-      :mode="timePickerMode"
-      :manual-locked="Boolean(strmScheduleLockedReason)"
-      :manual-locked-reason="strmScheduleLockedReason || undefined"
-      @confirm="onTimeWheelConfirm"
-      @cancel="timePickerVisible = false"
     />
   </div>
 </template>
@@ -1834,45 +1825,6 @@ watch(activeTab, (tab) => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-}
-
-.strm-time-display {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  min-height: 40px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
-  font-size: 14px;
-  cursor: pointer;
-  box-sizing: border-box;
-  transition: border-color 0.2s;
-}
-
-.strm-time-display:hover {
-  border-color: var(--brand);
-}
-
-.strm-time-display__icon {
-  width: 16px;
-  height: 16px;
-  color: var(--text-muted);
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: color 0.2s;
-  flex-shrink: 0;
-}
-
-.strm-time-display:hover .strm-time-display__icon {
-  color: var(--brand);
 }
 
 .strm-advanced-toggle {

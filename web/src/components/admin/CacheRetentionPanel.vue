@@ -33,7 +33,7 @@ import AppInput from "@/components/base/AppInput.vue";
 import AppModal from "@/components/base/AppModal.vue";
 import AppSelect from "@/components/base/AppSelect.vue";
 import StatCard from "@/components/base/StatCard.vue";
-import TimeWheelPicker from "@/components/base/TimeWheelPicker.vue";
+import TimeWindowField from "@/components/base/TimeWindowField.vue";
 import AdminStatsGrid from "@/components/admin/AdminStatsGrid.vue";
 import AccountFolderField from "@/components/admin/AccountFolderField.vue";
 import AdminEmptyState from "@/components/admin/AdminEmptyState.vue";
@@ -98,7 +98,6 @@ const dialogOpen = ref(false);
 const editingId = ref<number | null>(null);
 const submitting = ref(false);
 const pickerOpen = ref(false);
-const timePickerVisible = ref(false);
 
 const defaults = reactive({
   api_interval: 200,
@@ -133,9 +132,7 @@ const { display: sourceDirDisplay, title: sourceDirTitle } = useAccountPathLabel
   accounts,
 });
 
-const { timeWindowDisplay, onTimeWheelConfirm } = useTimeWindowSchedule(form, {
-  pickerVisible: timePickerVisible,
-});
+const { timeWindowDisplay, onTimeWheelConfirm } = useTimeWindowSchedule(form);
 
 function isRetentionBusy() {
   return (
@@ -692,19 +689,18 @@ defineExpose({
             <AppInput v-model="form.refresh_interval" type="number" min="1" max="1440" />
           </FormField>
           <FormField label="执行时间段">
-            <button type="button" class="retention-time-display" @click="timePickerVisible = true">
-              <span>{{ timeWindowDisplay }}</span>
-              <svg class="retention-time-display__icon" viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="12" cy="12" r="8.5" />
-                <path d="M12 7.5v5l3.2 2" />
-              </svg>
-            </button>
+            <TimeWindowField
+              :display="timeWindowDisplay"
+              :start-time="form.time_start"
+              :end-time="form.time_end"
+              :all-day="form.time_window_mode === 'always'"
+              @confirm="onTimeWheelConfirm"
+            />
           </FormField>
         </div>
       </div>
 
       <template #footer>
-        <AppButton type="button" variant="secondary" @click="dialogOpen = false">取消</AppButton>
         <AppButton type="button" variant="primary" :disabled="submitting" @click="submitTask">
           {{ submitting ? "保存中…" : editingId ? "更新配置" : "保存配置" }}
         </AppButton>
@@ -719,15 +715,6 @@ defineExpose({
       :initial-path="form.path"
       @close="pickerOpen = false"
       @resolve="onFolderPicked"
-    />
-
-    <TimeWheelPicker
-      :visible="timePickerVisible"
-      :start-time="form.time_start"
-      :end-time="form.time_end"
-      :all-day="form.time_window_mode === 'always'"
-      @confirm="onTimeWheelConfirm"
-      @cancel="timePickerVisible = false"
     />
   </div>
 </template>
@@ -833,29 +820,6 @@ defineExpose({
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
-}
-
-.retention-time-display {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  min-height: 40px;
-  padding: 0 12px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  cursor: pointer;
-  color: var(--text);
-}
-
-.retention-time-display__icon {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  color: var(--text-muted);
 }
 
 @media (max-width: 720px) {

@@ -1272,9 +1272,17 @@ watch(
   min-width: 0;
   border: none;
   outline: none;
+  appearance: none;
+  -webkit-appearance: none;
   background: transparent;
   color: var(--text);
   font-size: 13px;
+}
+.folder-selector__search input::-webkit-search-cancel-button,
+.folder-selector__search input::-webkit-search-decoration {
+  display: none;
+  appearance: none;
+  -webkit-appearance: none;
 }
 .folder-selector__search input::placeholder {
   color: var(--text-muted);

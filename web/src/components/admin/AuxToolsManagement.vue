@@ -8,7 +8,6 @@ import type StrmScrapePanelComponent from "@/components/admin/StrmScrapePanel.vu
 import { useSectionTabRoute } from "@/composables/useSectionTabRoute";
 import { useSettingsPageDirty } from "@/composables/useSettingsPageDirty";
 import { readPanelSaving, type SettingsPanelExpose } from "@/composables/useSettingsForm";
-import "@/styles/admin-shared.css";
 
 const StrmScrapePanel = defineAsyncComponent(() => import("@/components/admin/StrmScrapePanel.vue"));
 const StrmScrapeSettings = defineAsyncComponent(() => import("@/components/admin/StrmScrapeSettings.vue"));

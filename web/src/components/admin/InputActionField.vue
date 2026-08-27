@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import "@/styles/admin-shared.css";
 </script>
 
 <template>
@@ -10,3 +9,21 @@ import "@/styles/admin-shared.css";
     <slot name="action" />
   </div>
 </template>
+
+<style scoped>
+.input-action-field {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  min-width: 0;
+}
+.input-action-field__main {
+  flex: 1;
+  min-width: 0;
+}
+@media (max-width: 640px) {
+  .input-action-field {
+    flex-direction: column;
+  }
+}
+</style>

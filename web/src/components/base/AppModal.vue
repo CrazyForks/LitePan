@@ -12,8 +12,14 @@ const props = withDefaults(
     bare?: boolean;
     // nested：叠在另一层弹窗之上（目录选择等）。
     nested?: boolean;
+    // footerDivider：底部操作区上方是否显示分割线（默认无）。
+    footerDivider?: boolean;
+    // bodyFlush：内容区贴边（去掉左右内边距），用于内容自带贴边布局的弹窗。
+    bodyFlush?: boolean;
+    // headPlain：极简头部（白底、无分割线、与内容一体），用于极简风弹窗。
+    headPlain?: boolean;
   }>(),
-  { title: "", size: "md", bare: false, nested: false },
+  { title: "", size: "md", bare: false, nested: false, footerDivider: false, bodyFlush: false, headPlain: false },
 );
 const emit = defineEmits<{ close: [] }>();
 
@@ -64,16 +70,20 @@ onUnmounted(() => {
               <slot />
             </template>
             <template v-else>
-              <header class="modal__head">
+              <header class="modal__head" :class="{ 'modal__head--plain': headPlain }">
                 <slot name="header">
                   <h3 v-if="title" class="modal__title">{{ title }}</h3>
                 </slot>
                 <button class="modal__close" aria-label="关闭" @click="emit('close')">×</button>
               </header>
-              <div class="modal__body">
+              <div class="modal__body" :class="{ 'modal__body--flush': bodyFlush }">
                 <slot />
               </div>
-              <footer v-if="$slots.footer" class="modal__foot">
+              <footer
+                v-if="$slots.footer"
+                class="modal__foot"
+                :class="{ 'modal__foot--divider': footerDivider }"
+              >
                 <slot name="footer" />
               </footer>
             </template>
@@ -159,9 +169,14 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--border);
   border-radius: var(--radius-md) var(--radius-md) 0 0;
 }
+.modal__head--plain {
+  background: transparent;
+  border-bottom: 0;
+  padding-bottom: 12px;
+}
 .modal__title {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text);
 }
@@ -178,11 +193,21 @@ onUnmounted(() => {
 .modal__body {
   padding: 20px;
 }
+.modal__body--flush {
+  padding: 0;
+  /* 贴边内容（侧栏等自带背景色）裁进弹窗圆角，避免盖出直角 */
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  overflow: hidden;
+}
 .modal__foot {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
   padding: 4px 20px 18px;
+}
+.modal__foot--divider {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
 }
 
 .modal-enter-active,

@@ -420,7 +420,6 @@ onActivated(() => {
         </label>
       </div>
       <template #footer>
-        <AppButton variant="cancel" :disabled="creating" @click="createOpen = false">取消</AppButton>
         <AppButton variant="primary" :disabled="creating" @click="submitCreate">{{ creating ? "正在创建……" : "创建备份" }}</AppButton>
       </template>
     </AppModal>
@@ -437,7 +436,6 @@ onActivated(() => {
         <p class="backup-form__help">文件会先完成格式、加密载荷、校验值和数据库完整性检查，通过后才加入备份列表。</p>
       </div>
       <template #footer>
-        <AppButton variant="cancel" :disabled="importing" @click="importOpen = false">取消</AppButton>
         <AppButton variant="primary" :disabled="importing" @click="submitImport">{{ importing ? "正在校验……" : "导入并校验" }}</AppButton>
       </template>
     </AppModal>
@@ -468,7 +466,6 @@ onActivated(() => {
         </div>
       </div>
       <template #footer>
-        <AppButton variant="cancel" :disabled="preparingRestore" @click="restoreOpen = false">取消</AppButton>
         <AppButton variant="danger" :disabled="preparingRestore" @click="submitRestore">{{ preparingRestore ? "正在准备……" : "恢复并重启" }}</AppButton>
       </template>
     </AppModal>

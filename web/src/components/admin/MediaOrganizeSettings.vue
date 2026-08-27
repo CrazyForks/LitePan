@@ -630,12 +630,6 @@ defineExpose(
   gap: 16px;
 }
 
-.mo-settings__card-head {
-  display: flex;
-  justify-content: flex-end;
-  margin: -4px 0 8px;
-}
-
 .mo-tag-row :deep(.settings-row) {
   align-items: flex-start;
 }

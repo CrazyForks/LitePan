@@ -11,7 +11,6 @@ const FuseManagement = defineAsyncComponent(() => import("@/components/admin/Fus
 import { useSectionTabRoute } from "@/composables/useSectionTabRoute";
 import { useSettingsPageDirty } from "@/composables/useSettingsPageDirty";
 import { toast } from "@/composables/useToast";
-import "@/styles/admin-shared.css";
 
 const WEBDAV_TAB = "webdav";
 const FUSE_TAB = "fuse";

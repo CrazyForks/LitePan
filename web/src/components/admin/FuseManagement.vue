@@ -702,7 +702,6 @@ defineExpose({
         </template>
 
         <div class="modal-form__footer">
-          <AppButton variant="secondary" @click="dialogOpen = false">取消</AppButton>
           <AppButton variant="primary" :loading="submitting" @click="submitForm">
             {{ editingId ? "保存" : "添加挂载点" }}
           </AppButton>

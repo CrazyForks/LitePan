@@ -20,7 +20,6 @@ import TmdbHostsHelpTip from "@/components/admin/TmdbHostsHelpTip.vue";
 import { useSettingsForm, bindSettingsPanelExpose } from "@/composables/useSettingsForm";
 import { useSettingsLoad } from "@/composables/useSettingsLoad";
 import { toast } from "@/composables/useToast";
-import "@/styles/admin-shared.css";
 
 const SCRAPE_SETTINGS_ACCENT = "#38bdf8";
 

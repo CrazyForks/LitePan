@@ -1052,18 +1052,17 @@ defineExpose({
         </div>
 
         <div v-else class="modal-form__row">
-          <div class="form-field">
-            <div class="form-field__label-row">
-              <label class="form-field__label">整理标识</label>
+          <FormField label="整理标识">
+            <template #help>
               <SettingsHelpTooltip title="整理标识说明">
                 <p>原地重命名靠它判断哪些文件已整理过，避免重复处理。</p>
                 <p><b>tmdb</b>（推荐）：文件名写入 {"{tmdb-xxxx}"} 作为标识。</p>
                 <p><b>off</b>：文件名不写入任何标识，靠规范命名结构判断。</p>
                 <p><b>自定义</b>（如 v2）：文件名写入 [v2] 作为标识。</p>
               </SettingsHelpTooltip>
-            </div>
+            </template>
             <AppInput v-model="form.rename_marker" placeholder="tmdb（推荐）/ off / 自定义如 v2" />
-          </div>
+          </FormField>
           <FormField label="媒体类型">
             <AppSelect v-model="form.media_type" :options="mediaTypeOptions" />
           </FormField>
@@ -1430,7 +1429,6 @@ defineExpose({
           </p>
         </div>
         <div class="organize-match__foot">
-          <AppButton type="button" variant="secondary" @click="closeMatch">取消</AppButton>
           <AppButton
             type="button"
             variant="primary"
@@ -2463,23 +2461,5 @@ defineExpose({
   font-size: 11px;
   color: var(--warning);
   cursor: pointer;
-}
-
-.form-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.form-field__label-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.form-field__label {
-  font-size: 13px;
-  color: var(--text-regular);
-  font-weight: 500;
 }
 </style>

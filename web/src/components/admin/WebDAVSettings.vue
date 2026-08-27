@@ -13,7 +13,6 @@ import { useSettingsForm } from "@/composables/useSettingsForm";
 import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { useSettingsLoad } from "@/composables/useSettingsLoad";
 import { toast, copyTextToClipboard } from "@/composables/useToast";
-import "@/styles/admin-shared.css";
 
 const props = withDefaults(
   defineProps<{

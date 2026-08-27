@@ -48,7 +48,6 @@ function openBrowse() {
 .account-folder-field {
   display: flex;
   align-items: stretch;
-  min-height: 40px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;
@@ -64,14 +63,14 @@ function openBrowse() {
   flex: 1;
   min-width: 0;
   margin: 0;
-  padding: 0 12px;
+  padding: 9px 12px; /* 与 AppInput 盒模型一致，并排时高度相同 */
   border: none;
   background: transparent;
   text-align: left;
   cursor: pointer;
   color: var(--text);
   font-size: 13px;
-  line-height: 40px;
+  line-height: normal;
 }
 
 .account-folder-field__main:hover {

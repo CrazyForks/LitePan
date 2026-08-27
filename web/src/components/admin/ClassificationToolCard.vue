@@ -323,14 +323,8 @@ async function saveSettings() {
       </template>
     </CloudToolCard>
 
-    <AppModal :open="open" bare @close="open = false">
-      <div class="cls-modal">
-        <div class="cls-modal__head">
-          <span class="cls-modal__title">请选择分类模板</span>
-          <button type="button" class="cls-modal__close" aria-label="关闭" @click="open = false">✕</button>
-        </div>
-
-        <div class="classification-template-tabs">
+    <AppModal :open="open" size="lg" title="请选择分类模板" footer-divider body-flush @close="open = false">
+      <div class="classification-template-tabs">
           <button
             v-for="item in templateMeta"
             :key="item.kind"
@@ -450,11 +444,10 @@ async function saveSettings() {
           </section>
         </div>
 
-        <div class="cls-modal__foot">
-          <AppButton class="classification-help-button" variant="secondary" @click="helpOpen = true">查看帮助</AppButton>
-          <AppButton variant="primary" :disabled="saving" @click="saveSettings">{{ saving ? "保存中…" : "保存" }}</AppButton>
-        </div>
-      </div>
+      <template #footer>
+        <AppButton class="classification-help-button" variant="secondary" @click="helpOpen = true">查看帮助</AppButton>
+        <AppButton variant="primary" :disabled="saving" @click="saveSettings">{{ saving ? "保存中…" : "保存" }}</AppButton>
+      </template>
     </AppModal>
 
     <AppModal :open="helpOpen" title="分类帮助" size="lg" nested @close="helpOpen = false">
@@ -628,12 +621,6 @@ async function saveSettings() {
 .cls-help-fields__tip { color: var(--text-muted); font-size: 12px; }
 
 /* ── bare 自绘弹窗：贴边结构 ── */
-.cls-modal { width: min(880px, 94vw); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-pop); display: flex; flex-direction: column; }
-.cls-modal__head { display: flex; align-items: center; justify-content: space-between; padding: 16px 22px; border-bottom: 1px solid var(--border); background: var(--panel-head-bg, var(--surface-sunken)); }
-.cls-modal__title { font-size: 15px; font-weight: 600; color: var(--text); }
-.cls-modal__close { width: 30px; height: 30px; border: 0; background: transparent; color: var(--text-muted); font-size: 16px; cursor: pointer; border-radius: 8px; }
-.cls-modal__close:hover { background: var(--surface); color: var(--text); }
-.cls-modal__foot { display: flex; align-items: center; gap: 10px; padding: 14px 22px 18px; border-top: 1px solid var(--border); }
 .classification-lookup { margin-top: 10px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-sunken); }
 .classification-lookup__intro { display: flex; align-items: baseline; gap: 8px; }
 .classification-lookup__intro strong { font-size: 13px; font-weight: 600; }

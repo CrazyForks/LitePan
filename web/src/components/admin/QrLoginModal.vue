@@ -3,7 +3,8 @@ import { computed, onUnmounted, ref, watch } from "vue";
 import { qrPoll, qrStart, type QrStatus } from "@/api/qr";
 import type { FieldOption } from "@/api/types";
 import { toast } from "@/composables/useToast";
-import AppModal from "@/components/base/AppModal.vue";
+import AppPlainModal from "@/components/base/AppPlainModal.vue";
+import AppSelect from "@/components/base/AppSelect.vue";
 import BusySpinner from "@/components/base/BusySpinner.vue";
 
 const props = withDefaults(
@@ -98,10 +99,10 @@ function buildStartConfig(): string {
   return JSON.stringify(cfg);
 }
 
-function onDeviceChange(e: Event) {
-  const next = (e.target as HTMLSelectElement).value;
-  if (!next || next === device.value) return;
-  device.value = next;
+function onDeviceSelect(next: string | number | boolean) {
+  const value = String(next);
+  if (!value || value === device.value) return;
+  device.value = value;
   if (props.open) void start();
 }
 
@@ -215,22 +216,16 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <AppModal :open="open" bare @close="handleClose">
-    <div class="qr-panel">
-      <div class="qr-panel-header">
-        <div class="qr-panel-title">
-          <i class="fas fa-qrcode"></i>
-          <span>{{ panelTitle }}</span>
-        </div>
-        <button class="qr-panel-close" type="button" aria-label="关闭" @click="handleClose">×</button>
-      </div>
-
-      <div v-if="showDevicePicker" class="qr-device-bar">
-        <span class="qr-device-label">设备来源</span>
-        <select class="qr-device-select" :value="device" @change="onDeviceChange">
-          <option v-for="o in deviceOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-        </select>
-      </div>
+  <AppPlainModal :open="open" :title="panelTitle" size="sm" body-flush @close="handleClose">
+    <div v-if="showDevicePicker" class="qr-device-bar">
+      <span class="qr-device-label">设备来源</span>
+      <AppSelect
+        :model-value="device"
+        :options="deviceOptions"
+        class="qr-device-select"
+        @update:model-value="onDeviceSelect"
+      />
+    </div>
 
       <div class="qr-panel-body">
         <div v-if="phase === 'loading'" class="qr-state qr-state--loading">
@@ -252,87 +247,25 @@ onUnmounted(() => {
           <button class="qr-retry" type="button" @click="start">重新获取</button>
         </div>
       </div>
-    </div>
-  </AppModal>
+  </AppPlainModal>
 </template>
 
 <style scoped>
-.qr-panel {
-  width: 360px;
-  max-width: 92vw;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-radius: 16px;
-  background: var(--surface);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
-}
-
-.qr-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 20px;
-  background: var(--panel-head-bg);
-  border-bottom: 1px solid var(--border);
-  border-top-left-radius: 16px;
-  border-top-right-radius: 16px;
-}
-
-.qr-panel-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  color: var(--text);
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.qr-panel-title i {
-  color: var(--brand);
-  font-size: 15px;
-}
-
 .qr-device-bar {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  padding: 10px 20px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 60%, transparent);
+  padding: 12px 20px 0;
+}
+.qr-device-bar .qr-device-select {
+  width: 200px;
+  flex: 0 1 auto;
 }
 
 .qr-device-label {
   color: var(--text-muted);
   font-size: 13px;
-}
-
-.qr-device-select {
-  height: 30px;
-  padding: 0 28px 0 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 8px);
-  background: var(--surface);
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.qr-panel-close {
-  width: 28px;
-  height: 28px;
-  border: 0;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 24px;
-  line-height: 1;
-}
-
-.qr-panel-close:hover {
-  color: var(--text);
 }
 
 .qr-panel-body {

@@ -1241,7 +1241,6 @@ defineExpose({
           >
             无匹配
           </AppButton>
-          <AppButton type="button" variant="secondary" @click="closeRematch">取消</AppButton>
           <AppButton
             type="button"
             variant="primary"

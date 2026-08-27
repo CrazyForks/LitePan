@@ -143,15 +143,9 @@ function cancelName() {
 </script>
 
 <template>
-  <AppModal :open="open" bare @close="emit('cancel')">
-    <div class="ws-modal">
-      <div class="ws-modal__head">
-        <span class="ws-modal__title">{{ title }}</span>
-        <button type="button" class="ws-modal__close" aria-label="关闭" @click="emit('cancel')">✕</button>
-      </div>
-
-      <div class="ws">
-        <!-- 左侧配置列表 -->
+  <AppModal :open="open" size="lg" :title="title" body-flush @close="emit('cancel')">
+    <div class="ws">
+      <!-- 左侧配置列表 -->
         <aside class="ws-side">
           <div class="ws-side__cap">{{ caption }}</div>
           <div class="ws-side__list">
@@ -292,47 +286,10 @@ function cancelName() {
           </div>
         </section>
       </div>
-    </div>
   </AppModal>
 </template>
 
 <style scoped>
-.ws-modal {
-  width: min(880px, 94vw);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  box-shadow: var(--shadow-pop);
-}
-.ws-modal__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 22px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel-head-bg, var(--surface-sunken));
-}
-.ws-modal__title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
-}
-.ws-modal__close {
-  width: 30px;
-  height: 30px;
-  border: 0;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 16px;
-  cursor: pointer;
-  border-radius: 8px;
-}
-.ws-modal__close:hover {
-  background: var(--surface);
-  color: var(--text);
-}
-
 .ws {
   display: grid;
   grid-template-columns: 230px minmax(0, 1fr);

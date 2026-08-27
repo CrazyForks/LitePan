@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import "@/styles/admin-shared.css";
 </script>
 
 <template>
@@ -7,3 +6,12 @@ import "@/styles/admin-shared.css";
     <slot />
   </div>
 </template>
+
+<style scoped>
+.admin-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+</style>

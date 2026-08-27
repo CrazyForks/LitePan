@@ -4,7 +4,7 @@ import { quarkTVApi, type QuarkTVAccount } from "@/api/cloudTools";
 import { getApiErrorMessage } from "@/api/client";
 import { toast } from "@/composables/useToast";
 import AppButton from "@/components/base/AppButton.vue";
-import AppModal from "@/components/base/AppModal.vue";
+import AppPlainModal from "@/components/base/AppPlainModal.vue";
 import AppSelect from "@/components/base/AppSelect.vue";
 import BusySpinner from "@/components/base/BusySpinner.vue";
 
@@ -174,16 +174,13 @@ onUnmounted(clearTimers);
 </script>
 
 <template>
-  <AppModal :open="open" title="夸克 STRM 接管 · 账号绑定" size="md" @close="handleClose">
-    <label class="qtv-field">
-      <span>选择夸克账号</span>
-      <AppSelect
-        v-model="accountId"
-        :options="accountOptions"
-        :disabled="binding"
-        @update:modelValue="phase === 'waiting' ? start() : undefined"
-      />
-    </label>
+  <AppPlainModal :open="open" title="选择绑定的账号" size="sm" @close="handleClose">
+    <AppSelect
+      v-model="accountId"
+      :options="accountOptions"
+      :disabled="binding"
+      @update:modelValue="phase === 'waiting' ? start() : undefined"
+    />
 
     <div class="qtv-body" :class="{ 'qtv-body--failed': phase === 'failed' || phase === 'expired' || phase === 'error' }">
       <div v-if="phase === 'loading'" class="qtv-state qtv-state--loading">
@@ -224,29 +221,26 @@ onUnmounted(clearTimers);
       </div>
     </div>
 
-    <template #footer>
-      <AppButton variant="secondary" :disabled="binding" @click="handleClose">取消</AppButton>
-      <AppButton variant="primary" :disabled="!canStart" @click="start">
-        {{ primaryButtonText }}
-      </AppButton>
-    </template>
-  </AppModal>
+      <div class="qtv-action">
+        <AppButton variant="primary" :disabled="!canStart" @click="start">
+          {{ primaryButtonText }}
+        </AppButton>
+      </div>
+  </AppPlainModal>
 </template>
 
 <style scoped>
-.qtv-field {
-  display: grid;
-  gap: 6px;
-  color: var(--text-regular);
-  font-size: 13px;
-  font-weight: 600;
-}
 .qtv-body {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 300px;
   margin-top: 14px;
+}
+.qtv-action {
+  display: flex;
+  justify-content: center;
+  padding-top: 14px;
 }
 .qtv-body--failed {
   align-items: flex-start;

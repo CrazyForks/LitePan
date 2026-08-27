@@ -31,7 +31,6 @@ import ApiKeySettings from "@/components/admin/ApiKeySettings.vue";
 import SvgIcon from "@/components/icons/SvgIcon.vue";
 import { isCacheSettingKey } from "@/constants/cacheSettings";
 import { getSkinPref, previewSkin, restoreSavedSkin, setSkinPref, type SkinPref } from "@/utils/theme";
-import "@/styles/admin-shared.css";
 
 const BackupRestorePanel = defineAsyncComponent(() => import("@/components/admin/BackupRestorePanel.vue"));
 

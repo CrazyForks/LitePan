@@ -135,7 +135,14 @@ function resolve(payload: { selections?: FolderSelection[] } = {}) {
 }
 .scrape-scope-picker__search input {
   flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
+  appearance: none; -webkit-appearance: none;
   color: var(--text); font: inherit; font-size: 13px;
+}
+.scrape-scope-picker__search input::-webkit-search-cancel-button,
+.scrape-scope-picker__search input::-webkit-search-decoration {
+  display: none;
+  appearance: none;
+  -webkit-appearance: none;
 }
 .scrape-scope-picker__search input::placeholder { color: var(--text-muted); }
 .scrape-scope-picker__search button {

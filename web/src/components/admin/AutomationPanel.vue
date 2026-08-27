@@ -350,13 +350,14 @@
       @cancel="cancelTimePicker"
     />
 
-    <AppModal :open="pickerVisible" bare @close="cancelPicker">
-      <div class="pick-modal">
-        <div class="modal-head">
-          <div class="modal-title">{{ pickerKind === 'trigger' ? '选择触发条件' : '添加执行动作' }}</div>
-          <button class="modal-close" type="button" @click="cancelPicker"><i class="fas fa-times"></i></button>
-        </div>
-        <div class="modal-group">{{ pickerKind === 'trigger' ? '什么时候启动这条联动' : '这一步要执行什么' }}</div>
+    <AppPlainModal
+      :open="pickerVisible"
+      :title="pickerKind === 'trigger' ? '选择触发条件' : '添加执行动作'"
+      size="sm"
+      body-flush
+      @close="cancelPicker"
+    >
+      <div class="automation-scope">
         <div v-if="pickerKind === 'trigger'" class="pick-list">
           <button class="pick-option" type="button" @click="chooseTrigger('daily')">
             <span class="pick-ico trigger"><i class="fas fa-clock"></i></span>
@@ -402,15 +403,10 @@
           </button>
         </div>
       </div>
-    </AppModal>
+    </AppPlainModal>
 
-    <AppModal :open="configVisible" bare @close="closeConfig">
-      <div class="config-modal">
-        <div class="modal-head">
-          <div class="modal-title">{{ configTitle }}</div>
-          <button class="modal-close" type="button" @click="closeConfig"><i class="fas fa-times"></i></button>
-        </div>
-
+    <AppPlainModal :open="configVisible" :title="configTitle" size="sm" body-flush @close="closeConfig">
+      <div class="automation-scope">
         <div v-if="configMode === 'trigger'" class="cfg-body">
           <template v-if="form.trigger_type === 'external_event'">
             <div class="cfg-row">
@@ -530,13 +526,12 @@
             </div>
           </template>
         </div>
-
-        <div class="modal-actions">
-          <AppButton type="button" variant="cancel" @click="closeConfig">取消</AppButton>
-          <AppButton type="button" variant="primary" :disabled="!configCanApply" @click="applyConfig">确定</AppButton>
-        </div>
       </div>
-    </AppModal>
+
+      <template #footer>
+        <AppButton type="button" variant="primary" :disabled="!configCanApply" @click="applyConfig">确定</AppButton>
+      </template>
+    </AppPlainModal>
 
     <FolderPickerModal
       :open="offlineFolderPickerVisible"
@@ -567,6 +562,7 @@ import {
 import AppButton from '@/components/base/AppButton.vue'
 import AppBadge from '@/components/base/AppBadge.vue'
 import AppModal from '@/components/base/AppModal.vue'
+import AppPlainModal from '@/components/base/AppPlainModal.vue'
 import AppSelect from '@/components/base/AppSelect.vue'
 import FolderPickerModal from '@/components/file/FolderPickerModal.vue'
 import AdminEnableToggle from '@/components/admin/AdminEnableToggle.vue'
@@ -698,7 +694,7 @@ const ACTION_DEFINITIONS = {
     label: '生成本地STRM元数据',
     optionLabel: '生成本地STRM元数据',
     icon: 'fas fa-images',
-    desc: '对该 STRM 任务输出目录执行本地元数据刮削（nfo / 海报）',
+    desc: '对该 STRM 任务执行本地元数据刮削',
     normalize: params => ({
       task_id: params.task_id ? Number(params.task_id) : '',
       write_mode: params.write_mode === 'overwrite' ? 'overwrite' : 'missing_only',
@@ -2773,15 +2769,6 @@ defineExpose({
   font-size: 14px;
 }
 
-.readonly-ctrl {
-  display: flex;
-  align-items: center;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .time-btn {
   display: inline-flex;
   align-items: center;
@@ -3072,8 +3059,7 @@ defineExpose({
   }
 }
 
-.pick-modal,
-.config-modal {
+.automation-scope {
   --panel: var(--surface);
   --soft: var(--surface-sunken);
   --line: var(--border);
@@ -3083,53 +3069,6 @@ defineExpose({
   --blue: var(--brand);
   --ok: var(--success);
   --warn: var(--warning);
-  width: min(460px, calc(100vw - 40px));
-  max-height: 84vh;
-  border-radius: 18px;
-  background: var(--panel);
-  box-shadow: var(--shadow-pop);
-}
-
-.pick-modal {
-  overflow: auto;
-}
-
-.config-modal {
-  display: flex;
-  flex-direction: column;
-  width: min(520px, calc(100vw - 40px));
-  overflow: hidden;
-}
-
-.modal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 18px 20px 12px;
-}
-
-.modal-title {
-  color: var(--ink);
-  font-size: 16px;
-  font-weight: 800;
-}
-
-.modal-close {
-  display: inline-grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--muted2);
-  cursor: pointer;
-}
-
-.modal-close:hover {
-  background: var(--soft);
-  color: var(--ink);
 }
 
 .modal-group {
@@ -3299,16 +3238,6 @@ defineExpose({
   line-height: 1.35;
   white-space: pre-wrap;
   word-break: break-all;
-}
-
-.modal-actions {
-  display: flex;
-  flex-shrink: 0;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 14px 20px 18px;
-  border-top: 1px solid var(--line);
-  background: var(--soft);
 }
 
 @media (max-width: 1120px) {

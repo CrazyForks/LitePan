@@ -9,8 +9,10 @@ withDefaults(
     size?: "xs" | "sm" | "md";
     disabled?: boolean;
     title?: string;
+    /** 为 true 时不渲染原生 title 属性（改用自定义气泡时避免浏览器默认提示） */
+    noNativeTitle?: boolean;
   }>(),
-  { icon: "", variant: "ghost", size: "sm", disabled: false, title: "" },
+  { icon: "", variant: "ghost", size: "sm", disabled: false, title: "", noNativeTitle: false },
 );
 
 const emit = defineEmits<{ click: [MouseEvent] }>();
@@ -22,7 +24,7 @@ const emit = defineEmits<{ click: [MouseEvent] }>();
     class="icon-btn"
     :class="[`icon-btn--${variant}`, `icon-btn--${size}`]"
     :disabled="disabled"
-    :title="title || label"
+    :title="noNativeTitle ? undefined : title || label"
     :aria-label="label"
     @click="emit('click', $event)"
   >
