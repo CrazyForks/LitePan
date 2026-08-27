@@ -358,7 +358,7 @@ func (s *Service) configFromSettings() Config {
 		FnosURL:           strings.TrimRight(strings.TrimSpace(s.settings.String(settings.KeyFnosURL)), "/"),
 		Port:              strings.TrimSpace(s.settings.String(settings.KeyFnosProxyPort)),
 		PathMaps:          strings.TrimSpace(s.settings.String(settings.KeyFnosStrmPathMaps)),
-		DirectSTRMClients: proxybase.NormalizeClientKeywords(s.settings.String(settings.KeyFnosDirectSTRMClients)),
+		DirectSTRMClients: proxybase.NormalizeClientKeywords(s.settings.StringAllowEmpty(settings.KeyFnosDirectSTRMClients)),
 	}
 }
 

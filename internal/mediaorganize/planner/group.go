@@ -122,6 +122,7 @@ func (p *Planner) groupEntries(entries []batchEntry) (map[groupKey][]batchEntry,
 	}
 	layout := rules.AnalyzeTVTreeLayout(scanEntries)
 	rangeLayouts := rules.AnalyzeEpisodeRangeLayouts(scanEntries)
+	bareNumberedTVDirs := analyzeBareNumberedTVDirs(entries)
 
 	for _, raw := range entries {
 		entry := raw
@@ -191,7 +192,8 @@ func (p *Planner) groupEntries(entries []batchEntry) (map[groupKey][]batchEntry,
 		hasEpisodeIdentity := fileParsed.Episode != nil || rules.HasExplicitSeasonToken(entry.item.Name) || showIdentity
 		nestedMovieID, _ := rules.FindNearestStandaloneMovieDir(ancestors)
 		forceMovie := !hasEpisodeIdentity && (nestedMovieID != "" || shouldPreferStructuredMovieDir(rawFileParsed, dirParsed, ancestors, entry.item.Name))
-		isTV := !forceMovie && (p.taskMediaType == "tv" || (p.taskMediaType == "auto" && (tvRule.Matched || showIdentity)))
+		isTV := !forceMovie && (p.taskMediaType == "tv" ||
+			(p.taskMediaType == "auto" && (tvRule.Matched || showIdentity || bareNumberedTVDirs[sourceDirID])))
 
 		if isTV {
 			if showDirID == "" {
@@ -301,6 +303,43 @@ func (p *Planner) groupEntries(entries []batchEntry) (map[groupKey][]batchEntry,
 		groups[key] = append(groups[key], entry)
 	}
 	return attachSingleTVWorkRoot(groups), pending
+}
+
+// analyzeBareNumberedTVDirs 识别“作品目录/01.mp4、02.mp4…”这类无 SxxExx 标记的剧集。
+// 单个纯数字文件仍保持电影保守判定；同目录至少出现 3 个连续集号才认为剧集。
+func analyzeBareNumberedTVDirs(entries []batchEntry) map[string]bool {
+	episodesByDir := make(map[string]map[int]struct{})
+	for _, entry := range entries {
+		if len(entry.ancestors) == 0 || rules.HasExplicitSeasonToken(entry.item.Name) {
+			continue
+		}
+		parsed := rules.NormalizeParsedMedia(rules.ParseFilenameStrict(entry.item.Name))
+		if strings.TrimSpace(parsed.Title) != "" || parsed.Episode == nil || *parsed.Episode <= 0 {
+			continue
+		}
+		dir := entry.ancestors[len(entry.ancestors)-1]
+		if dir.ID == "" || rules.IsGenericMediaDir(dir.Name) || rules.IsSeasonDirName(dir.Name) || rules.IsEpisodeRangeDirName(dir.Name) {
+			continue
+		}
+		if episodesByDir[dir.ID] == nil {
+			episodesByDir[dir.ID] = map[int]struct{}{}
+		}
+		episodesByDir[dir.ID][*parsed.Episode] = struct{}{}
+	}
+
+	result := make(map[string]bool)
+	for dirID, episodes := range episodesByDir {
+		for episode := range episodes {
+			if _, ok := episodes[episode+1]; !ok {
+				continue
+			}
+			if _, ok := episodes[episode+2]; ok {
+				result[dirID] = true
+				break
+			}
+		}
+	}
+	return result
 }
 
 func attachSingleTVWorkRoot(groups map[groupKey][]batchEntry) map[groupKey][]batchEntry {

@@ -46,9 +46,16 @@ func (p *Planner) ReplanMatchedGroup(group ManualMatchGroup, raw map[string]any)
 	if !ok {
 		return nil, domain.Errorf(domain.CodeValidation, "当前计划中未找到该作品组")
 	}
+	bucketDefaults := alignDefaults[key]
+	selectedKind := strings.ToLower(strings.TrimSpace(group.MediaKind))
+	if selectedKind == "movie" || selectedKind == "tv" {
+		// 手动选中的 TMDB 类型高于原计划的自动猜测。
+		// 否则纯数字剧集先被猜成电影后，即使用户选中电视剧仍会按电影重建。
+		key.mediaKind = selectedKind
+	}
 	p.recordManualMatchGroup(key, len(items))
 	match := manualTMDBMatchResult(raw, key.mediaKind)
-	if err := p.planGroupWithMatch(key, items, alignDefaults[key], &match, false); err != nil {
+	if err := p.planGroupWithMatch(key, items, bucketDefaults, &match, false); err != nil {
 		return nil, err
 	}
 	return p.finalize(), nil

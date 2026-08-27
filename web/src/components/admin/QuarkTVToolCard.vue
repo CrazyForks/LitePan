@@ -170,7 +170,7 @@ function selectBinding(id: string) {
   qtvForm.allow_dolby = String(!!binding.allow_dolby);
   qtvForm.play_mode = qtvStatus.value.play_mode || "adaptive";
   qtvForm.client_list_mode = qtvStatus.value.client_list_mode || "proxy_list";
-  qtvForm.proxy_clients = qtvStatus.value.proxy_clients || "vidhub";
+  qtvForm.proxy_clients = qtvStatus.value.proxy_clients;
 }
 
 function displayMembership(binding: QuarkTVBinding | null) {

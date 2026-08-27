@@ -223,10 +223,10 @@ export function searchMediaOrganizeTmdb(params: {
   });
 }
 
-export function setMediaOrganizeBinding(taskId: string, groupUid: string, tmdbId: string) {
-  return http.post<{ group_uid: string; tmdb_id: string; plan?: MediaOrganizePlan }>(
+export function setMediaOrganizeBinding(taskId: string, groupUid: string, tmdbId: string, mediaType: "movie" | "tv") {
+  return http.post<{ group_uid: string; tmdb_id: string; media_type: string; plan?: MediaOrganizePlan }>(
     `/admin/media-organize/tasks/${taskId}/bindings`,
-    { group_uid: groupUid, tmdb_id: tmdbId },
+    { group_uid: groupUid, tmdb_id: tmdbId, media_type: mediaType },
   );
 }
 

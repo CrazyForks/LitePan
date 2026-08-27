@@ -67,6 +67,22 @@ func (s *Service) String(key string) string {
 	return v
 }
 
+// StringAllowEmpty 读取字符串设置时保留显式写入的空值；仅当该键从未存储时使用默认值。
+func (s *Service) StringAllowEmpty(key string) string {
+	sp := s.byKey[key]
+	if sp == nil {
+		return ""
+	}
+	v, ok := s.raw(key)
+	if !ok {
+		v = sp.Default
+	}
+	if sp.normalize != nil {
+		return sp.normalize(v)
+	}
+	return v
+}
+
 // Int 返回整型设置，缺失/非法回落默认，并按 Min/Max 收口。
 func (s *Service) Int(key string) int {
 	sp := s.byKey[key]

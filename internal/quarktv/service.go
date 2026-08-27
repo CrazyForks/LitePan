@@ -425,7 +425,7 @@ func (s *Service) ProxyClients() string {
 	if s.settings == nil {
 		return ""
 	}
-	return proxybase.NormalizeClientKeywords(s.settings.String(settings.KeyQuarkTVProxyClients))
+	return proxybase.NormalizeClientKeywords(s.settings.StringAllowEmpty(settings.KeyQuarkTVProxyClients))
 }
 
 // ResolveHook 是播放解析接管钩子；返回 handled=true 表示用 TV 直链替换原解析。

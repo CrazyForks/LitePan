@@ -461,6 +461,7 @@ func (s *Service) RunTaskNow(ctx context.Context, id int64, runMode string) (*do
 }
 
 func (s *Service) OnFileMutated(ctx context.Context, e eventbus.FileMutated) {
+	s.invalidateMutatedDirCache(ctx, e)
 	if e.Op == "move" || isMetadataSyncMutation(ctx) {
 		return
 	}

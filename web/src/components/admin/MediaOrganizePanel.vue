@@ -257,9 +257,15 @@ async function applyMatchBinding() {
   if (!matchTarget.value || !planTaskId.value || !selectedCandidateKey.value) return;
   const hit = candidates.value.find((c) => hitKey(c) === selectedCandidateKey.value);
   if (!hit) return;
+  const selectedMediaType = hitMediaType(hit) === "tv" ? "tv" : "movie";
   matchApplying.value = true;
   try {
-    const result = await setMediaOrganizeBinding(planTaskId.value, matchTarget.value.group_uid, hitId(hit));
+    const result = await setMediaOrganizeBinding(
+      planTaskId.value,
+      matchTarget.value.group_uid,
+      hitId(hit),
+      selectedMediaType,
+    );
     closeMatch();
     if (result.plan) {
       preview.loadPlan(result.plan);

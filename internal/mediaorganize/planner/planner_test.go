@@ -920,6 +920,77 @@ func TestRenamePlanAddsTMDBToMultipleStructuredMovieDirs(t *testing.T) {
 	}
 }
 
+func TestAutoRecognizesConsecutiveBareNumberedFilesAsTV(t *testing.T) {
+	files := make([]domain.FileItem, 0, 16)
+	for episode := 1; episode <= 16; episode++ {
+		files = append(files, domain.FileItem{
+			ID:   fmt.Sprintf("ep%02d", episode),
+			Name: fmt.Sprintf("%02d.mp4", episode),
+		})
+	}
+	fs := &mockFS{dirs: map[string][]domain.FileItem{
+		"root": {{ID: "show", Name: "藏锋 (2026)", IsDir: true}},
+		"show": files,
+	}}
+	p := planner.New(
+		context.Background(),
+		fs,
+		1,
+		planner.TaskConfig{
+			TargetDirectoryID: "root",
+			ActionType:        "rename",
+			MediaType:         "auto",
+			RenameMarker:      "off",
+			UseTMDB:           false,
+			Recursive:         true,
+		},
+		planner.Settings{},
+		"task-test",
+		nil,
+		func(string) {},
+		nil,
+		func() error { return nil },
+	)
+	plan, err := p.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups, _ := plan.Diagnostics["groups"].([]map[string]any)
+	if len(groups) != 1 || groups[0]["media_kind"] != "tv" || groups[0]["title"] != "藏锋" {
+		t.Fatalf("连续纯数字集号应识别为同一部剧集: %+v", groups)
+	}
+	for _, action := range plan.Actions {
+		if action.SourceID == "ep01" && action.Metadata["media_kind"] != "tv" {
+			t.Fatalf("01.mp4 应按剧集整理: %+v", action)
+		}
+	}
+}
+
+func TestAutoKeepsTwoBareNumberedFilesConservative(t *testing.T) {
+	fs := &mockFS{dirs: map[string][]domain.FileItem{
+		"root": {{ID: "work", Name: "测试作品 (2026)", IsDir: true}},
+		"work": {
+			{ID: "f1", Name: "01.mp4"},
+			{ID: "f2", Name: "02.mp4"},
+		},
+	}}
+	p := planner.New(
+		context.Background(), fs, 1,
+		planner.TaskConfig{TargetDirectoryID: "root", ActionType: "rename", MediaType: "auto", UseTMDB: false, Recursive: true},
+		planner.Settings{}, "task-test", nil, func(string) {}, nil, func() error { return nil },
+	)
+	plan, err := p.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups, _ := plan.Diagnostics["groups"].([]map[string]any)
+	for _, group := range groups {
+		if group["media_kind"] == "tv" {
+			t.Fatalf("仅两个纯数字文件时不应贸然判为剧集: %+v", groups)
+		}
+	}
+}
+
 func TestRenamePlanReportsMissingTMDBForStructuredMovieDir(t *testing.T) {
 	fs := &mockFS{dirs: map[string][]domain.FileItem{
 		"root": {{ID: "movie", Name: "东北警察故事2 (2023)", IsDir: true}},

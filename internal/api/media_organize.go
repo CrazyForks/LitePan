@@ -428,8 +428,9 @@ func (h *Handler) searchMediaOrganizeTMDB(w http.ResponseWriter, r *http.Request
 }
 
 type mediaOrganizeBindingDTO struct {
-	GroupUID string `json:"group_uid"`
-	TMDBID   string `json:"tmdb_id"`
+	GroupUID  string `json:"group_uid"`
+	TMDBID    string `json:"tmdb_id"`
+	MediaType string `json:"media_type"`
 }
 
 // setMediaOrganizeBinding 保存一条"组 -> tmdb_id"手动匹配绑定到任务配置。
@@ -449,19 +450,25 @@ func (h *Handler) setMediaOrganizeBinding(w http.ResponseWriter, r *http.Request
 	}
 	uid := strings.TrimSpace(in.GroupUID)
 	tmdbID := strings.TrimSpace(in.TMDBID)
+	mediaType := strings.ToLower(strings.TrimSpace(in.MediaType))
 	if uid == "" || tmdbID == "" {
 		writeErr(w, domain.Errorf(domain.CodeValidation, "group_uid 与 tmdb_id 不能为空"))
 		return
 	}
-	plan, err := h.mediaOrganize.ApplyBindingToPlan(r.Context(), taskID, uid, tmdbID)
+	if mediaType != "movie" && mediaType != "tv" {
+		writeErr(w, domain.Errorf(domain.CodeValidation, "media_type 必须为 movie 或 tv"))
+		return
+	}
+	plan, err := h.mediaOrganize.ApplyBindingToPlan(r.Context(), taskID, uid, tmdbID, mediaType)
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
 	writeOK(w, map[string]any{
-		"group_uid": uid,
-		"tmdb_id":   tmdbID,
-		"plan":      plan,
+		"group_uid":  uid,
+		"tmdb_id":    tmdbID,
+		"media_type": mediaType,
+		"plan":       plan,
 	})
 }
 
