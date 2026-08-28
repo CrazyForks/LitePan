@@ -30,6 +30,7 @@ const (
 	KeyPublicIndexEnabled         = "public_index_enabled"
 	KeyWebDAVEnabled              = "webdav_enabled"
 	KeyIndexAccountSwitchMode     = "index_account_switch_mode"
+	KeyCompactHomeEnabled         = "compact_home_enabled"
 	KeyAdminHomeReturnMode        = "admin_home_return_mode"
 	KeyHeaderEffectsEnabled       = "header_effects_enabled"
 	KeyIndexStrmAutoDetectEnabled = "index_strm_auto_detect_enabled"
@@ -75,6 +76,7 @@ type SystemConfig struct {
 	SessionTimeout             float64 `json:"session_timeout"`
 	PublicIndexEnabled         bool    `json:"public_index_enabled"`
 	IndexAccountSwitchMode     string  `json:"index_account_switch_mode"`
+	CompactHomeEnabled         bool    `json:"compact_home_enabled"`
 	AdminHomeReturnMode        string  `json:"admin_home_return_mode"`
 	HeaderEffectsEnabled       bool    `json:"header_effects_enabled"`
 	IndexStrmAutoDetectEnabled bool    `json:"index_strm_auto_detect_enabled"`
@@ -97,6 +99,7 @@ type UpdateCredentialsRequest struct {
 	SessionTimeout             *float64 `json:"session_timeout"`
 	PublicIndexEnabled         *bool    `json:"public_index_enabled"`
 	IndexAccountSwitchMode     *string  `json:"index_account_switch_mode"`
+	CompactHomeEnabled         *bool    `json:"compact_home_enabled"`
 	AdminHomeReturnMode        *string  `json:"admin_home_return_mode"`
 	HeaderEffectsEnabled       *bool    `json:"header_effects_enabled"`
 	IndexStrmAutoDetectEnabled *bool    `json:"index_strm_auto_detect_enabled"`
@@ -382,6 +385,7 @@ func (s *Service) SystemConfig(ctx context.Context) SystemConfig {
 		SessionTimeout:             float64(s.sessionTimeout(ctx)) / 3600,
 		PublicIndexEnabled:         s.publicIndexEnabled(ctx),
 		IndexAccountSwitchMode:     s.indexAccountSwitchMode(ctx),
+		CompactHomeEnabled:         s.compactHomeEnabled(ctx),
 		AdminHomeReturnMode:        s.adminHomeReturnMode(ctx),
 		HeaderEffectsEnabled:       s.headerEffectsEnabled(ctx),
 		IndexStrmAutoDetectEnabled: s.indexStrmAutoDetectEnabled(ctx),
@@ -397,6 +401,10 @@ func (s *Service) SystemConfig(ctx context.Context) SystemConfig {
 
 func (s *Service) IndexAccountSwitchMode(ctx context.Context) string {
 	return s.indexAccountSwitchMode(ctx)
+}
+
+func (s *Service) CompactHomeEnabled(ctx context.Context) bool {
+	return s.compactHomeEnabled(ctx)
 }
 
 func (s *Service) HeaderEffectsEnabled(ctx context.Context) bool {
@@ -475,6 +483,9 @@ func (s *Service) prepareCredentialUpdates(ctx context.Context, req UpdateCreden
 			return "", nil, domain.Errorf(domain.CodeValidation, "账号切换方式不正确")
 		}
 		updates = append(updates, configUpdate{key: KeyIndexAccountSwitchMode, value: mode})
+	}
+	if req.CompactHomeEnabled != nil {
+		updates = append(updates, configUpdate{key: KeyCompactHomeEnabled, value: boolString(*req.CompactHomeEnabled)})
 	}
 	if req.AdminHomeReturnMode != nil {
 		mode := normalizeAdminHomeReturnMode(*req.AdminHomeReturnMode)
@@ -577,6 +588,10 @@ func (s *Service) indexAccountSwitchMode(ctx context.Context) string {
 		return "dropdown"
 	}
 	return mode
+}
+
+func (s *Service) compactHomeEnabled(ctx context.Context) bool {
+	return s.configBool(ctx, KeyCompactHomeEnabled, false)
 }
 
 func (s *Service) adminHomeReturnMode(ctx context.Context) string {

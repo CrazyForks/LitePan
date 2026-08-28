@@ -3,15 +3,16 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import type { Crumb } from "@/stores/browser";
 
 // compact：窄对话框专用，深度>3 时收缩为根+…+末两级。
-const props = defineProps<{ items: Crumb[]; compact?: boolean }>();
+// maxVisible：可选，覆盖折叠阈值（简约首页导航用，空间被账号下拉占用时单独限定）。
+const props = defineProps<{ items: Crumb[]; compact?: boolean; maxVisible?: number }>();
 const emit = defineEmits<{ navigate: [index: number] }>();
 
 function collapseThreshold(width: number) {
-  if (width >= 1400) return 7;
-  if (width >= 1200) return 6;
-  if (width >= 1000) return 5;
-  if (width >= 800) return 4;
-  return 3;
+  if (width >= 1400) return 8;
+  if (width >= 1200) return 8;
+  if (width >= 1000) return 7;
+  if (width >= 800) return 5;
+  return 4;
 }
 
 const screenThreshold = ref(collapseThreshold(window.innerWidth));
@@ -22,11 +23,15 @@ const maxItems = computed(() => {
   return count <= threshold ? count : threshold + 1;
 });
 
-const collapsed = computed(() =>
-  props.compact ? props.items.length > 3 : props.items.length > maxItems.value,
-);
+const collapsed = computed(() => {
+  if (props.compact) return props.items.length > 3;
+  const threshold = props.maxVisible ?? maxItems.value;
+  return props.items.length > threshold;
+});
 
-const tailCount = computed(() => (props.compact ? 2 : maxItems.value - 2));
+const tailCount = computed(() =>
+  props.compact ? 2 : (props.maxVisible ?? maxItems.value) - 2,
+);
 
 const hiddenItems = computed(() => {
   if (!collapsed.value) return [] as { crumb: Crumb; index: number }[];

@@ -25,6 +25,83 @@
   margin-left: auto;
 }
 
+.file-toolbar__navigation {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.file-toolbar--compact {
+  flex-wrap: nowrap;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--surface);
+}
+
+.file-toolbar--compact .file-toolbar__left,
+.file-toolbar--compact .file-toolbar__right {
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.file-toolbar--compact .file-toolbar__favorites-toggle {
+  width: 40px;
+  height: 40px;
+  margin: 0;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.file-toolbar--compact .file-toolbar__favorites-toggle:hover,
+.file-toolbar--compact .file-toolbar__favorites-toggle.active {
+  color: var(--brand-strong);
+  border-color: var(--tab-active-border);
+  background: var(--tab-active-bg);
+}
+
+/* 简约模式收藏夹图标是正五角星，不参与旧 chevron 箭头的旋转（-90°↔90° 会转半圈） */
+.file-toolbar--compact .file-toolbar__favorites-toggle-icon,
+.file-toolbar--compact .file-toolbar__favorites-toggle.active .file-toolbar__favorites-toggle-icon {
+  transform: none;
+  transition: none;
+}
+
+.file-toolbar--compact .file-toolbar__menu-trigger,
+.file-toolbar--compact .file-toolbar__btn--refresh {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+}
+
+.file-toolbar--compact .file-toolbar__menu-trigger {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
+/* 简约模式账号下拉宽度：比收藏夹面板（168px）更窄，保证不超出 */
+.file-toolbar--compact .file-toolbar__navigation .account-selector__control,
+.file-toolbar--compact .account-selector--compact .account-selector__control {
+  width: 150px;
+  min-width: 150px;
+}
+
+.file-toolbar--compact .file-toolbar__menu-trigger:hover {
+  color: var(--brand-strong);
+  border-color: var(--tab-active-border);
+  background: var(--tab-active-bg);
+}
+
+.file-toolbar--compact .file-toolbar__menu-label,
+.file-toolbar--compact .file-toolbar__menu-arrow,
+.file-toolbar--compact .file-toolbar__btn--refresh > span:last-child {
+  display: none;
+}
+
 .file-toolbar__favorites-toggle {
   width: 34px;
   height: 34px;
@@ -268,6 +345,31 @@
     flex-direction: column;
     align-items: stretch;
     padding: 15px 14px;
+  }
+
+  .file-toolbar--compact {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 42px 40px;
+    gap: 8px;
+    padding: 9px 10px;
+  }
+
+  .file-toolbar--compact .file-toolbar__navigation {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .file-toolbar--compact .file-toolbar__left {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .file-toolbar--compact .file-toolbar__right {
+    grid-column: 2;
+    grid-row: 2;
+    margin-left: 0;
+    flex-wrap: nowrap;
   }
 
   .file-toolbar__right {

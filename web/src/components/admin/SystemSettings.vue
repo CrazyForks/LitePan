@@ -108,21 +108,23 @@ const confirmPassword = ref("");
 const securityForm = reactive({
   admin_username: "admin",
   session_timeout: "2",
+  public_index_enabled: false,
 });
 const securityOriginal = reactive({
   admin_username: "admin",
   session_timeout: "2",
+  public_index_enabled: false,
 });
 const homepageForm = reactive({
-  public_index_enabled: false,
   index_account_switch_mode: "dropdown" as "dropdown" | "floating",
+  compact_home_enabled: false,
   admin_home_return_mode: "top_icon" as "sidebar" | "top_icon",
   header_effects_enabled: true,
   index_strm_auto_detect_enabled: true,
 });
 const homepageOriginal = reactive({
-  public_index_enabled: false,
   index_account_switch_mode: "dropdown" as "dropdown" | "floating",
+  compact_home_enabled: false,
   admin_home_return_mode: "top_icon" as "sidebar" | "top_icon",
   header_effects_enabled: true,
   index_strm_auto_detect_enabled: true,
@@ -160,14 +162,15 @@ const securityDirty = computed(
   () =>
     securityForm.admin_username !== securityOriginal.admin_username ||
     securityForm.session_timeout !== securityOriginal.session_timeout ||
+    securityForm.public_index_enabled !== securityOriginal.public_index_enabled ||
     newPassword.value !== "" ||
     confirmPassword.value !== "",
 );
 
 const homepageDirty = computed(
   () =>
-    homepageForm.public_index_enabled !== homepageOriginal.public_index_enabled ||
     homepageForm.index_account_switch_mode !== homepageOriginal.index_account_switch_mode ||
+    homepageForm.compact_home_enabled !== homepageOriginal.compact_home_enabled ||
     homepageForm.admin_home_return_mode !== homepageOriginal.admin_home_return_mode ||
     homepageForm.header_effects_enabled !== homepageOriginal.header_effects_enabled ||
     homepageForm.index_strm_auto_detect_enabled !== homepageOriginal.index_strm_auto_detect_enabled ||
@@ -277,6 +280,7 @@ function applySystemConfig(config: {
   session_timeout: number;
   public_index_enabled: boolean;
   index_account_switch_mode?: string;
+  compact_home_enabled?: boolean;
   admin_home_return_mode?: string;
   header_effects_enabled?: boolean;
   index_strm_auto_detect_enabled?: boolean;
@@ -285,11 +289,13 @@ function applySystemConfig(config: {
   securityForm.session_timeout = String(config.session_timeout || 2);
   securityOriginal.admin_username = securityForm.admin_username;
   securityOriginal.session_timeout = securityForm.session_timeout;
-  homepageForm.public_index_enabled = config.public_index_enabled ?? false;
-  homepageOriginal.public_index_enabled = homepageForm.public_index_enabled;
+  securityForm.public_index_enabled = config.public_index_enabled ?? false;
+  securityOriginal.public_index_enabled = securityForm.public_index_enabled;
   const mode = config.index_account_switch_mode === "floating" ? "floating" : "dropdown";
   homepageForm.index_account_switch_mode = mode;
   homepageOriginal.index_account_switch_mode = mode;
+  homepageForm.compact_home_enabled = config.compact_home_enabled ?? false;
+  homepageOriginal.compact_home_enabled = homepageForm.compact_home_enabled;
   const homeReturn = config.admin_home_return_mode === "sidebar" ? "sidebar" : "top_icon";
   homepageForm.admin_home_return_mode = homeReturn;
   homepageOriginal.admin_home_return_mode = homeReturn;
@@ -366,6 +372,7 @@ async function saveSecurity() {
       admin_username: securityForm.admin_username.trim(),
       admin_password: newPassword.value || undefined,
       session_timeout: sessionTimeout,
+      public_index_enabled: securityForm.public_index_enabled,
     });
     const passwordUpdated = Boolean(newPassword.value);
     newPassword.value = "";
@@ -385,12 +392,13 @@ async function saveHomepage() {
   try {
     await updateCredentials({
       admin_username: securityForm.admin_username.trim(),
-      public_index_enabled: homepageForm.public_index_enabled,
       index_account_switch_mode: homepageForm.index_account_switch_mode,
+      compact_home_enabled: homepageForm.compact_home_enabled,
       admin_home_return_mode: homepageForm.admin_home_return_mode,
       header_effects_enabled: homepageForm.header_effects_enabled,
       index_strm_auto_detect_enabled: homepageForm.index_strm_auto_detect_enabled,
     });
+    localStorage.setItem("litepan:index:compact-home-enabled", homepageForm.compact_home_enabled ? "1" : "0");
     commitSkinDraft();
     toast.success("首页设置已保存");
     await loadSystemConfig();
@@ -556,12 +564,10 @@ async function submit() {
             </div>
           </template>
         </SettingsRow>
-      </SettingsCard>
 
-      <SettingsCard v-else-if="isHomepageTab" title="访问权限" :accent="accentColor">
         <SettingsRow
           :show-changed-badge="true"
-          :changed="homepageForm.public_index_enabled !== homepageOriginal.public_index_enabled"
+          :changed="securityForm.public_index_enabled !== securityOriginal.public_index_enabled"
         >
           <template #info>
             <div class="settings-row__label">
@@ -574,7 +580,7 @@ async function submit() {
           </template>
           <template #control>
             <SettingsBoolSegment
-              v-model="homepageForm.public_index_enabled"
+              v-model="securityForm.public_index_enabled"
               label="允许匿名访问文件列表"
               off-label="不允许"
               on-label="允许"
@@ -609,6 +615,28 @@ async function submit() {
       </SettingsCard>
 
       <SettingsCard v-if="isHomepageTab" title="界面显示" :accent="accentColor">
+        <SettingsRow
+          :show-changed-badge="true"
+          :changed="homepageForm.compact_home_enabled !== homepageOriginal.compact_home_enabled"
+        >
+          <template #info>
+            <div class="settings-row__label">
+              <span>简约首页</span>
+              <SettingsHelpTooltip title="简约首页说明">
+                <p>开启后，首页文件列表导航栏和工具栏合并，且工具栏改为图标简约样式，性能和任务面板移至底部。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <SettingsBoolSegment
+              v-model="homepageForm.compact_home_enabled"
+              label="简约首页"
+              off-label="关闭"
+              on-label="开启"
+            />
+          </template>
+        </SettingsRow>
+
         <SettingsRow :show-changed-badge="true" :changed="skinDraft !== skinSaved">
           <template #info>
             <div class="settings-row__label">

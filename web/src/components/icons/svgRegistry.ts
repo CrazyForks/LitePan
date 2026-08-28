@@ -23,6 +23,12 @@ const SVG_MAP = {
 
   'chevron-down': `<svg viewBox="0 0 24 24"${NS}><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="m6 9 6 6 6-6"/></svg>`,
 
+  // 新建：加号（线框风，与 pause/play 一致）
+  plus: `<svg viewBox="0 0 24 24"${NS}><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>`,
+  // 收藏夹：标准正五角星（尖角朝正上；空心/实心两种状态）
+  star: `<svg viewBox="0 0 24 24"${NS}><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M12 2.5l2.6 6.1 6.6.5-5 4.6 1.4 6.5L12 16.9l-5.6 3.3 1.4-6.5-5-4.6 6.6-.5z"/></svg>`,
+  'star-solid': `<svg viewBox="0 0 24 24"${NS}><path fill="currentColor" d="M12 2.5l2.6 6.1 6.6.5-5 4.6 1.4 6.5L12 16.9l-5.6 3.3 1.4-6.5-5-4.6 6.6-.5z"/></svg>`,
+
   'help-circle': `<svg viewBox="0 0 24 24"${NS}><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="8.25" r="0.9" fill="currentColor"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M12 11v5"/></svg>`,
   lock: `<svg viewBox="0 0 24 24"${NS}><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 10V7.7a4 4 0 1 1 8 0V10"/><rect x="5.5" y="10" width="13" height="10" rx="2.4" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 14v2.2"/><circle cx="12" cy="13.2" r="0.9" fill="currentColor"/></svg>`,
   'lock-open': `<svg viewBox="0 0 24 24"${NS}><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 10V8a4 4 0 0 1 4-4c1.5 0 2.8.8 3.5 2"/><rect x="5.5" y="10" width="13" height="10" rx="2.4" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 14v2.2"/><circle cx="12" cy="13.2" r="0.9" fill="currentColor"/></svg>`,

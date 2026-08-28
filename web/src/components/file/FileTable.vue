@@ -29,6 +29,9 @@ const props = defineProps<{
   downloadFile: (file: FileItem) => void;
   moveFile: (file: FileItem) => void;
   copyFile: (file: FileItem) => void;
+  batchDeleteFiles: () => void;
+  batchMoveFiles: () => void;
+  batchCopyFiles: () => void;
   nameAlignFile: (file: FileItem) => void;
   coverExtractEnabled: boolean;
   coverExtractFile: (file: FileItem) => void;
@@ -57,6 +60,7 @@ const emit = defineEmits<{
 
 const inline = useFileTableInline({
   files: toRef(props, "files"),
+  selectedIds: toRef(props, "selectedIds"),
   isAdmin: toRef(props, "isAdmin"),
   loading: toRef(props, "loading"),
   createFolderRequest: toRef(props, "createFolderRequest"),
@@ -67,6 +71,9 @@ const inline = useFileTableInline({
   downloadFile: (file) => props.downloadFile(file),
   moveFile: (file) => props.moveFile(file),
   copyFile: (file) => props.copyFile(file),
+  batchDeleteFiles: () => props.batchDeleteFiles(),
+  batchMoveFiles: () => props.batchMoveFiles(),
+  batchCopyFiles: () => props.batchCopyFiles(),
   nameAlignFile: (file) => props.nameAlignFile(file),
   coverExtractEnabled: toRef(props, "coverExtractEnabled"),
   coverExtractFile: (file) => props.coverExtractFile(file),

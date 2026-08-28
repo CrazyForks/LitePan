@@ -49,7 +49,8 @@ function accountColor(account: Account): string {
 .floating-switcher {
   position: fixed;
   left: 14px;
-  top: 170px;
+  /* 与右侧第一栏（FileToolbar / 导航行）顶部对齐：header 100px + 内容区顶部 20px */
+  top: 120px;
   z-index: 80;
   display: flex;
   flex-direction: column;
@@ -133,7 +134,8 @@ function accountColor(account: Account): string {
   .floating-switcher {
     left: 50%;
     top: auto;
-    bottom: 14px;
+    /* footer 固定于视口底部，横条抬高到其上方，避免盖住 footer 里的性能/任务图标 */
+    bottom: calc(88px + 10px);
     transform: translateX(-50%);
     z-index: 90;
     flex-direction: row;

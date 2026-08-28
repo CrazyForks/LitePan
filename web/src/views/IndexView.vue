@@ -25,5 +25,7 @@ import FileBrowser from "@/components/file/FileBrowser.vue";
 .page__main {
   flex: 1;
   background: var(--bg);
+  /* footer 固定于视口底部，内容区预留其高度避免被遮挡 */
+  padding-bottom: 88px;
 }
 </style>

@@ -12,6 +12,7 @@ export type ContextMenuItem = {
 
 export function useFileTableInline(options: {
   files: Ref<FileItem[]>;
+  selectedIds: Ref<string[]>;
   isAdmin: Ref<boolean>;
   loading: Ref<boolean>;
   createFolderRequest: Ref<number>;
@@ -23,6 +24,9 @@ export function useFileTableInline(options: {
   downloadFile: (file: FileItem) => void;
   moveFile: (file: FileItem) => void;
   copyFile: (file: FileItem) => void;
+  batchDeleteFiles: () => void;
+  batchMoveFiles: () => void;
+  batchCopyFiles: () => void;
   nameAlignFile: (file: FileItem) => void;
   coverExtractEnabled: Ref<boolean>;
   coverExtractFile: (file: FileItem) => void;
@@ -139,11 +143,12 @@ export function useFileTableInline(options: {
     if (!file.is_dir && options.files.value.filter((item) => !item.is_dir).length >= 3) {
       items.push({ action: "name-align", label: "命名对齐" });
     }
+    const useBatchActions = options.selectedIds.value.length > 1 && options.selectedIds.value.includes(fileKey(file));
     items.push(
       { action: "rename", label: "重命名" },
-      { action: "delete", label: "删除", danger: true },
-      { action: "move", label: "移动到" },
-      { action: "copy", label: "复制到" },
+      { action: useBatchActions ? "batch-delete" : "delete", label: useBatchActions ? "批量删除" : "删除", danger: true },
+      { action: useBatchActions ? "batch-move" : "move", label: useBatchActions ? "批量移动" : "移动到" },
+      { action: useBatchActions ? "batch-copy" : "copy", label: useBatchActions ? "批量复制" : "复制到" },
     );
     return items;
   }
@@ -256,6 +261,9 @@ export function useFileTableInline(options: {
     if (action === "delete") void startInlineDelete(file);
     if (action === "move") options.moveFile(file);
     if (action === "copy") options.copyFile(file);
+    if (action === "batch-delete") options.batchDeleteFiles();
+    if (action === "batch-move") options.batchMoveFiles();
+    if (action === "batch-copy") options.batchCopyFiles();
   }
 
   function handleClickOutside() {

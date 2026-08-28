@@ -20,6 +20,7 @@ import type { OfflineDownloadTask } from "@/types/offline-download";
 import { getApiErrorMessage } from "@/api/client";
 import { generateCurrentDirectoryStrm } from "@/api/strm";
 import { useStrmDirectoryPrompt } from "@/composables/useStrmDirectoryPrompt";
+import { useHomeFooterStatus } from "@/composables/useHomeFooterStatus";
 import { fileKind } from "@/utils/fileIcon";
 import { publicApi } from "@/api/public";
 import AccountSelector from "./AccountSelector.vue";
@@ -46,6 +47,7 @@ type FocusableInput = {
 const BROWSER_LOCATION_STORAGE_KEY = "litepan:index:browser-location";
 const BROWSER_LOCATION_RESET_ONCE_KEY = "litepan:index:reset-once";
 const ACCOUNT_SWITCH_MODE_STORAGE_KEY = "litepan:index:account-switch-mode";
+const COMPACT_HOME_STORAGE_KEY = "litepan:index:compact-home-enabled";
 const DRAG_UNLOCK_DURATION_MS = 600;
 
 interface BrowserLocationSnapshot {
@@ -69,6 +71,7 @@ const createFolderRequest = ref(0);
 const uploadFileInput = ref<HTMLInputElement | null>(null);
 const uploadFolderInput = ref<HTMLInputElement | null>(null);
 const accountSwitchMode = ref<"dropdown" | "floating">(readSavedAccountSwitchMode());
+const compactHomeEnabled = ref(localStorage.getItem(COMPACT_HOME_STORAGE_KEY) === "1");
 const favoriteNameModalOpen = ref(false);
 const favoriteNameInput = ref("");
 const favoriteNameInputRef = ref<FocusableInput | null>(null);
@@ -91,6 +94,7 @@ const nameAlignApplyProgress = ref(0);
 const activePreview = ref<ActiveFilePreview | null>(null);
 let nameAlignApplyTimer: number | undefined;
 
+// 悬浮账号列表与简约模式不冲突：简约模式下左侧仍保留悬浮图标，账号下拉选择则不渲染。
 const floatingAccountSwitchEnabled = computed(
   () => accountSwitchMode.value === "floating" && accounts.value.length > 1,
 );
@@ -113,7 +117,7 @@ const sortAccountKey = computed(() =>
   currentAccountId.value != null ? String(currentAccountId.value) : "",
 );
 const { sortKey, sortOrder, sortBy, sortClass } = useFileSort(files, sortAccountKey, filesResortTick);
-const { selectedCount, selectedFiles } = useFileSelection(files, selectedIds);
+const { selectedFiles } = useFileSelection(files, selectedIds);
 
 function getDeleteMode(): DeleteMode {
   const account = accounts.value.find((a) => a.id === currentAccountId.value);
@@ -223,6 +227,17 @@ const uploadTaskFailed = computed(
 const uploadTaskSuccess = computed(() =>
   uploadApi.displayUploadTasks.value.some((task) => task.status === "success") || offline.successfulTasks.value.length > 0,
 );
+const transferTaskCount = computed(() => {
+  const active =
+    uploadApi.activeUploadTasks.value.length +
+    uploadApi.activeRelayCount.value +
+    offline.activeTasks.value.length;
+  if (active > 0) return active;
+  return (
+    uploadApi.displayUploadTasks.value.filter((task) => task.status === "failed").length +
+    offline.failedTasks.value.length
+  );
+});
 const showFavorites = computed(() => isAdmin.value && favoritesOpen.value);
 const currentCrumbIds = computed(() => breadcrumb.value.map((item) => item.id));
 const currentFolderFavorited = computed(() =>
@@ -558,6 +573,8 @@ async function loadPublicSystemConfig() {
     const mode = cfg.index_account_switch_mode === "floating" ? "floating" : "dropdown";
     accountSwitchMode.value = mode;
     saveAccountSwitchMode(mode);
+    compactHomeEnabled.value = cfg.compact_home_enabled ?? false;
+    localStorage.setItem(COMPACT_HOME_STORAGE_KEY, compactHomeEnabled.value ? "1" : "0");
     strmAutoDetectEnabled.value = cfg.index_strm_auto_detect_enabled ?? true;
   } catch {
     const mode = readSavedAccountSwitchMode();
@@ -910,7 +927,35 @@ onUnmounted(() => {
   stopDragUnlock();
   clearNameAlignApplyProgress();
   uploadApi.cleanupUploadTasks();
+  homeFooterStatus.onOpenTaskPanel(null);
 });
+
+// 简约首页：性能与传输任务状态推送到 footer 单例，由全局 AppFooter 展示。
+const homeFooterStatus = useHomeFooterStatus();
+watch(
+  [
+    () => responseTime.value,
+    () => cacheRate.value,
+    uploadTaskActive,
+    uploadTaskFailed,
+    uploadTaskSuccess,
+    transferTaskCount,
+    transferTaskText,
+  ],
+  () => {
+    homeFooterStatus.update({
+      responseTime: responseTime.value,
+      cacheRate: cacheRate.value,
+      uploadTaskActive: uploadTaskActive.value,
+      uploadTaskFailed: uploadTaskFailed.value,
+      uploadTaskSuccess: uploadTaskSuccess.value,
+      uploadTaskCount: transferTaskCount.value,
+      uploadTaskLabel: transferTaskText.value,
+    });
+  },
+  { immediate: true },
+);
+homeFooterStatus.onOpenTaskPanel(openTaskPanel);
 </script>
 
 <template>
@@ -922,7 +967,7 @@ onUnmounted(() => {
       @update:model-value="store.selectAccount"
     />
 
-    <div class="browser__nav">
+    <div v-if="!compactHomeEnabled" class="browser__nav">
       <AccountSelector
         v-if="accountSwitchMode === 'dropdown'"
         :accounts="accounts"
@@ -946,7 +991,6 @@ onUnmounted(() => {
       </div>
       <FileToolbar
         :is-admin="isAdmin"
-        :selected-count="selectedCount"
         :view="view"
         :refreshing="refreshing"
         :response-time="responseTime"
@@ -955,20 +999,34 @@ onUnmounted(() => {
         :upload-task-failed="uploadTaskFailed"
         :upload-task-success="uploadTaskSuccess"
         :upload-task-label="transferTaskText"
+        :upload-task-count="transferTaskCount"
         :favorites-open="favoritesOpen"
         :offline-download-supported="offline.capability.value?.supported"
+        :compact-home="compactHomeEnabled"
         @refresh="store.refreshFiles"
         @update:view="setView"
         @create-folder="startCreateFolder"
         @upload-file="uploadEntry.handleUploadFile"
         @upload-folder="uploadEntry.handleUploadFolder"
         @offline-download="offline.openModal"
-        @batch-delete="fileActions.requestBatchDelete"
-        @batch-move="fileActions.requestBatchMove"
-        @batch-copy="fileActions.requestBatchCopy"
         @open-upload-tasks="openTaskPanel"
         @toggle-favorites="store.toggleFavoritesOpen"
-      />
+      >
+        <template #navigation>
+          <AccountSelector
+            v-if="accountSwitchMode === 'dropdown'"
+            class="account-selector--compact"
+            :accounts="accounts"
+            :model-value="currentAccountId"
+            @update:model-value="store.selectAccount"
+          />
+          <BreadcrumbNav
+            :items="breadcrumb"
+            :max-visible="7"
+            @navigate="store.goTo"
+          />
+        </template>
+      </FileToolbar>
       <div v-if="strmPrompt.showPrompt.value && !strmGenerating" class="strm-prompt-bar">
         <div class="strm-prompt-bar__main">
           <span class="strm-prompt-bar__dot" aria-hidden="true" />
@@ -1039,6 +1097,9 @@ onUnmounted(() => {
             :download-file="fileActions.downloadFile"
             :move-file="fileActions.requestSingleMove"
             :copy-file="fileActions.requestSingleCopy"
+            :batch-delete-files="fileActions.requestBatchDelete"
+            :batch-move-files="fileActions.requestBatchMove"
+            :batch-copy-files="fileActions.requestBatchCopy"
             :name-align-file="openNameAlign"
             :cover-extract-enabled="coverExtractEnabled"
             :cover-extract-file="sendToCoverExtract"

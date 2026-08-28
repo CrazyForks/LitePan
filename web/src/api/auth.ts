@@ -20,6 +20,7 @@ export interface SystemConfig {
   session_timeout: number;
   public_index_enabled: boolean;
   index_account_switch_mode?: string;
+  compact_home_enabled?: boolean;
   admin_home_return_mode?: "sidebar" | "top_icon";
   header_effects_enabled?: boolean;
   index_strm_auto_detect_enabled?: boolean;
@@ -38,6 +39,7 @@ export interface UpdateCredentialsRequest {
   session_timeout?: number;
   public_index_enabled?: boolean;
   index_account_switch_mode?: "dropdown" | "floating";
+  compact_home_enabled?: boolean;
   admin_home_return_mode?: "sidebar" | "top_icon";
   header_effects_enabled?: boolean;
   index_strm_auto_detect_enabled?: boolean;

@@ -13,9 +13,6 @@ const emit = defineEmits<{
   "upload-file": [];
   "upload-folder": [];
   "offline-download": [];
-  "batch-move": [];
-  "batch-copy": [];
-  "batch-delete": [];
   "open-upload-tasks": [];
   "toggle-favorites": [];
 }>();
@@ -23,11 +20,8 @@ const emit = defineEmits<{
 const { expanded: performanceExpanded, toggle: togglePerformancePanel } = usePerformancePanel();
 
 const createOpen = ref(false);
-const transferOpen = ref(false);
-
 const props = defineProps<{
   isAdmin: boolean;
-  selectedCount: number;
   view: "list" | "grid";
   refreshing: boolean;
   responseTime: string;
@@ -36,8 +30,10 @@ const props = defineProps<{
   uploadTaskFailed?: boolean;
   uploadTaskSuccess?: boolean;
   uploadTaskLabel?: string;
+  uploadTaskCount?: number;
   favoritesOpen?: boolean;
   offlineDownloadSupported?: boolean;
+  compactHome?: boolean;
 }>();
 
 const createItems = computed<DropdownMenuItem[]>(() => {
@@ -52,26 +48,19 @@ const createItems = computed<DropdownMenuItem[]>(() => {
   return items;
 });
 
-const transferItems = computed<DropdownMenuItem[]>(() => [
-  { key: "batch-move", label: "批量移动", icon: "package", type: "action" },
-  { key: "batch-copy", label: "批量复制", icon: "copy", type: "action" },
-]);
-
 function onCreateSelect(key: string) {
   if (key === "create-folder") emit("create-folder");
   else if (key === "upload-file") emit("upload-file");
   else if (key === "upload-folder") emit("upload-folder");
   else emit("offline-download");
 }
-
-function onTransferSelect(key: string) {
-  if (key === "batch-move") emit("batch-move");
-  else emit("batch-copy");
-}
 </script>
 
 <template>
-  <div class="file-toolbar">
+  <div class="file-toolbar" :class="{ 'file-toolbar--compact': compactHome }">
+    <div v-if="compactHome" class="file-toolbar__navigation">
+      <slot name="navigation" :performance-expanded="performanceExpanded" />
+    </div>
     <div class="file-toolbar__left">
       <button
         v-if="isAdmin"
@@ -83,6 +72,12 @@ function onTransferSelect(key: string) {
         @click="emit('toggle-favorites')"
       >
         <SvgIcon
+          v-if="compactHome"
+          :name="favoritesOpen ? 'star-solid' : 'star'"
+          :size="17"
+          class-name="file-toolbar__favorites-toggle-icon"
+        />        <SvgIcon
+          v-else
           name="chevron-down"
           :size="16"
           class-name="file-toolbar__favorites-toggle-icon"
@@ -92,8 +87,7 @@ function onTransferSelect(key: string) {
       <AppDropdown
         v-if="isAdmin"
         v-model:open="createOpen"
-        trigger="hover"
-        hover-bridge
+        trigger="click"
         align="left"
         :items="createItems"
         density="comfortable"
@@ -107,7 +101,7 @@ function onTransferSelect(key: string) {
             @click="toggle"
           >
             <span class="file-toolbar__menu-main">
-              <span class="file-toolbar__icon"><SvgIcon name="folder" :size="17" /></span>
+              <span class="file-toolbar__icon"><SvgIcon name="plus" :size="17" /></span>
               <span class="file-toolbar__menu-label">新建</span>
             </span>
             <span class="file-toolbar__menu-arrow" :class="{ open }">
@@ -124,37 +118,11 @@ function onTransferSelect(key: string) {
         <span>刷新</span>
       </AppButton>
 
-      <div v-if="isAdmin && selectedCount > 0" class="file-toolbar__batch">
-        <AppDropdown
-          v-model:open="transferOpen"
-          trigger="hover"
-          hover-bridge
-          align="left"
-          :items="transferItems"
-          density="comfortable"
-          @select="onTransferSelect"
-        >
-          <template #trigger="{ open, toggle }">
-            <AppButton variant="secondary" class="file-toolbar__btn" :aria-expanded="open" @click="toggle">
-              <span class="file-toolbar__icon"><SvgIcon name="package" :size="17" /></span>
-              <span>转移/复制</span>
-              <span class="file-toolbar__menu-arrow file-toolbar__menu-arrow--muted" :class="{ open }">
-                <SvgIcon name="chevron-down" :size="14" />
-              </span>
-            </AppButton>
-          </template>
-        </AppDropdown>
-
-        <AppButton variant="danger" class="file-toolbar__btn" @click="emit('batch-delete')">
-          <span class="file-toolbar__icon"><SvgIcon name="trash-button" :size="17" /></span>
-          <span>批量删除</span>
-        </AppButton>
-      </div>
     </div>
 
     <div class="file-toolbar__right">
       <button
-        v-if="isAdmin"
+        v-if="isAdmin && !compactHome"
         type="button"
         class="transfer-status-chip"
         :class="{
@@ -183,10 +151,13 @@ function onTransferSelect(key: string) {
             <SvgIcon name="upload" :size="14" />
           </span>
         </span>
+        <span v-if="compactHome && (uploadTaskCount || 0) > 0" class="transfer-status-badge">
+          {{ Math.min(uploadTaskCount || 0, 99) }}
+        </span>
         <span class="transfer-status-text">{{ uploadTaskLabel || "暂无传输任务" }}</span>
       </button>
 
-      <div class="performance-panel" :class="{ expanded: performanceExpanded }">
+      <div v-if="!compactHome" class="performance-panel" :class="{ expanded: performanceExpanded }">
         <div class="performance-metrics" :aria-hidden="!performanceExpanded">
           <span class="performance-metric">
             <span class="performance-label">响应时间</span>
