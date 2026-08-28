@@ -333,7 +333,7 @@ func (r *remoteWindowReader) readRangeOnce(ctx context.Context, off int64, dest 
 	end := off + int64(len(dest)) - 1
 	link := r.lh.snapshot()
 	for try := 0; try < 2; try++ {
-		resp, err := r.svc.doRangeRequest(ctx, r.lh.accountID, link, off, end)
+		resp, err := r.svc.doRangeRequest(ctx, r.lh.accountID, link, off, end, r.lh.skipRangeLimit)
 		if err != nil {
 			return 0, err
 		}

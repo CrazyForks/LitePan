@@ -9,9 +9,9 @@ func TestExtractionTimes(t *testing.T) {
 		duration int64
 		want     int
 	}{
-		{name: "默认均匀五帧", req: ExtractRequest{Mode: "uniform"}, duration: 60_000, want: 5},
-		{name: "片头片尾各取一帧", req: ExtractRequest{Mode: "head_tail"}, duration: 60_000, want: 2},
-		{name: "极短视频避免首尾重复", req: ExtractRequest{Mode: "head_tail"}, duration: 1000, want: 1},
+		{name: "默认随机三帧", req: ExtractRequest{Mode: "random"}, duration: 60_000, want: 3},
+		{name: "片头一秒取一帧", req: ExtractRequest{Mode: "head"}, duration: 60_000, want: 1},
+		{name: "极短视频取有效时间", req: ExtractRequest{Mode: "head"}, duration: 1000, want: 1},
 		{name: "精确时间", req: ExtractRequest{Mode: "timestamp", TimestampMS: 900}, duration: 1000, want: 1},
 	}
 	for _, tt := range tests {
@@ -90,11 +90,51 @@ func TestSaveComposedRejectsInvalidSizeBeforeIO(t *testing.T) {
 }
 
 func TestExtractionTimesRejectsInvalidInput(t *testing.T) {
-	if _, err := extractionTimes(ExtractRequest{Mode: "uniform", Count: 10}, 60_000); err == nil {
-		t.Fatal("帧数超限应拒绝")
-	}
 	if _, err := extractionTimes(ExtractRequest{Mode: "timestamp", TimestampMS: 60_000}, 60_000); err == nil {
 		t.Fatal("超过时长的时间点应拒绝")
+	}
+}
+
+func TestRandomExtractionTimesUseThreeSeparatedBands(t *testing.T) {
+	times, err := randomExtractionTimes(60_000, 3)
+	if err != nil || len(times) != 3 {
+		t.Fatalf("随机三帧生成失败: times=%v err=%v", times, err)
+	}
+	bands := [][2]int64{{6_000, 22_000}, {22_000, 38_000}, {38_000, 54_000}}
+	for i, ts := range times {
+		if ts < bands[i][0] || ts >= bands[i][1] {
+			t.Fatalf("第 %d 帧不在预期随机区段内: %d", i+1, ts)
+		}
+	}
+}
+
+func TestHeadFrameUsesOneSecondWithinDuration(t *testing.T) {
+	regular, err := extractionTimes(ExtractRequest{Mode: "head"}, 60_000)
+	if err != nil || len(regular) != 1 || regular[0] != 1000 {
+		t.Fatalf("普通视频应截取片头 1 秒: times=%v err=%v", regular, err)
+	}
+	short, err := extractionTimes(ExtractRequest{Mode: "head"}, 800)
+	if err != nil || len(short) != 1 || short[0] != 799 {
+		t.Fatalf("极短视频应落在有效时长内: times=%v err=%v", short, err)
+	}
+}
+
+func TestFrameAttempts(t *testing.T) {
+	fast := frameAttempts(500, 60_000, false)
+	if len(fast) < 3 || !fast[0].KeyframeOnly {
+		t.Fatalf("快速取帧应全部走关键帧路径、快速失败: %#v", fast)
+	}
+	for _, attempt := range fast {
+		if !attempt.KeyframeOnly {
+			t.Fatalf("非精确取帧不得回落精确 seek（避免限速网盘拖长）: %#v", attempt)
+		}
+		if attempt.TimeMS < 0 || attempt.TimeMS >= 60_000 {
+			t.Fatalf("邻近时间必须在视频范围内: %#v", attempt)
+		}
+	}
+	exact := frameAttempts(30_000, 60_000, true)
+	if len(exact) != 1 || exact[0].KeyframeOnly || exact[0].TimeMS != 30_000 {
+		t.Fatalf("指定时间必须只做准确定位且不得偏移: %#v", exact)
 	}
 }
 

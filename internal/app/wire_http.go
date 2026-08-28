@@ -51,7 +51,13 @@ func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core
 	if err != nil {
 		return nil, err
 	}
-	coverExtractSvc, err := coverextract.New(coverextract.Options{DataDir: cfg.DataDir, ListenAddr: cfg.ListenAddr, Files: svc.files, Playback: svc.playback})
+	coverExtractSvc, err := coverextract.New(coverextract.Options{
+		DataDir:    cfg.DataDir,
+		ListenAddr: cfg.ListenAddr,
+		Files:      svc.files,
+		Playback:   svc.playback,
+		Log:        logs.For(logx.ModuleSystem),
+	})
 	if err != nil {
 		return nil, err
 	}

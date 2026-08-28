@@ -17,6 +17,10 @@ type Intent struct {
 	Inline       bool
 	WebDAV       bool
 	OriginalFile bool
+	// SkipRangeLimit：绕过同账号 Range 并发限流（视频海报取帧用）。
+	// 提取本身串行（内部已限并发 1），ffmpeg 会并发发起多个请求，
+	// 若全部计入限流名额会互相饿死（一个流的并行分片即可占满）。
+	SkipRangeLimit bool
 }
 
 // allowsPlaybackResolve 只有真实播放请求才允许增强工具替换原始下载地址。

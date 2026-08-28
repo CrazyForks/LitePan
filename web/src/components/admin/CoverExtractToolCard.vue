@@ -9,8 +9,9 @@ import AppModal from "@/components/base/AppModal.vue";
 import AccountFolderField from "@/components/admin/AccountFolderField.vue";
 import CloudToolCard from "@/components/admin/CloudToolCard.vue";
 import FolderPickerModal from "@/components/file/FolderPickerModal.vue";
+import { useAccountsStore } from "@/stores/accounts";
 
-type CaptureMode = "uniform" | "head_tail" | "timestamp";
+type CaptureMode = "head" | "random" | "timestamp";
 
 const props = withDefaults(defineProps<{ searchQuery?: string }>(), { searchQuery: "" });
 const open = ref(false);
@@ -20,7 +21,9 @@ const saving = ref(false);
 const previewing = ref(false);
 const toggleSaving = ref(false);
 const targetPickerOpen = ref(false);
-const captureMode = ref<CaptureMode>("uniform");
+const helpOpen = ref(false);
+// 默认只取片头 1 秒的一帧，需要更多候选时再由用户选择随机三帧。
+const captureMode = ref<CaptureMode>("head");
 const files = ref<CoverFile[]>([]);
 const runtime = ref<CoverRuntime | null>(null);
 const globalStyle = ref<CoverStyle>({ shape: "slant", height: 0.22, panel_color: "#3C4CC3", opacity: 0.8, text_color: "#fffdf8", packaged: false });
@@ -69,7 +72,17 @@ let dragState: {
 
 const active = computed(() => files.value.find((file) => file.id === activeID.value) ?? files.value[0]);
 const enabled = computed(() => runtime.value?.enabled ?? false);
-const targetDisplay = computed(() => active.value ? `${active.value.target_path === "/" ? "" : active.value.target_path}/poster.jpg` : "/poster.jpg");
+const accountsStore = useAccountsStore();
+const accountName = computed(() => {
+  if (!active.value) return "";
+  return accountsStore.accounts.find((a) => a.id === active.value!.account_id)?.name ?? "";
+});
+const targetDisplay = computed(() => {
+  const path = active.value ? `${active.value.target_path === "/" ? "" : active.value.target_path}/poster.jpg` : "/poster.jpg";
+  // 前缀账号名，让用户知道封面保存到哪个网盘
+  const name = accountName.value ? `${accountName.value} ` : "";
+  return `${name}${path}`;
+});
 const visible = computed(() => !props.searchQuery.trim() || "视频海报生成封面提取".includes(props.searchQuery.trim()));
 const selectedFrameInfo = computed(() => active.value?.frames.find((frame) => frame.id === selectedFrame.value));
 const activeTitle = computed({
@@ -121,8 +134,6 @@ const activeImageZoom = computed({
   },
 });
 const captureActionLabel = computed(() => {
-  if (captureMode.value === "uniform") return "取帧";
-  if (captureMode.value === "head_tail") return "取帧";
   return "取帧";
 });
 const zoomPercent = computed(() => `${Math.round(activeImageZoom.value * 100)}%`);
@@ -319,16 +330,51 @@ async function extract(mode: CaptureMode) {
   const sessionID = active.value.id;
   const previousFrames = new Set(active.value.frames.map((frame) => frame.id));
   loading.value = true;
-  statusText.value = mode === "uniform" ? "正在读取视频信息并生成 5 张候选画面…" : mode === "head_tail" ? "正在提取片头与片尾 2 张候选画面…" : "正在提取指定时间的画面…";
   try {
     const timestampMs = (timeHour.value * 3600 + timeMinute.value * 60 + timeSecond.value) * 1000;
-    const out = await coverExtractApi.extract({ session_file_id: sessionID, mode, count: mode === "uniform" ? 5 : undefined, timestamp_ms: timestampMs });
-    ensureFileOptions(out);
-    files.value = files.value.map((file) => file.id === out.id ? { ...out, frames: out.frames ?? [] } : file);
-    const firstNewFrame = out.frames.find((frame) => !previousFrames.has(frame.id));
-    selectedFrame.value = firstNewFrame?.id ?? out.frames[0]?.id ?? "";
+    // 先取时长（probe 只探测不取帧；时长缓存后逐帧提取不再重复探测）
+    statusText.value = "正在读取视频信息…";
+    const info = await coverExtractApi.extract({ session_file_id: sessionID, mode: "probe" });
+    const duration = info.duration_ms ?? 0;
+    // 计算取帧时间点
+    let points: number[] = [];
+    if (mode === "head") {
+      points = [1000];
+    } else if (mode === "random") {
+      points = randomFramePoints(duration, 3);
+    } else {
+      points = [timestampMs];
+    }
+    if (!points.length || points.some((p) => p < 0 || p >= duration)) {
+      toast.error("无法计算有效的取帧时间点");
+      return;
+    }
+    // 逐帧提取，实时显示进度；approx=true 走关键帧极速路径，单帧失败快速跳过
+    let latest: CoverFile | null = null;
+    let succeeded = 0;
+    for (let i = 0; i < points.length; i++) {
+      statusText.value = `正在提取第 ${i + 1}/${points.length} 帧…`;
+      try {
+        const out = await coverExtractApi.extract({
+          session_file_id: sessionID,
+          mode: "timestamp",
+          timestamp_ms: points[i],
+          approx: mode !== "timestamp",
+        });
+        ensureFileOptions(out);
+        latest = out;
+        succeeded++;
+      } catch {
+        // 单帧失败跳过，继续下一帧
+      }
+    }
+    if (latest) {
+      files.value = files.value.map((file) => file.id === latest!.id ? { ...latest!, frames: latest!.frames ?? [] } : file);
+      const newFrames = (latest.frames ?? []).filter((frame) => !previousFrames.has(frame.id));
+      selectedFrame.value = newFrames[0]?.id ?? latest.frames[0]?.id ?? "";
+    }
     statusText.value = "";
-    toast.success(`已生成 ${out.frames.length} 张候选图`);
+    toast.success(succeeded > 0 ? `已生成 ${succeeded} 张候选图` : "未能提取到候选画面");
   } catch (error) {
     toast.error(getApiErrorMessage(error, "提取失败"));
     await load();
@@ -336,6 +382,22 @@ async function extract(mode: CaptureMode) {
   } finally {
     loading.value = false;
   }
+}
+
+// 随机取帧点：避开片头片尾两端，在 10%~90% 区间按 count 段各随机一点（与后端一致）。
+function randomFramePoints(duration: number, count: number): number[] {
+  const start = Math.floor(duration / 10);
+  const span = Math.floor((duration * 8) / 10);
+  const points: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const left = start + Math.floor((span * i) / count);
+    const right = start + Math.floor((span * (i + 1)) / count);
+    const width = right - left;
+    const offset = width > 1 ? Math.floor(Math.random() * width) : 0;
+    const ts = Math.min(left + offset, duration - 1);
+    if (!points.length || ts !== points[points.length - 1]) points.push(ts);
+  }
+  return points;
 }
 
 async function buildPoster() {
@@ -635,6 +697,7 @@ watch(() => active.value?.frames.length, (count) => {
 onMounted(() => {
   window.addEventListener("click", onWindowClick);
   window.addEventListener("resize", onResize);
+  void accountsStore.loadAccounts();
   void load();
 });
 onUnmounted(() => {
@@ -647,8 +710,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <CloudToolCard v-show="visible" :enabled="enabled" name="视频海报生成" driver="视频截图· 保存到网盘" logo-src="/logos/CoverExtract.png" logo-alt="视频海报生成" :stat-value="files.length" stat-label="个待处理视频">
-    启用后，首页文件列表右键[生成视频海报]将待处理项发送至此，用于无法刮削作品生成海报。
+  <CloudToolCard v-show="visible" :enabled="enabled" name="视频海报生成" driver="视频截图· 保存到网盘" logo-src="/logos/CoverExtract.png" logo-alt="视频海报生成" :tags="[{ label: '实验性', variant: 'warn' }]" :stat-value="files.length" stat-label="个待处理视频">
+    适用于 TMDB 未收录的视频（如生活日常、自己拍摄的小文件），可为 MP4 / MKV 格式生成海报。
     <template #toggle><button class="check-toggle" type="button" :class="{ on: enabled }" :aria-label="enabled ? '停用视频海报生成' : '启用视频海报生成'" :disabled="toggleSaving" @click="toggleEnabled"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg></button></template>
     <template #actions><AppButton size="sm" @click="show">打开工具</AppButton></template>
   </CloudToolCard>
@@ -657,7 +720,10 @@ onUnmounted(() => {
     <div class="cover-shell">
       <!-- 顶栏 -->
       <div class="c-top">
-        <h1 class="c-title">视频海报生成</h1>
+        <div class="c-title-block">
+          <h1 class="c-title">视频海报生成</h1>
+          <button class="c-help" type="button" title="取帧失败原因说明" aria-label="取帧失败原因说明" @click="helpOpen = true">?</button>
+        </div>
         <div class="c-spacer" />
         <!-- 时分秒排在取帧切换左侧、紧挨右对齐 -->
         <div v-if="captureMode === 'timestamp'" class="time-input" @click.stop>
@@ -666,8 +732,8 @@ onUnmounted(() => {
           <input v-model.number="timeSecond" aria-label="秒" type="number" min="0" max="59"><span>秒</span>
         </div>
         <div class="seg">
-          <button type="button" :class="{ on: captureMode === 'uniform' }" @click="captureMode = 'uniform'">均匀取帧</button>
-          <button type="button" :class="{ on: captureMode === 'head_tail' }" @click="captureMode = 'head_tail'">片头片尾</button>
+          <button type="button" :class="{ on: captureMode === 'head' }" @click="captureMode = 'head'">片头取帧</button>
+          <button type="button" :class="{ on: captureMode === 'random' }" @click="captureMode = 'random'">随机三帧</button>
           <button type="button" :class="{ on: captureMode === 'timestamp' }" @click="captureMode = 'timestamp'">按时间</button>
         </div>
         <button class="c-extract" type="button" :disabled="loading || !enabled || !runtime?.ready || !active" @click="extract(captureMode)">{{ loading ? "取帧中…" : captureActionLabel }}</button>
@@ -694,7 +760,15 @@ onUnmounted(() => {
               <button type="button" class="c-file-rm" title="移除" @click.stop="remove(file.id)">✕</button>
             </div>
           </div>
-          <div v-else class="c-file-empty">列表为空<br>右键网盘视频<br>发送到视频海报生成工具</div>
+          <div v-else class="c-file-empty">
+            <span class="c-file-empty__icon" aria-hidden="true">🎬</span>
+            <b class="c-file-empty__title">还没有待处理影片</b>
+            <ol class="c-file-empty__steps">
+              <li data-step="1">回到首页文件列表</li>
+              <li data-step="2">右键视频文件（MP4 / MKV）</li>
+              <li data-step="3">选择「生成视频海报」发送过来</li>
+            </ol>
+          </div>
           <div v-if="filesPageCount > 1" class="c-pager">
             <button type="button" :disabled="filesPage <= 1" @click="filesPage--">‹</button>
             <span>{{ filesPage }} / {{ filesPageCount }}</span>
@@ -728,7 +802,7 @@ onUnmounted(() => {
           <div v-else class="stage-empty">
             <template v-if="!(loading || downloading || saving)">
               <p v-if="active && active.error">{{ active.error }}</p>
-              <p v-else>{{ active ? "取帧后可在这里选择画面并实时预览海报。" : "右键网盘视频，发送到视频海报生成工具。" }}</p>
+              <p v-else-if="active">取帧后可在这里选择画面并实时预览海报。</p>
             </template>
             <span v-if="loading || downloading || saving" class="stage-empty-loading"><i class="c-spinner" />{{ statusText }}</span>
           </div>
@@ -795,6 +869,21 @@ onUnmounted(() => {
     </div>
   </AppModal>
   <FolderPickerModal :open="targetPickerOpen" nested :account-id="active?.account_id ?? null" :initial-path="active?.target_path ?? '/'" title="选择封面保存目录" confirm-text="保存到此目录" @close="targetPickerOpen = false" @resolve="setTarget" />
+
+  <AppModal :open="helpOpen" title="为什么截取不到？" size="sm" @close="helpOpen = false">
+    <div class="c-help-body">
+      <p>取帧需要从网盘读取视频数据，快慢和成败主要取决于网络与网盘账号：</p>
+      <ul>
+        <li><strong>网络环境</strong>：带宽不足时读取慢，可能超时。</li>
+        <li><strong>网盘会员</strong>：无会员（如夸克非 SVIP）下载直链会被限速，大文件或高码率视频可能很慢甚至失败。</li>
+        <li><strong>视频规格</strong>：视频越大、码率越高，取帧需要读取的数据越多，耗时越长。</li>
+      </ul>
+      <p>建议：在带宽较好的网络下操作 / 开通网盘会员 / 改用其他网盘 / 稍后重试。同一文件多次取帧的候选图都会保留，可对比选择。</p>
+    </div>
+    <template #footer>
+      <AppButton variant="primary" @click="helpOpen = false">知道了</AppButton>
+    </template>
+  </AppModal>
 </template>
 
 <style scoped>
@@ -858,6 +947,7 @@ onUnmounted(() => {
 /* 顶栏 */
 .c-top { display: flex; align-items: center; gap: 12px; padding: 11px 20px; background: var(--c-panel); border-bottom: 1px solid var(--c-line); flex-shrink: 0; }
 .c-title { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: 0.2px; white-space: nowrap; }
+.c-title-block { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .c-spacer { flex: 1; }
 
 /* 左栏：待处理影片 */
@@ -878,7 +968,55 @@ onUnmounted(() => {
 .c-file-rm { width: 24px; height: 24px; border: 0; border-radius: 7px; background: transparent; color: var(--c-faint); font-size: 13px; cursor: pointer; flex-shrink: 0; opacity: 0; transition: opacity 0.12s; }
 .c-file:hover .c-file-rm { opacity: 1; }
 .c-file-rm:hover { color: var(--c-danger); background: rgba(220, 38, 38, 0.08); }
-.c-file-empty { font-size: 12px; color: var(--c-faint); line-height: 1.7; padding: 10px 8px; }
+.c-file-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 22px 12px;
+  text-align: center;
+}
+.c-file-empty__icon {
+  font-size: 26px;
+  line-height: 1;
+  margin-bottom: 4px;
+  opacity: 0.9;
+}
+.c-file-empty__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+.c-file-empty__steps {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--c-faint);
+  line-height: 1.6;
+}
+.c-file-empty__steps li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.c-file-empty__steps li::before {
+  content: attr(data-step);
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--c-line2);
+  color: var(--c-muted);
+  font-size: 10px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 
 /* 取帧模式 + 时间输入 */
 .seg { display: flex; gap: 2px; background: var(--c-bg); border: 1px solid var(--c-line); border-radius: 10px; padding: 3px; flex-shrink: 0; }
@@ -893,6 +1031,42 @@ onUnmounted(() => {
 .c-extract:disabled { opacity: 0.4; cursor: not-allowed; }
 .c-close { width: 34px; height: 34px; border: 1px solid var(--c-line); border-radius: 10px; background: var(--c-panel); color: var(--c-muted); font-size: 14px; cursor: pointer; flex-shrink: 0; }
 .c-close:hover { color: var(--c-text); }
+.c-help {
+  width: 15px;
+  height: 15px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--c-dark);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+.c-help:hover {
+  background: var(--c-accent);
+}
+.c-help-body {
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--c-text);
+}
+.c-help-body p {
+  margin: 0 0 8px;
+}
+.c-help-body ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+.c-help-body li {
+  margin-bottom: 4px;
+}
+.c-help-body strong {
+  color: var(--c-danger);
+}
 
 /* ffmpeg 警告 */
 .cover-warning { padding: 8px 20px; border-bottom: 1px solid var(--c-line); background: #fff8ec; color: #b45309; font-size: 12px; line-height: 1.6; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; flex-shrink: 0; }
@@ -913,7 +1087,17 @@ onUnmounted(() => {
 .cand-rm { position: absolute; right: 6px; bottom: 5px; width: 20px; height: 20px; border: 0; border-radius: 50%; background: rgba(220, 38, 38, 0.85); color: #fff; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.12s; z-index: 2; }
 .cand:hover .cand-rm { opacity: 1; }
 .cand-rm:hover { background: #b91c1c; }
-.cand-empty { font-size: 12px; color: var(--c-faint); line-height: 1.7; padding: 10px 8px; }
+.cand-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  font-size: 12px;
+  color: var(--c-faint);
+  line-height: 1.7;
+  text-align: center;
+  padding: 10px 8px;
+}
 
 /* 分页条 */
 .c-pager { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 4px 0 0; flex-shrink: 0; }

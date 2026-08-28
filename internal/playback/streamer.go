@@ -25,13 +25,14 @@ func (s *Service) serveStream(w http.ResponseWriter, r *http.Request, req Reques
 	}
 
 	lh := &linkHolder{
-		svc:         s,
-		link:        res.Link,
-		accountID:   req.AccountID,
-		fileID:      req.FileID,
-		ua:          ua,
-		playback:    intent.allowsPlaybackResolve(),
-		refreshLeft: 2,
+		svc:            s,
+		link:           res.Link,
+		accountID:      req.AccountID,
+		fileID:         req.FileID,
+		ua:             ua,
+		playback:       intent.allowsPlaybackResolve(),
+		skipRangeLimit: intent.SkipRangeLimit,
+		refreshLeft:    2,
 	}
 	partSize := res.Link.ChunkSize
 	if partSize <= 0 {

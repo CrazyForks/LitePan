@@ -24,14 +24,15 @@ var copyBufPool = sync.Pool{
 }
 
 type linkHolder struct {
-	svc         *Service
-	mu          sync.Mutex
-	link        domain.DownloadInfo
-	accountID   int64
-	fileID      string
-	ua          string
-	playback    bool
-	refreshLeft int
+	svc            *Service
+	mu             sync.Mutex
+	link           domain.DownloadInfo
+	accountID      int64
+	fileID         string
+	ua             string
+	playback       bool
+	skipRangeLimit bool
+	refreshLeft    int
 }
 
 func (lh *linkHolder) snapshot() domain.DownloadInfo {
@@ -205,7 +206,7 @@ func writeAll(w io.Writer, data []byte) error {
 func (s *Service) pipeUpstreamRange(ctx context.Context, w io.Writer, lh *linkHolder, start, end int64) error {
 	link := lh.snapshot()
 	for try := 0; try < 2; try++ {
-		resp, err := s.doRangeRequest(ctx, lh.accountID, link, start, end)
+		resp, err := s.doRangeRequest(ctx, lh.accountID, link, start, end, lh.skipRangeLimit)
 		if err != nil {
 			if try == 0 && ctx.Err() == nil {
 				newLink, refreshed, rerr := lh.refreshAfterFailure(ctx, link)
@@ -296,7 +297,7 @@ func (g *growBuffer) Write(p []byte) (int, error) {
 func (g *growBuffer) Bytes() []byte { return g.b }
 
 func (s *Service) probeSizeViaRange0(ctx context.Context, lh *linkHolder) (int64, error) {
-	resp, err := s.doRangeRequest(ctx, lh.accountID, lh.snapshot(), 0, 0)
+	resp, err := s.doRangeRequest(ctx, lh.accountID, lh.snapshot(), 0, 0, lh.skipRangeLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -327,10 +328,16 @@ func parseContentRangeTotal(v string) (int64, error) {
 	return n, nil
 }
 
-func (s *Service) doRangeRequest(ctx context.Context, accountID int64, link domain.DownloadInfo, start, end int64) (*http.Response, error) {
-	release, err := s.rangeLimits.acquire(ctx, accountID, link.Concurrency)
-	if err != nil {
-		return nil, err
+func (s *Service) doRangeRequest(ctx context.Context, accountID int64, link domain.DownloadInfo, start, end int64, skipLimit bool) (*http.Response, error) {
+	var release func()
+	if !skipLimit {
+		var err error
+		release, err = s.rangeLimits.acquire(ctx, accountID, link.Concurrency)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		release = func() {}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link.URL, nil)
 	if err != nil {

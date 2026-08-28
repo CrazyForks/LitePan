@@ -1,6 +1,7 @@
 package coverextract
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/rand"
@@ -9,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -35,6 +38,8 @@ const (
 	maxFiles       = 20
 	maxFrames      = 50
 	maxImageBytes  = int64(200 << 20)
+	// defaultReadMax 是单次提取读取量的基础上限；newSource 会按文件大小
+	// 提升为 max(256MB, 文件大小)，避免深位置取帧（MKV 无 Cues）被截断。
 	defaultReadMax = int64(256 << 20)
 	// MaxPosterBytes 限制前端 Canvas 合成后上传的海报大小。
 	MaxPosterBytes = int64(8 << 20)
@@ -47,6 +52,7 @@ type Options struct {
 	ListenAddr string
 	Files      *filecore.Service
 	Playback   *playback.Service
+	Log        *slog.Logger
 }
 
 type Service struct {
@@ -58,6 +64,7 @@ type Service struct {
 	sem        chan struct{}
 	downloadMu sync.Mutex
 	opts       Options
+	log        *slog.Logger
 }
 
 type SessionFile struct {
@@ -102,8 +109,10 @@ type sourceToken struct {
 type ExtractRequest struct {
 	SessionFileID string `json:"session_file_id"`
 	Mode          string `json:"mode"`
-	Count         int    `json:"count"`
 	TimestampMS   int64  `json:"timestamp_ms"`
+	// Approx：逐帧候选提取标记（非精确）。候选图允许落在最近关键帧，
+	// 优先关键帧极速路径、失败快速放弃，避免限速网盘上拖长等待。
+	Approx bool `json:"approx"`
 }
 
 type SaveRequest struct {
@@ -122,7 +131,11 @@ func New(opts Options) (*Service, error) {
 	if opts.Files == nil || opts.Playback == nil || strings.TrimSpace(opts.DataDir) == "" {
 		return nil, errors.New("视频海报生成服务配置不完整")
 	}
-	return &Service{files: map[string]*SessionFile{}, frames: map[string]*imageEntry{}, tokens: map[string]*sourceToken{}, sem: make(chan struct{}, 1), opts: opts}, nil
+	log := opts.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Service{files: map[string]*SessionFile{}, frames: map[string]*imageEntry{}, tokens: map[string]*sourceToken{}, sem: make(chan struct{}, 1), opts: opts, log: log}, nil
 }
 
 func (s *Service) Add(ctx context.Context, accountID int64, fileID, parentID string, directoryChain []DirectoryRef) (*SessionFile, error) {
@@ -301,25 +314,75 @@ func (s *Service) Extract(ctx context.Context, req ExtractRequest) (*SessionFile
 	if err != nil {
 		return s.fail(req.SessionFileID, err)
 	}
-	token, sourceURL, err := s.newSource(local.AccountID, local.FileID)
+	// 读取上限按文件大小动态：深位置取帧（MKV 无 Cues）需读大量字节，
+	// 上限取 max(256MB, 文件大小)，既够大文件取帧，又不会给提取无脑放权。
+	token, sourceURL, err := s.newSource(local.AccountID, local.FileID, local.Size)
 	if err != nil {
 		return s.fail(req.SessionFileID, err)
 	}
 	defer s.dropToken(token)
-	duration, err := probeDuration(ctx, ffmpeg, sourceURL)
-	if err != nil {
-		return s.fail(req.SessionFileID, err)
+	// probe 模式只探测并缓存时长，不提取候选画面。
+	if req.Mode == "probe" {
+		duration := local.DurationMS
+		if duration <= 0 {
+			duration, err = probeDuration(ctx, ffmpeg, sourceURL)
+			if err != nil {
+				return s.fail(req.SessionFileID, err)
+			}
+			s.mu.Lock()
+			if ff := s.files[req.SessionFileID]; ff != nil {
+				ff.DurationMS = duration
+			}
+			s.mu.Unlock()
+		}
+		out := cloneFile(&local)
+		out.DurationMS = duration
+		out.Status = "done"
+		return out, nil
+	}
+	// 同一待处理视频复用已缓存时长，后续批量或指定时间取帧不再重复探测。
+	duration := local.DurationMS
+	if duration <= 0 {
+		duration, err = probeDuration(ctx, ffmpeg, sourceURL)
+		if err != nil {
+			return s.fail(req.SessionFileID, err)
+		}
 	}
 	times, err := extractionTimes(req, duration)
 	if err != nil {
 		return s.fail(req.SessionFileID, err)
 	}
-	for _, ts := range times {
-		data, extractErr := extractOne(ctx, ffmpeg, sourceURL, ts)
-		if extractErr != nil {
+	// 精确模式仅限用户指定时间的单帧提取（timestamp 且未标记 Approx）；
+	// 候选图（head/random/逐帧 approx）走关键帧极速路径。
+	exact := req.Mode == "timestamp" && !req.Approx
+	started := time.Now()
+	results := extractFrames(ctx, ffmpeg, sourceURL, times, duration, exact)
+	succeeded := 0
+	var lastExtractErr error
+	for i, result := range results {
+		if result.Err != nil {
+			lastExtractErr = result.Err
 			continue
 		}
-		s.addFrame(req.SessionFileID, ts, data)
+		if len(result.Data) == 0 {
+			continue
+		}
+		s.addFrame(req.SessionFileID, times[i], result.Data)
+		succeeded++
+	}
+	s.log.Debug("视频海报取帧完成",
+		"account_id", local.AccountID,
+		"file_id", local.FileID,
+		"mode", req.Mode,
+		"requested", len(times),
+		"succeeded", succeeded,
+		"elapsed_ms", time.Since(started).Milliseconds(),
+	)
+	if succeeded == 0 {
+		if lastExtractErr == nil {
+			lastExtractErr = errors.New("FFmpeg 未返回可用画面")
+		}
+		return s.fail(req.SessionFileID, fmt.Errorf("未能提取可用画面: %w", lastExtractErr))
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -331,7 +394,11 @@ func (s *Service) Extract(ctx context.Context, req ExtractRequest) (*SessionFile
 	f.TouchedAt = time.Now().Unix()
 	if len(f.Frames) == 0 {
 		f.Status = "failed"
-		f.Error = "未能提取可用画面"
+		if lastExtractErr != nil {
+			f.Error = "未能提取可用画面: " + lastExtractErr.Error()
+		} else {
+			f.Error = "未能提取可用画面"
+		}
 	} else {
 		f.Status = "done"
 	}
@@ -456,11 +523,14 @@ func (s *Service) ServeSource(w http.ResponseWriter, r *http.Request, token stri
 		cur.Read += n
 		return cur.Read <= cur.MaxRead
 	}}
-	// 必须由 LitePan 代理字节，否则 302 后 FFmpeg 会绕过读取预算。
+	// 海报生成固定用夸克驱动本体读取（OriginalFile→playback=false→hook 不接管）：
+	// 夸克TV 转码直链在深位置/随机取帧上不稳定（实测丢帧），驱动本体读原始文件稳定，
+	// 虽取链较慢但可靠。ForceProxy 保证 Litepan 代取（不走 302，ffmpeg 只面对本机）。
 	return s.opts.Playback.ServeHTTP(cw, r, playback.Request{AccountID: accountID, FileID: fileID}, playback.Intent{
 		FileName:     "source",
-		ForceProxy:   true,
 		OriginalFile: true,
+		ForceProxy:   true,
+		SkipRangeLimit: true,
 	})
 }
 
@@ -476,14 +546,18 @@ func (w *countingWriter) Write(p []byte) (int, error) {
 	return w.ResponseWriter.Write(p)
 }
 
-func (s *Service) newSource(accountID int64, fileID string) (string, string, error) {
+func (s *Service) newSource(accountID int64, fileID string, fileSize int64) (string, string, error) {
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
 		return "", "", err
 	}
 	token := hex.EncodeToString(b)
+	maxRead := defaultReadMax
+	if fileSize > maxRead {
+		maxRead = fileSize
+	}
 	s.mu.Lock()
-	s.tokens[token] = &sourceToken{AccountID: accountID, FileID: fileID, ExpiresAt: time.Now().Add(10 * time.Minute), MaxRead: defaultReadMax}
+	s.tokens[token] = &sourceToken{AccountID: accountID, FileID: fileID, ExpiresAt: time.Now().Add(10 * time.Minute), MaxRead: maxRead}
 	s.mu.Unlock()
 	return token, "http://127.0.0.1" + normalizeListen(s.opts.ListenAddr) + "/api/internal/cover-source/" + token, nil
 }
@@ -521,27 +595,46 @@ func extractionTimes(req ExtractRequest, duration int64) ([]int64, error) {
 			return nil, domain.Errorf(domain.CodeValidation, "时间点必须在视频时长内")
 		}
 		return []int64{req.TimestampMS}, nil
-	case "head_tail", "head":
-		if duration <= 1000 {
-			return []int64{0}, nil
-		}
-		return []int64{500, duration - 500}, nil
-	case "uniform", "":
-		n := req.Count
-		if n == 0 {
-			n = 5
-		}
-		if n < 3 || n > 9 {
-			return nil, domain.Errorf(domain.CodeValidation, "均匀取帧数必须在 3 到 9 之间")
-		}
-		out := make([]int64, 0, n)
-		for i := 1; i <= n; i++ {
-			out = append(out, duration*int64(i)/int64(n+1))
-		}
-		return out, nil
+	case "head":
+		return []int64{min(int64(1000), duration-1)}, nil
+	case "random", "":
+		return randomExtractionTimes(duration, 3)
 	default:
 		return nil, domain.Errorf(domain.CodeValidation, "不支持的取帧方式")
 	}
+}
+
+// randomExtractionTimes 避开容易出现片头、片尾字幕的两端，并在三个区段各随机取一帧。
+// 这样每次点击都有变化，同时避免纯随机导致三张候选图挤在同一小段。
+func randomExtractionTimes(duration int64, count int) ([]int64, error) {
+	if duration <= 0 || count <= 0 {
+		return nil, domain.Errorf(domain.CodeValidation, "无法计算随机取帧时间")
+	}
+	start := duration / 10
+	span := duration * 8 / 10
+	if span < int64(count) {
+		start = 0
+		span = duration
+	}
+	out := make([]int64, 0, count)
+	for i := 0; i < count; i++ {
+		left := start + span*int64(i)/int64(count)
+		right := start + span*int64(i+1)/int64(count)
+		width := right - left
+		offset := int64(0)
+		if width > 1 {
+			n, err := rand.Int(rand.Reader, big.NewInt(width))
+			if err != nil {
+				return nil, fmt.Errorf("生成随机取帧时间失败: %w", err)
+			}
+			offset = n.Int64()
+		}
+		ts := min(left+offset, duration-1)
+		if len(out) == 0 || ts != out[len(out)-1] {
+			out = append(out, ts)
+		}
+	}
+	return out, nil
 }
 
 var durationPattern = regexp.MustCompile(`Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)`)
@@ -552,7 +645,12 @@ func probeDuration(parent context.Context, bin, url string) (int64, error) {
 	out, _ := exec.CommandContext(ctx, bin, "-hide_banner", "-i", url).CombinedOutput()
 	match := durationPattern.FindSubmatch(out)
 	if len(match) != 4 {
-		return 0, errors.New("FFmpeg 未返回有效时长")
+		// 带上 FFmpeg 实际输出便于定位拉流失败原因（截断尾部）
+		detail := strings.TrimSpace(string(out))
+		if len(detail) > 800 {
+			detail = detail[len(detail)-800:]
+		}
+		return 0, fmt.Errorf("FFmpeg 未返回有效时长: %s", detail)
 	}
 	hours, _ := strconv.ParseInt(string(match[1]), 10, 64)
 	minutes, _ := strconv.ParseInt(string(match[2]), 10, 64)
@@ -562,21 +660,122 @@ func probeDuration(parent context.Context, bin, url string) (int64, error) {
 	}
 	return int64((float64(hours*3600+minutes*60) + seconds) * 1000), nil
 }
-func extractOne(parent context.Context, bin, url string, ts int64) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
-	defer cancel()
-	dir, err := os.MkdirTemp("", "litepan-cover-")
-	if err != nil {
-		return nil, err
+
+type frameResult struct {
+	Data []byte
+	Err  error
+}
+
+// extractFrames 串行读取同一网盘文件，避免多个 FFmpeg 进程争抢 Range 连接或代理通道。
+// 每帧独立返回结果，单帧失败不会丢弃已成功的候选图。
+func extractFrames(parent context.Context, bin, url string, times []int64, duration int64, exact bool) []frameResult {
+	if len(times) == 0 {
+		return nil
 	}
-	defer os.RemoveAll(dir)
-	out := filepath.Join(dir, "frame.jpg")
+	results := make([]frameResult, len(times))
+	for i, ts := range times {
+		if err := parent.Err(); err != nil {
+			results[i].Err = err
+			continue
+		}
+		results[i].Data, results[i].Err = extractOneFrame(parent, bin, url, ts, duration, exact)
+	}
+	return results
+}
+
+// extractOneFrame 先尝试关键帧快速路径，失败时再用普通准确定位回退。
+// 指定时间模式优先准确定位，避免用户选定的时间偏移到较早的关键帧。
+type frameAttempt struct {
+	TimeMS       int64
+	KeyframeOnly bool
+}
+
+func frameAttempts(ts, duration int64, exact bool) []frameAttempt {
+	if exact {
+		return []frameAttempt{{TimeMS: ts}}
+	}
+	// 非精确：全部走关键帧快速路径（含附近位置），失败即放弃该帧。
+	// 海报生成固定用夸克驱动本体读取，关键帧极速在原始文件上稳定；
+	// 限速网盘上精确 seek 可能拖到 30s 仍失败，快速放弃让前端尽快返回已成功的帧。
+	attempts := []frameAttempt{{TimeMS: ts, KeyframeOnly: true}}
+	seen := map[int64]struct{}{ts: {}}
+	for _, offset := range []int64{2000, -2000} {
+		nearby := ts + offset
+		if nearby < 0 {
+			nearby = 0
+		}
+		if duration > 0 && nearby >= duration {
+			nearby = duration - 1
+		}
+		if nearby < 0 {
+			continue
+		}
+		if _, ok := seen[nearby]; ok {
+			continue
+		}
+		seen[nearby] = struct{}{}
+		attempts = append(attempts, frameAttempt{TimeMS: nearby, KeyframeOnly: true})
+	}
+	return attempts
+}
+
+func extractOneFrame(parent context.Context, bin, url string, ts, duration int64, exact bool) ([]byte, error) {
+	var errs []string
+	for _, attempt := range frameAttempts(ts, duration, exact) {
+		timeout := 15 * time.Second
+		if !attempt.KeyframeOnly {
+			timeout = 30 * time.Second
+		}
+		ctx, cancel := context.WithTimeout(parent, timeout)
+		data, err := runFrameCommand(ctx, bin, url, attempt.TimeMS, attempt.KeyframeOnly)
+		cancel()
+		if err == nil && len(data) > 0 {
+			return data, nil
+		}
+		if err != nil {
+			errs = append(errs, err.Error())
+		}
+		if parent.Err() != nil {
+			return nil, parent.Err()
+		}
+	}
+	return nil, errors.New(strings.Join(errs, "; "))
+}
+
+func runFrameCommand(ctx context.Context, bin, url string, ts int64, keyframeOnly bool) ([]byte, error) {
 	stamp := fmt.Sprintf("%.3f", float64(ts)/1000)
-	cmd := exec.CommandContext(ctx, bin, "-hide_banner", "-loglevel", "error", "-y", "-ss", stamp, "-i", url, "-frames:v", "1", "-vf", "scale=w='min(1280,iw)':h='min(1280,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2", "-q:v", "2", out)
-	if b, err := cmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("FFmpeg 取帧失败: %s", strings.TrimSpace(string(b)))
+	args := []string{"-nostdin", "-hide_banner", "-loglevel", "error", "-ss", stamp}
+	if keyframeOnly {
+		args = append(args, "-noaccurate_seek", "-skip_frame", "nokey")
 	}
-	return os.ReadFile(out)
+	args = append(args,
+		"-i", url,
+		"-map", "0:V:0",
+		"-an", "-sn", "-dn",
+		"-frames:v", "1",
+		"-vf", "scale=w='min(1280,iw)':h='min(1280,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
+		"-q:v", "3",
+		"-f", "image2pipe", "-c:v", "mjpeg", "pipe:1",
+	)
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		strategy := "普通"
+		if keyframeOnly {
+			strategy = "关键帧"
+		}
+		detail := strings.TrimSpace(stderr.String())
+		if len(detail) > 500 {
+			detail = detail[len(detail)-500:]
+		}
+		return nil, fmt.Errorf("%s取帧失败(%s): %s", strategy, stamp, detail)
+	}
+	if stdout.Len() == 0 {
+		return nil, fmt.Errorf("FFmpeg 未返回画面(%s)", stamp)
+	}
+	return stdout.Bytes(), nil
 }
 
 func findTool(dataDir, name string) (string, error) {
