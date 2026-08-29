@@ -12,7 +12,7 @@ export interface AnnouncementItem {
   dialog_title: string;
   /** 黄色警示区（纯文字） */
   banner: string;
-  /** 特别说明区：banner 之下、正文之上，支持 ![alt](url) 图片 */
+  /** 特别说明区：banner 之下、正文之上，仅展示纯文本 */
   special: string;
   lead: string;
   issues: AnnouncementSection[];

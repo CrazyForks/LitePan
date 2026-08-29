@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { filesApi } from "@/api/files";
 import type { Account, BrowserFavoriteItem } from "@/api/types";
 import type { Crumb } from "@/stores/browser";
@@ -63,7 +63,54 @@ const selAccount = ref<number | null>(props.accountId);
 const selectedItems = ref<FolderSelection[]>([]);
 const favorites = ref<BrowserFavoriteItem[]>([]);
 const favoritesLoading = ref(false);
+const accountListRef = ref<HTMLElement | null>(null);
+const accountListScrollable = ref(false);
+const accountListAtTop = ref(true);
+const accountListAtBottom = ref(true);
 let favoritesSeq = 0;
+let accountScrollDelay: ReturnType<typeof setTimeout> | null = null;
+let accountScrollRepeat: ReturnType<typeof setInterval> | null = null;
+
+function updateAccountScrollState() {
+  const el = accountListRef.value;
+  if (!el) {
+    accountListScrollable.value = false;
+    accountListAtTop.value = true;
+    accountListAtBottom.value = true;
+    return;
+  }
+  const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+  accountListScrollable.value = maxScroll > 2;
+  accountListAtTop.value = el.scrollTop <= 2;
+  accountListAtBottom.value = el.scrollTop >= maxScroll - 2;
+}
+
+function scrollAccountList(direction: -1 | 1, smooth = true) {
+  const el = accountListRef.value;
+  if (!el) return;
+  el.scrollBy({ top: direction * 64, behavior: smooth ? "smooth" : "auto" });
+  window.setTimeout(updateAccountScrollState, smooth ? 180 : 0);
+}
+
+function stopAccountScroll() {
+  if (accountScrollDelay) clearTimeout(accountScrollDelay);
+  if (accountScrollRepeat) clearInterval(accountScrollRepeat);
+  accountScrollDelay = null;
+  accountScrollRepeat = null;
+}
+
+function startAccountScroll(direction: -1 | 1) {
+  stopAccountScroll();
+  accountScrollDelay = setTimeout(() => {
+    accountScrollRepeat = setInterval(() => {
+      if ((direction < 0 && accountListAtTop.value) || (direction > 0 && accountListAtBottom.value)) {
+        stopAccountScroll();
+        return;
+      }
+      scrollAccountList(direction, false);
+    }, 90);
+  }, 360);
+}
 
 function initAccount() {
   if (props.accountId != null) {
@@ -105,6 +152,7 @@ watch(
     if (open) {
       initAccount();
       initSelections();
+      void nextTick(updateAccountScrollState);
       return;
     }
     favoritesSeq += 1;
@@ -112,6 +160,17 @@ watch(
   },
   { immediate: true },
 );
+
+watch(
+  () => props.accounts.length,
+  () => void nextTick(updateAccountScrollState),
+);
+
+onMounted(() => window.addEventListener("resize", updateAccountScrollState));
+onBeforeUnmount(() => {
+  stopAccountScroll();
+  window.removeEventListener("resize", updateAccountScrollState);
+});
 
 watch(
   () => [props.open, selAccount.value] as const,
@@ -171,8 +230,47 @@ function onResolve(folder: {
   <AppModal :open="open" bare @close="emit('close')">
     <div class="folder-picker" :class="{ 'folder-picker--accounts': selectableAccount }">
       <aside v-if="selectableAccount" class="folder-picker__accounts">
-        <div class="folder-picker__accounts-title">选择账号</div>
-        <div class="folder-picker__accounts-list">
+        <div class="folder-picker__accounts-head">
+          <div class="folder-picker__accounts-title">选择账号</div>
+          <div v-if="accountListScrollable" class="folder-picker__accounts-scroll-actions" aria-label="滚动账号列表">
+            <button
+              type="button"
+              class="folder-picker__accounts-scroll-btn folder-picker__accounts-scroll-btn--up"
+              aria-label="向上滚动账号列表"
+              :disabled="accountListAtTop"
+              @click="scrollAccountList(-1)"
+              @pointerdown="startAccountScroll(-1)"
+              @pointerup="stopAccountScroll"
+              @pointercancel="stopAccountScroll"
+              @pointerleave="stopAccountScroll"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="folder-picker__accounts-scroll-btn folder-picker__accounts-scroll-btn--down"
+              aria-label="向下滚动账号列表"
+              :disabled="accountListAtBottom"
+              @click="scrollAccountList(1)"
+              @pointerdown="startAccountScroll(1)"
+              @pointerup="stopAccountScroll"
+              @pointercancel="stopAccountScroll"
+              @pointerleave="stopAccountScroll"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div
+          ref="accountListRef"
+          class="folder-picker__accounts-list"
+          :class="{ 'is-scrollable': accountListScrollable }"
+          @scroll.passive="updateAccountScrollState"
+        >
           <div v-if="!accounts.length" class="folder-picker__accounts-empty">
             没有可用账号<br />请先到「存储管理」添加
           </div>
@@ -245,19 +343,90 @@ function onResolve(folder: {
   padding: 18px 12px 18px 18px;
   border-right: 1px solid var(--border);
 }
+.folder-picker__accounts-head {
+  min-height: 30px;
+  padding: 0 6px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .folder-picker__accounts-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-muted);
-  padding: 0 6px 10px;
+}
+.folder-picker__accounts-scroll-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+.folder-picker__accounts-scroll-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.folder-picker__accounts-scroll-btn svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.folder-picker__accounts-scroll-btn--up svg {
+  transform: rotate(180deg);
+}
+.folder-picker__accounts-scroll-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--brand);
+}
+.folder-picker__accounts-scroll-btn:disabled {
+  opacity: 0.28;
+  cursor: default;
 }
 .folder-picker__accounts-list {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding: 6px 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.folder-picker__accounts-list.is-scrollable {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 8px,
+    #000 calc(100% - 8px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 8px,
+    #000 calc(100% - 8px),
+    transparent 100%
+  );
+}
+.folder-picker__accounts-list::-webkit-scrollbar {
+  display: none;
 }
 .folder-picker__account {
   display: flex;

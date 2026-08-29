@@ -312,12 +312,12 @@ onBeforeUnmount(() => {
   bottom: calc(100% + 6px);
   width: auto;
   min-width: 0;
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.65);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+  box-shadow: var(--shadow-pop);
   padding: 0;
   overflow: hidden;
   z-index: 130;
@@ -337,7 +337,7 @@ onBeforeUnmount(() => {
 }
 
 .acct-menu__section + .acct-menu__section {
-  border-top: 1px solid rgba(15, 23, 42, 0.06);
+  border-top: 1px solid var(--border-soft);
 }
 
 .acct-menu__item {
@@ -358,14 +358,14 @@ onBeforeUnmount(() => {
 }
 
 .acct-menu__avatar {
-  background: color-mix(in srgb, var(--brand) 12%, white);
+  background: color-mix(in srgb, var(--brand) 14%, var(--surface));
   color: var(--text);
   font-size: 14px;
   font-weight: 700;
 }
 
 .acct-menu__icon {
-  background: rgba(15, 23, 42, 0.05);
+  background: var(--surface-hover);
   color: var(--text-muted);
 }
 
@@ -438,7 +438,7 @@ onBeforeUnmount(() => {
 }
 
 .acct-menu__action:hover {
-  background: rgba(15, 23, 42, 0.04);
+  background: var(--surface-hover);
 }
 
 .acct-menu__action:hover .acct-menu__icon,
@@ -451,7 +451,7 @@ onBeforeUnmount(() => {
 }
 
 .acct-menu__about:hover {
-  background: rgba(15, 23, 42, 0.04);
+  background: var(--surface-hover);
 }
 
 .unlock-body {

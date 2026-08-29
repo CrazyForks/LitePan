@@ -1075,29 +1075,22 @@ watch(
 .folder-selector__favorite-trigger {
   width: 36px;
   height: 36px;
-  border: 1px solid color-mix(in srgb, var(--border) 82%, var(--surface));
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, white 12%), var(--surface));
-  color: color-mix(in srgb, var(--text-muted) 86%, var(--text));
+  background: var(--surface);
+  color: var(--text-muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: var(--transition);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, white 72%, transparent),
-    0 8px 18px color-mix(in srgb, var(--text) 6%, transparent);
+  box-shadow: none;
 }
 .folder-selector__favorite-trigger:hover:not(:disabled),
 .folder-selector__favorite-trigger.active {
-  border-color: color-mix(in srgb, var(--brand) 24%, var(--border));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--brand) 10%, white), color-mix(in srgb, var(--brand) 7%, var(--surface)));
-  color: color-mix(in srgb, var(--brand) 72%, var(--text));
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, white 72%, transparent),
-    0 10px 24px color-mix(in srgb, var(--brand) 16%, transparent);
+  border-color: color-mix(in srgb, var(--brand) 42%, var(--border));
+  background: color-mix(in srgb, var(--brand) 10%, var(--surface));
+  color: var(--brand);
 }
 .folder-selector__favorite-trigger:disabled {
   opacity: 0.55;

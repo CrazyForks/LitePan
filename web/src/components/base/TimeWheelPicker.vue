@@ -252,7 +252,7 @@ onBeforeUnmount(() => {
 watch(() => props.visible, (v) => {
   if (v) {
     const isDark = document?.documentElement?.dataset?.theme === 'dark'
-    activeColor.value = isDark ? '#e5edf8' : '#3b82f6'
+    activeColor.value = isDark ? '#60a5fa' : '#3b82f6'
     inactiveColor.value = isDark ? 'rgba(148, 163, 184, 0.78)' : '#9aa6b6'
     window.addEventListener('keydown', onKeydown, true)
     if (props.dailyOnly || (props.allowDaily && props.mode === 'daily')) {
@@ -353,7 +353,8 @@ function confirm() {
 }
 
 .twp-modal {
-  background: #fff;
+  background: var(--surface);
+  color: var(--text);
   border-radius: 18px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
   width: 420px;
@@ -379,10 +380,10 @@ function confirm() {
 
 .twp-all-day-btn {
   padding: 7px 24px;
-  border: 1.5px solid #dde3ed;
+  border: 1.5px solid var(--border);
   border-radius: 20px;
-  background: #fff;
-  color: #94a3b8;
+  background: var(--surface);
+  color: var(--text-muted);
   font-size: 14px;
   font-weight: 600;
   font-family: inherit;
@@ -403,8 +404,8 @@ function confirm() {
 
 .twp-mode-seg {
   display: inline-flex;
-  background: #f1f5f9;
-  border: 1.5px solid #e2e8f0;
+  background: var(--surface-sunken);
+  border: 1.5px solid var(--border);
   border-radius: 22px;
   padding: 3px;
 }
@@ -414,7 +415,7 @@ function confirm() {
   border: 0;
   background: transparent;
   border-radius: 18px;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 13px;
   font-weight: 600;
   font-family: inherit;
@@ -439,7 +440,7 @@ function confirm() {
 }
 
 .twp-mode-btn:disabled:hover {
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .twp-label-single {
@@ -453,7 +454,7 @@ function confirm() {
   gap: 8px;
   height: 188px;
   justify-content: center;
-  background: #f8fafc;
+  background: var(--surface-sunken);
   border-radius: 14px;
   padding: 0 24px;
   text-align: center;
@@ -462,21 +463,21 @@ function confirm() {
 .twp-manual-title {
   font-size: 15px;
   font-weight: 700;
-  color: #475569;
+  color: var(--text);
 }
 
 .twp-manual-desc {
   font-size: 12px;
   line-height: 1.6;
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .twp-manual-lock {
   max-width: 280px;
   padding: 8px 12px;
   border-radius: 10px;
-  background: #fff4e5;
-  color: #b45309;
+  background: color-mix(in srgb, var(--warning) 14%, var(--surface));
+  color: var(--warning);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -500,7 +501,7 @@ function confirm() {
   text-align: center;
   font-size: 11px;
   font-weight: 500;
-  color: #94a3b8;
+  color: var(--text-muted);
   letter-spacing: 1px;
 }
 
@@ -508,7 +509,7 @@ function confirm() {
   position: relative;
   display: flex;
   height: 188px;
-  background: #f8fafc;
+  background: var(--surface-sunken);
   border-radius: 14px;
   overflow: hidden;
 }
@@ -618,7 +619,7 @@ function confirm() {
   left: 8px;
   right: 8px;
   height: 1px;
-  background: #dde3ed;
+  background: var(--border);
 }
 
 .twp-line-top {
@@ -636,12 +637,12 @@ function confirm() {
   z-index: 0;
   background:
     linear-gradient(to bottom,
-      rgba(248, 250, 252, 1) 0%,
-      rgba(248, 250, 252, 0.6) 30%,
+      var(--surface-sunken) 0%,
+      color-mix(in srgb, var(--surface-sunken) 60%, transparent) 30%,
       transparent 38%,
       transparent 62%,
-      rgba(248, 250, 252, 0.6) 70%,
-      rgba(248, 250, 252, 1) 100%
+      color-mix(in srgb, var(--surface-sunken) 60%, transparent) 70%,
+      var(--surface-sunken) 100%
     );
 }
 
@@ -665,12 +666,13 @@ function confirm() {
 }
 
 .twp-btn-cancel {
-  background: #f1f5f9;
-  color: #64748b;
+  background: var(--surface-sunken);
+  color: var(--text-muted);
 }
 
 .twp-btn-cancel:hover {
-  background: #e2e8f0;
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .twp-btn-confirm {
@@ -682,5 +684,13 @@ function confirm() {
 .twp-btn-confirm:hover {
   box-shadow: 0 4px 16px rgba(76, 116, 223, 0.45);
   transform: translateY(-1px);
+}
+
+:global(:root[data-theme="dark"] .twp-overlay) {
+  background: rgba(0, 0, 0, 0.62);
+}
+
+:global(:root[data-theme="dark"] .twp-modal) {
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.5);
 }
 </style>

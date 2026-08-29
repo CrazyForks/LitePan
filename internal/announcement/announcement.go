@@ -19,7 +19,7 @@ import (
 )
 
 // DefaultURL 是公告远端文件地址（维护者托管在文档站），固定写死，不提供配置入口。
-const DefaultURL = "http://www.litepan.top/announcement.json"
+const DefaultURL = "https://www.litepan.top/announcement.json"
 
 // Section 是公告正文的一个小节（对齐文档站 important-notice 的 ### 分节）。
 type Section struct {
@@ -38,8 +38,7 @@ type Announcement struct {
 	Title string `json:"dialog_title"`
 	// Banner 黄色警示区文字（JSON banner）；可空。
 	Banner string `json:"banner"`
-	// Special 特别说明区（JSON special）：排在 banner 之下、正文之上，
-	// 支持 ![alt](url) 图片（如赞赏二维码）；可空。
+	// Special 特别说明区（JSON special）：排在 banner 之下、正文之上，仅按纯文本展示；可空。
 	Special string `json:"special"`
 	// Lead 开场引导段（支持多行，前端 pre-wrap）；可空。
 	Lead string `json:"lead"`
@@ -121,6 +120,16 @@ func (s *Service) Fetch(ctx context.Context) (*Announcement, error) {
 	}
 
 	item := parse(body)
+	if item == nil {
+		s.mu.Lock()
+		s.failedAt = time.Now()
+		cached := s.cached
+		s.mu.Unlock()
+		if s.log != nil {
+			s.log.Warn("announcement content ignored", "url", s.url, "reason", "invalid json or empty content")
+		}
+		return cached, nil
+	}
 	item.FetchedAt = time.Now()
 	s.mu.Lock()
 	s.cached = item
@@ -154,24 +163,18 @@ func (s *Service) fetchBody(ctx context.Context) ([]byte, error) {
 	return body, nil
 }
 
-// parse 解析远端内容：优先 JSON（对齐文档站结构），解析失败或非 JSON 时按纯文本处理。
+// parse 只接受文档站约定的有效 JSON。格式异常、非 JSON 或没有可展示正文时返回 nil，
+// 调用方静默沿用旧缓存或返回暂无公告，避免把错误页和损坏内容展示给用户。
 func parse(raw []byte) *Announcement {
 	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return nil
+	}
 	hash := contentHash(text)
 	if a, ok := parseJSON(raw, hash); ok {
 		return &a
 	}
-	// 纯文本：首行以 # 开头时作为标题，其余行作为正文（放 Lead 展示）；否则标题固定「公告」。
-	title := "公告"
-	lead := text
-	if idx := strings.IndexByte(text, '\n'); idx >= 0 {
-		first := strings.TrimSpace(text[:idx])
-		if strings.HasPrefix(first, "#") {
-			title = strings.TrimSpace(strings.TrimPrefix(first, "#"))
-			lead = strings.TrimSpace(text[idx+1:])
-		}
-	}
-	return &Announcement{Version: hash, Title: title, Lead: lead}
+	return nil
 }
 
 type jsonAnnouncement struct {

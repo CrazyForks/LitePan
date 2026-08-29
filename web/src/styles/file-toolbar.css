@@ -686,6 +686,35 @@
 :root[data-skin="brutal"] .file-toolbar .view-mode-btn.active {
   background: var(--brutal-ink);
   color: var(--brutal-yellow);
+  box-shadow: 4px 4px 0 var(--brutal-ink);
+}
+
+/* 野兽派简约首页收藏夹：避免黑色实心星与黑色激活背景融成色块。 */
+:root[data-skin="brutal"] .file-toolbar--compact .file-toolbar__favorites-toggle {
+  border: var(--brutal-bw) solid var(--brutal-ink);
+  border-radius: 0;
+  background: #fff;
+  color: var(--brutal-ink);
+  box-shadow: 4px 4px 0 var(--brutal-ink);
+}
+
+:root[data-skin="brutal"] .file-toolbar--compact .file-toolbar__favorites-toggle:hover {
+  border-color: var(--brutal-ink);
+  background: var(--brutal-yellow);
+  color: var(--brutal-ink);
+  box-shadow: 4px 4px 0 var(--brutal-ink);
+}
+
+:root[data-skin="brutal"] .file-toolbar--compact .file-toolbar__favorites-toggle.active {
+  border-color: var(--brutal-ink);
+  background: var(--brutal-ink);
+  color: var(--brutal-yellow);
+  box-shadow: 4px 4px 0 var(--brutal-ink);
+}
+
+:root[data-skin="brutal"] .file-toolbar--compact .file-toolbar__favorites-toggle:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 var(--brutal-ink);
 }
 
 :root[data-skin="brutal"] .file-toolbar .view-icon.list::before,

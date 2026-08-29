@@ -663,3 +663,37 @@
   color: var(--brutal-ink);
   background: var(--brutal-yellow);
 }
+
+/*
+ * 组合搜索框本身已经负责绘制外框。本规则必须位于野兽主题末尾，
+ * 避免通用 input 黑边规则再次套到内层输入框上。
+ */
+:root[data-skin="brutal"] .upload-task-panel label.search-box > input,
+:root[data-skin="brutal"] label.folder-selector__search > input,
+:root[data-skin="brutal"] label.scrape-scope-picker__search > input,
+:root[data-skin="brutal"] label.archive-preview__search > input,
+:root[data-skin="brutal"] .tool-search__box > input,
+:root[data-skin="brutal"] .upload-task-panel label.search-box > input:focus,
+:root[data-skin="brutal"] label.folder-selector__search > input:focus,
+:root[data-skin="brutal"] label.scrape-scope-picker__search > input:focus,
+:root[data-skin="brutal"] label.archive-preview__search > input:focus,
+:root[data-skin="brutal"] .tool-search__box > input:focus {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* 目录选择器和工具搜索原本是软色块，野兽主题只保留一层清晰外框。 */
+:root[data-skin="brutal"] .folder-selector__search,
+:root[data-skin="brutal"] .scrape-scope-picker__search,
+:root[data-skin="brutal"] .archive-preview__search,
+:root[data-skin="brutal"] .tool-search__box {
+  border: 1px solid var(--brutal-ink);
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
+}

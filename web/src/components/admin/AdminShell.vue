@@ -380,7 +380,7 @@ onBeforeUnmount(() => {
 .sidebar__footer {
   flex-shrink: 0;
   padding: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  border-top: 1px solid var(--admin-footer-border);
 }
 
 .nav-item {
@@ -401,16 +401,16 @@ onBeforeUnmount(() => {
 }
 
 .nav-item:hover:not(.nav-item--active):not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--admin-nav-hover-bg);
   color: #fff;
 }
 
 .nav-item--active,
 .nav-item--active:hover {
-  background: #fff;
-  color: var(--brand);
+  background: var(--admin-nav-active-bg);
+  color: var(--admin-nav-active-color);
   font-weight: 600;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--admin-nav-active-shadow);
 }
 
 .nav-item--home {

@@ -99,14 +99,14 @@ func TestParseJSONSpecialSection(t *testing.T) {
   "notice_version": "2026-08-20",
   "dialog_title": "标题",
   "banner": "警示文字",
-  "special": "最近发生的事\n\n![微信赞赏码](https://www.litepan.top/images/qr.png)",
+  "special": "最近发生的事\n请查看文档站了解详情",
   "lead": "引导"
 }`)
 	a := parse(raw)
 	if a.Banner != "警示文字" {
 		t.Fatalf("banner=%q", a.Banner)
 	}
-	if !strings.Contains(a.Special, "最近发生的事") || !strings.Contains(a.Special, "![微信赞赏码]") {
+	if !strings.Contains(a.Special, "最近发生的事") || !strings.Contains(a.Special, "请查看文档站") {
 		t.Fatalf("special=%q", a.Special)
 	}
 	if a.Lead != "引导" {
@@ -133,38 +133,22 @@ func TestParseJSONBlankSectionsFiltered(t *testing.T) {
 
 func TestParsePlainText(t *testing.T) {
 	a := parse([]byte("第一行\n第二行\n第三行"))
-	if a.Title != "公告" {
-		t.Fatalf("title=%q want 公告", a.Title)
-	}
-	if a.Lead != "第一行\n第二行\n第三行" {
-		t.Fatalf("lead=%q", a.Lead)
-	}
-	if a.Version == "" {
-		t.Fatal("plain text version should fall back to content hash")
-	}
-	if len(a.Sections) != 0 {
-		t.Fatalf("plain text should have no sections: %+v", a.Sections)
+	if a != nil {
+		t.Fatalf("纯文本不应被当作公告展示: %+v", a)
 	}
 }
 
 func TestParseMarkdownHeadingTitle(t *testing.T) {
 	a := parse([]byte("# 维护公告\n正文一\n正文二"))
-	if a.Title != "维护公告" {
-		t.Fatalf("title=%q", a.Title)
-	}
-	if a.Lead != "正文一\n正文二" {
-		t.Fatalf("lead=%q", a.Lead)
+	if a != nil {
+		t.Fatalf("Markdown 不应被当作公告展示: %+v", a)
 	}
 }
 
-func TestParseInvalidJSONFallsBackToText(t *testing.T) {
-	// 以 { 开头但不是合法 JSON → 按纯文本整篇显示
+func TestParseInvalidJSONIgnored(t *testing.T) {
 	a := parse([]byte("{这不是 JSON\n但确实是文本"))
-	if a.Title != "公告" {
-		t.Fatalf("title=%q", a.Title)
-	}
-	if !strings.Contains(a.Lead, "这不是 JSON") {
-		t.Fatalf("lead=%q", a.Lead)
+	if a != nil {
+		t.Fatalf("非法 JSON 不应被展示: %+v", a)
 	}
 }
 
@@ -226,6 +210,20 @@ func TestFetchFromRemoteAndCache(t *testing.T) {
 	}
 	if hits.Load() != 1 {
 		t.Fatalf("cache should avoid re-fetch, hits=%d", hits.Load())
+	}
+}
+
+func TestFetchInvalidContentSilentlyIgnored(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"dialog_title":`))
+	}))
+	defer ts.Close()
+
+	s := New(ts.URL, nil)
+	item, err := s.Fetch(context.Background())
+	if err != nil || item != nil {
+		t.Fatalf("异常公告应静默返回暂无公告: item=%v err=%v", item, err)
 	}
 }
 

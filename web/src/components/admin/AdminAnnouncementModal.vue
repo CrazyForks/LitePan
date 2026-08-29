@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { computed } from "vue";
 import AppModal from "@/components/base/AppModal.vue";
 import type { AnnouncementItem } from "@/api/announcement";
 
@@ -15,36 +14,6 @@ const emit = defineEmits<{
 const GITHUB_URL = "https://github.com/Ponphil/LitePan";
 const SPONSOR_URL = "https://www.litepan.top/sponsor.html";
 const CHANGELOG_URL = "https://www.litepan.top/changelog.html";
-
-interface RichNode {
-  kind: "img" | "text";
-  src?: string;
-  alt?: string;
-  text?: string;
-}
-
-// 轻量解析「特别说明区」里的 Markdown 图片语法 ![alt](url)，其余按纯文本展示。
-const IMG_RE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
-
-function parseRichText(text: string): RichNode[] {
-  const nodes: RichNode[] = [];
-  let last = 0;
-  let m: RegExpExecArray | null;
-  IMG_RE.lastIndex = 0;
-  while ((m = IMG_RE.exec(text)) !== null) {
-    if (m.index > last) nodes.push({ kind: "text", text: text.slice(last, m.index) });
-    nodes.push({ kind: "img", alt: m[1] || "图片", src: m[2] });
-    last = m.index + m[0].length;
-  }
-  if (last < text.length) nodes.push({ kind: "text", text: text.slice(last) });
-  return nodes;
-}
-
-const specialNodes = computed<RichNode[]>(() =>
-  props.item?.special ? parseRichText(props.item.special) : [],
-);
-
-const hasSpecial = computed(() => specialNodes.value.length > 0);
 
 function closeAll() {
   emit("close");
@@ -66,22 +35,14 @@ function closeAll() {
         {{ item.banner }}
       </div>
 
-      <!-- 特别说明区：警示区之下、正文之上，文字保留换行，图片独立成行显示（如赞赏二维码） -->
-      <div v-if="hasSpecial" class="announcement-modal__special" role="note">
-        <template v-for="(node, i) in specialNodes" :key="i">
-          <img
-            v-if="node.kind === 'img'"
-            class="announcement-modal__special-img"
-            :src="node.src"
-            :alt="node.alt"
-          />
-          <span v-else class="announcement-modal__special-text">{{ node.text }}</span>
-        </template>
+      <!-- 特别说明区只展示纯文本，避免公告触发第三方图片请求。 -->
+      <div v-if="item.special" class="announcement-modal__special" role="note">
+        {{ item.special }}
       </div>
 
       <p v-if="item.lead" class="announcement-modal__lead">{{ item.lead }}</p>
 
-      <!-- 公告正文区：分块列表 -->
+      <!-- 公告正文区：统一内容区内的简洁列表 -->
       <div v-if="item.issues.length" class="announcement-modal__list">
         <section
           v-for="(sec, i) in item.issues"
@@ -172,10 +133,7 @@ function closeAll() {
 .announcement-modal__body {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  max-height: min(62vh, 520px);
-  overflow-y: auto;
-  padding-right: 2px;
+  gap: 12px;
 }
 
 /* 警示区：黄色警示框，纯文字 */
@@ -191,7 +149,7 @@ function closeAll() {
   word-break: break-word;
 }
 
-/* 特别说明区：中性卡片，文字保留换行；图片独立成行居中 */
+/* 特别说明区：中性纯文本卡片 */
 .announcement-modal__special {
   display: flex;
   flex-direction: column;
@@ -204,19 +162,7 @@ function closeAll() {
   font-size: 13px;
   line-height: 1.6;
   word-break: break-word;
-}
-
-.announcement-modal__special-text {
   white-space: pre-wrap;
-}
-
-.announcement-modal__special-img {
-  display: block;
-  max-width: 100%;
-  max-height: 300px;
-  margin: 0 auto;
-  border-radius: var(--radius-sm);
-  object-fit: contain;
 }
 
 .announcement-modal__lead {
@@ -229,20 +175,41 @@ function closeAll() {
 }
 
 .announcement-modal__list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.announcement-modal__section {
-  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 28px;
+  row-gap: 0;
+  padding: 10px 16px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
   background: var(--surface-sunken);
+  counter-reset: announcement-item;
+}
+
+.announcement-modal__section:only-child {
+  grid-column: 1 / -1;
+}
+
+.announcement-modal__section {
+  position: relative;
+  min-width: 0;
+  padding: 9px 0 9px 28px;
+  counter-increment: announcement-item;
+}
+
+.announcement-modal__section::before {
+  content: counter(announcement-item, decimal-leading-zero);
+  position: absolute;
+  top: 10px;
+  left: 0;
+  color: var(--brand);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
 }
 
 .announcement-modal__section-title {
-  margin: 0 0 6px;
+  margin: 0 0 3px;
   font-size: 14px;
   font-weight: 700;
   color: var(--text);
@@ -250,7 +217,7 @@ function closeAll() {
 
 .announcement-modal__section-body {
   font-size: 13px;
-  line-height: 1.65;
+  line-height: 1.55;
   color: var(--text-muted);
   white-space: pre-wrap;
   word-break: break-word;
@@ -327,6 +294,7 @@ function closeAll() {
 }
 
 @media (max-width: 560px) {
+  .announcement-modal__list,
   .announcement-modal__links {
     grid-template-columns: 1fr;
   }

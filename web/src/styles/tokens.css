@@ -68,11 +68,11 @@
   --admin-sidebar-bg: linear-gradient(180deg, var(--brand-start), var(--brand-end));
   --admin-sidebar-border: transparent;
   --admin-sidebar-shadow: none;
-  --admin-nav-hover-bg: rgba(255, 255, 255, 0.15);
+  --admin-nav-hover-bg: rgba(255, 255, 255, 0.1);
   --admin-nav-active-bg: #fff;
   --admin-nav-active-color: var(--brand);
   --admin-nav-active-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  --admin-footer-border: rgba(255, 255, 255, 0.18);
+  --admin-footer-border: rgba(255, 255, 255, 0.15);
 
   /* 叠层：dropdown < modal < popover(Modal 内 Select 等) < confirm < toast */
   --z-dropdown: 10050;
@@ -119,8 +119,8 @@
   --admin-sidebar-border: rgba(148, 163, 184, 0.14);
   --admin-sidebar-shadow: 0 18px 46px rgba(2, 6, 23, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   --admin-nav-hover-bg: rgba(255, 255, 255, 0.08);
-  --admin-nav-active-bg: rgba(59, 130, 246, 0.18);
-  --admin-nav-active-color: #dbeafe;
+  --admin-nav-active-bg: rgba(15, 23, 42, 0.3);
+  --admin-nav-active-color: #e5eefc;
   --admin-nav-active-shadow: none;
   --admin-footer-border: rgba(148, 163, 184, 0.16);
 
