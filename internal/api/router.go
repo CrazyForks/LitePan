@@ -469,6 +469,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Post("/upload/tasks/{taskID}/pause", h.pauseUploadTask)
 				r.Post("/upload/tasks/{taskID}/resume", h.resumeUploadTask)
 				r.Delete("/upload/tasks/{taskID}", h.deleteUploadTask)
+				r.Post("/upload/tasks/batch-pause", h.batchPauseUploadTasks)
 				r.Post("/upload/tasks/batch-delete", h.batchDeleteUploadTasks)
 				r.Route("/offline-download", func(r chi.Router) {
 					r.Get("/capabilities", h.offlineDownloadCapabilities)

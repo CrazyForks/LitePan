@@ -36,6 +36,9 @@ export type LocalUploadPayload = {
   targetPath?: string;
   displayName?: string;
   targetDisplayPath?: string;
+  batchRootId?: string;
+  batchRootParentId?: string;
+  batchRootOwned?: boolean;
 };
 
 export type UploadRuntimeHooks = {

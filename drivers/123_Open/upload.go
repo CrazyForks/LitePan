@@ -138,10 +138,10 @@ func (d *Driver) UploadLocalFile(ctx context.Context, req driver.LocalUploadRequ
 		if preuploadID == "" {
 			return nil, domain.Errorf(domain.CodeDriverError, "上传初始化失败：响应中缺少 preuploadID")
 		}
-		if sliceSize <= 0 {
+		if fileSize > 0 && sliceSize <= 0 {
 			return nil, domain.Errorf(domain.CodeDriverError, "上传初始化失败：响应中缺少有效 sliceSize")
 		}
-		if len(servers) == 0 {
+		if fileSize > 0 && len(servers) == 0 {
 			return nil, domain.Errorf(domain.CodeDriverError, "上传初始化失败：响应中缺少上传域名")
 		}
 		resume = &pan123ResumeCtx{
@@ -264,6 +264,10 @@ func (d *Driver) uploadFileSlices(
 	resume *pan123ResumeCtx,
 	onState driver.UploadStateCallback,
 ) error {
+	// 123 Open 的空文件只需 create + complete，不应伪造一个 0 字节分片。
+	if fileSize == 0 {
+		return nil
+	}
 	totalSlices := int((fileSize + sliceSize - 1) / sliceSize)
 	if totalSlices <= 0 {
 		totalSlices = 1

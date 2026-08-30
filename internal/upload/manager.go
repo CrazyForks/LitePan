@@ -48,24 +48,26 @@ type Manager struct {
 	log         *slog.Logger
 	startupGate <-chan struct{}
 
-	mu                     sync.Mutex
-	tasks                  map[string]*taskState
-	queueOrder             int
-	limit                  int
-	runningUploads         int
-	runningDownloads       int
-	runCond                sync.Cond
-	subs                   map[chan []byte]struct{}
-	broadcastPending       bool
-	broadcastDirty         bool
-	subMu                  sync.Mutex
-	clientTaskIndex        map[string]string
-	tempRegistry           *TempRegistry
-	targetDirCache         *uploadTargetDirCache
-	completedOfflineGroups map[string]struct{}
-	runCtx                 context.Context
-	runCancel              context.CancelFunc
-	stopping               bool
+	mu                      sync.Mutex
+	tasks                   map[string]*taskState
+	queueOrder              int
+	limit                   int
+	runningUploads          int
+	runningDownloads        int
+	runCond                 sync.Cond
+	subs                    map[chan []byte]struct{}
+	broadcastPending        bool
+	broadcastAllDirty       bool
+	broadcastDirtyTaskIDs   map[string]struct{}
+	broadcastDeletedTaskIDs map[string]struct{}
+	subMu                   sync.Mutex
+	clientTaskIndex         map[string]string
+	tempRegistry            *TempRegistry
+	targetDirCache          *uploadTargetDirCache
+	completedOfflineGroups  map[string]struct{}
+	runCtx                  context.Context
+	runCancel               context.CancelFunc
+	stopping                bool
 
 	resumePersistMu sync.Mutex
 	resumePersist   map[string]*time.Timer
@@ -74,24 +76,26 @@ type Manager struct {
 func NewManager(opts Options) *Manager {
 	runCtx, runCancel := context.WithCancel(context.Background())
 	m := &Manager{
-		exec:                   opts.Exec,
-		files:                  opts.Files,
-		playback:               opts.Playback,
-		accounts:               opts.Accounts,
-		repo:                   opts.Repo,
-		settings:               opts.Settings,
-		bus:                    opts.Bus,
-		dataDir:                opts.DataDir,
-		log:                    opts.Log,
-		startupGate:            opts.StartupGate,
-		tasks:                  make(map[string]*taskState),
-		limit:                  defaultLimit,
-		subs:                   make(map[chan []byte]struct{}),
-		clientTaskIndex:        make(map[string]string),
-		targetDirCache:         newUploadTargetDirCache(),
-		completedOfflineGroups: make(map[string]struct{}),
-		runCtx:                 runCtx,
-		runCancel:              runCancel,
+		exec:                    opts.Exec,
+		files:                   opts.Files,
+		playback:                opts.Playback,
+		accounts:                opts.Accounts,
+		repo:                    opts.Repo,
+		settings:                opts.Settings,
+		bus:                     opts.Bus,
+		dataDir:                 opts.DataDir,
+		log:                     opts.Log,
+		startupGate:             opts.StartupGate,
+		tasks:                   make(map[string]*taskState),
+		limit:                   defaultLimit,
+		subs:                    make(map[chan []byte]struct{}),
+		clientTaskIndex:         make(map[string]string),
+		broadcastDirtyTaskIDs:   make(map[string]struct{}),
+		broadcastDeletedTaskIDs: make(map[string]struct{}),
+		targetDirCache:          newUploadTargetDirCache(),
+		completedOfflineGroups:  make(map[string]struct{}),
+		runCtx:                  runCtx,
+		runCancel:               runCancel,
 	}
 	m.runCond.L = &m.mu
 	if m.log == nil {
@@ -191,7 +195,11 @@ func (m *Manager) createBatch(ctx context.Context, params []CreateParams) ([]*Ta
 		persisted = append(persisted, st.TaskID)
 	}
 	if len(created) > 0 {
-		m.broadcast()
+		ids := make([]string, 0, len(created))
+		for _, st := range created {
+			ids = append(ids, st.TaskID)
+		}
+		m.broadcast(ids...)
 	}
 	for _, st := range created {
 		go m.runTask(st.TaskID)
@@ -332,10 +340,20 @@ func (m *Manager) newTaskStateLocked(p CreateParams) *taskState {
 	case SourceTypeOfflineHandoff:
 		message = "等待离线文件上传"
 	}
+	var initialResult map[string]any
+	if strings.TrimSpace(p.BatchRootID) != "" {
+		initialResult = map[string]any{
+			"batch_root_id":        strings.TrimSpace(p.BatchRootID),
+			"batch_root_parent_id": strings.TrimSpace(p.BatchRootParentID),
+			"batch_root_owned":     p.BatchRootOwned,
+		}
+	}
 	st := &taskState{
 		Task: Task{
 			TaskID:            id,
 			ClientTaskID:      p.ClientTaskID,
+			BatchID:           strings.TrimSpace(p.BatchID),
+			BatchName:         strings.TrimSpace(p.BatchName),
 			AccountID:         p.AccountID,
 			AccountName:       p.AccountName,
 			DriverType:        p.DriverType,
@@ -358,6 +376,7 @@ func (m *Manager) newTaskStateLocked(p CreateParams) *taskState {
 			QueueOrder:        order,
 			CreatedAt:         timeutil.UnixFloat(now),
 			UpdatedAt:         timeutil.UnixFloat(now),
+			Result:            initialResult,
 		},
 		localPath:      localPath,
 		conflictPolicy: p.ConflictPolicy,
@@ -411,12 +430,16 @@ func (m *Manager) CreateServerLocalTasks(ctx context.Context, params []ServerLoc
 		}
 		prepared = append(prepared, CreateParams{
 			ClientTaskID:      p.ClientTaskID,
+			BatchID:           p.BatchID,
+			BatchName:         p.BatchName,
 			AccountID:         p.AccountID,
 			AccountName:       p.AccountName,
 			DriverType:        p.DriverType,
 			FileName:          p.FileName,
 			DisplayName:       p.DisplayName,
 			SourceType:        sourceType,
+			RelPath:           p.RelPath,
+			RelDir:            p.RelDir,
 			TargetPath:        p.TargetPath,
 			TargetDisplayPath: p.TargetDisplayPath,
 			LocalPath:         p.LocalPath,

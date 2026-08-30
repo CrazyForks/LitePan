@@ -39,8 +39,10 @@ export function useUploadPanelActions(ctx: UploadActionsCtx) {
 
   function closeUploadTaskPanel() {
     store.uploadTaskPanelOpen.value = false;
-    stream.disconnectUploadTaskStream();
-    if (store.activeUploadTasks.value.length === 0) stream.stopUploadTaskPolling();
+    if (store.activeUploadTasks.value.length === 0 && store.activeRelayCount.value === 0) {
+      stream.disconnectUploadTaskStream();
+      stream.stopUploadTaskPolling();
+    }
   }
 
   async function openUploadNoticeDialog() {

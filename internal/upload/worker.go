@@ -411,11 +411,15 @@ func (m *Manager) executeUpload(ctx context.Context, taskID string) {
 		st.Message = msg
 		st.Error = ""
 		st.resumeData = nil
+		resultMeta := retainBatchRootMetadata(st.Result)
 		st.Result = map[string]any{
 			"file_id":   result.FileID,
 			"parent_id": result.ParentID,
 			"file_name": result.FileName,
 			"size":      result.Size,
+		}
+		for key, value := range resultMeta {
+			st.Result[key] = value
 		}
 	})
 	if m.files == nil && m.bus != nil {
@@ -474,7 +478,7 @@ func (m *Manager) updateDownloadProgress(taskID string, downloaded, total int64,
 	if snap != nil {
 		_ = m.persistTask(snap)
 	}
-	m.broadcast()
+	m.broadcast(taskID)
 }
 
 func (m *Manager) finishCrossTransferDownloadError(ctx context.Context, taskID, errMsg string) {
