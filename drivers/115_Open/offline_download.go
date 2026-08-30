@@ -90,7 +90,7 @@ func (d *Driver) OfflineDownloadCapabilities() driver.OfflineDownloadCapabilitie
 		SupportsURLs:      true,
 		SupportsBatchURLs: true,
 		SupportsTorrent:   true,
-		URLSchemes:        []string{"http", "https", "ftp", "magnet"},
+		URLSchemes:        []string{"http", "https", "ftp", "magnet", "ed2k"},
 		RootTargetAllowed: true,
 		RemoteDelete:      true,
 	}

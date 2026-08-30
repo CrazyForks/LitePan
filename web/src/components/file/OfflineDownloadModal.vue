@@ -57,6 +57,9 @@ const supportedSchemes = computed(() =>
     ? ((props.capability?.builtin_url_schemes?.length ? props.capability.builtin_url_schemes : ["http", "https"]) ?? ["http", "https"])
     : (props.capability?.url_schemes ?? []),
 );
+const supportedSchemeText = computed(() =>
+  supportedSchemes.value.map((item) => String(item).trim().toUpperCase()).filter(Boolean).join(" / "),
+);
 const urlLines = computed(() =>
   urlText.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
 );
@@ -286,7 +289,7 @@ async function submit() {
               </button>
             </div>
             <small v-if="sourceMode === 'url'">
-              支持 {{ supportedSchemes.map((item) => item.toUpperCase()).join(" / ") }}
+              支持 {{ supportedSchemeText }}
               <template v-if="supportsBatchUrls">，当前 {{ urlLines.length }} 条</template>
               <template v-if="providerKind === 'builtin'">，下载完成后自动转入上传</template>
             </small>

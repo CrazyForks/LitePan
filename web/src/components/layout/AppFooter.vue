@@ -212,6 +212,12 @@ const badges = [
   color: var(--text-muted);
   margin: 0 2px;
 }
+.footer-status-btn__ok {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: block;
+}
 .footer-status-btn--tasks.active {
   color: var(--brand);
 }
