@@ -32,18 +32,20 @@ func (s *Service) ApplyBindingToPlan(ctx context.Context, taskID, groupUID, tmdb
 	}
 	settingsDict := SettingsDict(s.settings)
 
-	indexes, mediaKind := collectBindingActionIndexes(plan, groupUID)
-	if len(indexes) == 0 {
+	_, actionMediaKind := collectBindingActionIndexes(plan, groupUID)
+	group := bindingFindManualMatchGroup(plan, groupUID, actionMediaKind)
+	if strings.TrimSpace(group.GroupUID) == "" {
 		return nil, domain.Errorf(domain.CodeValidation, "当前计划中未找到该作品组")
+	}
+	mediaKind := strings.ToLower(strings.TrimSpace(group.MediaKind))
+	if mediaKind == "" {
+		mediaKind = strings.ToLower(strings.TrimSpace(actionMediaKind))
 	}
 	selectedMediaKind = strings.ToLower(strings.TrimSpace(selectedMediaKind))
 	if selectedMediaKind == "movie" || selectedMediaKind == "tv" {
 		mediaKind = selectedMediaKind
 	}
-	group := bindingFindManualMatchGroup(plan, groupUID, mediaKind)
-	if strings.TrimSpace(group.GroupUID) == "" {
-		return nil, domain.Errorf(domain.CodeValidation, "当前计划中未找到该作品组")
-	}
+	group.MediaKind = mediaKind
 
 	results, err := s.SearchTMDB(ctx, tmdbID, nil, "", mediaKind)
 	if err != nil || len(results) == 0 {
@@ -205,8 +207,13 @@ func bindingReplacePlanGroup(plan *Plan, groupUID string, rebuilt *Plan) *Plan {
 	}
 
 	normalized := bindingNormalizeImportedPlan(rebuilt, bindingNextActionSeq(keptActions))
+	affectedSourceIDs := make(map[string]struct{}, len(removedSourceIDs))
+	for sourceID := range removedSourceIDs {
+		affectedSourceIDs[sourceID] = struct{}{}
+	}
+	bindingCollectPlanSourceIDs(normalized, affectedSourceIDs)
 	plan.Actions = append(keptActions, normalized.Actions...)
-	plan.Skipped = bindingMergeSkipped(plan.Skipped, normalized.Skipped, removedSourceIDs)
+	plan.Skipped = bindingMergeSkipped(plan.Skipped, normalized.Skipped, affectedSourceIDs)
 	if plan.Diagnostics == nil {
 		plan.Diagnostics = map[string]any{}
 	}
@@ -223,10 +230,29 @@ func bindingReplacePlanGroup(plan *Plan, groupUID string, rebuilt *Plan) *Plan {
 	plan.Diagnostics["meta_followers"] = bindingMergeMetaFollowers(
 		plan.Diagnostics["meta_followers"],
 		normalized.Diagnostics["meta_followers"],
-		removedSourceIDs,
+		affectedSourceIDs,
 		removedActionIDs,
 	)
 	return plan
+}
+
+// bindingCollectPlanSourceIDs 收集局部重建实际涉及的源文件。
+// 待手动匹配的作品可能还没有旧动作，此时仍需用新计划的文件 ID
+// 清掉旧的“无法识别”等跳过记录。
+func bindingCollectPlanSourceIDs(plan *Plan, out map[string]struct{}) {
+	if plan == nil || out == nil {
+		return
+	}
+	for i := range plan.Actions {
+		if sourceID := strings.TrimSpace(plan.Actions[i].SourceID); sourceID != "" {
+			out[sourceID] = struct{}{}
+		}
+	}
+	for _, entry := range plan.Skipped {
+		if sourceID := strings.TrimSpace(fmt.Sprint(entry["file_id"])); sourceID != "" {
+			out[sourceID] = struct{}{}
+		}
+	}
 }
 
 func collectBindingActionIndexes(plan *Plan, groupUID string) ([]int, string) {

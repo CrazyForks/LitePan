@@ -275,7 +275,7 @@ func TestApplyMetadataFollowersOnRenameMerge(t *testing.T) {
 			TargetName:     "千与千寻 (2001) [1080p H.264 PCM 2.0].mkv",
 			Metadata: map[string]any{
 				"_resolved_target_parent_id": "d1",
-				"mode":                     "rename",
+				"mode":                       "rename",
 			},
 		}},
 		Diagnostics: map[string]any{
@@ -406,6 +406,110 @@ func (m *simulatedFS) DeleteFiles(_ context.Context, _ int64, fileIDs []string, 
 
 func (m *simulatedFS) Info(_ context.Context, _ int64, fileID string) (*domain.FileItem, error) {
 	return nil, nil
+}
+
+func TestManualTMDBMatchReplansAndAppliesUnmatchedWork(t *testing.T) {
+	fs := &simulatedFS{dirs: map[string][]domain.FileItem{
+		"root": {
+			{ID: "target", Name: "整理目标", IsDir: true},
+			{ID: "work", Name: "未识别作品 (2026)", IsDir: true},
+		},
+		"target": {},
+		"work": {
+			{ID: "video1", Name: "未识别作品.2026.1080p.mkv"},
+		},
+	}}
+	cfg := planner.TaskConfig{
+		TargetDirectoryID: "root",
+		TargetRootID:      "target",
+		ActionType:        "move",
+		MediaType:         "auto",
+		RenameMarker:      "tmdb",
+		UseTMDB:           true,
+		Recursive:         true,
+	}
+	settings := planner.Settings{"mo_tmdb_api_key": "test-key"}
+	missingTMDB := &plannerMockTMDB{searchFn: func(string, *int) []map[string]any {
+		return nil
+	}}
+	initialPlanner := planner.New(
+		context.Background(), fs, 1, cfg, settings, "task-manual-match",
+		missingTMDB, func(string) {}, nil, func() error { return nil },
+	)
+	initialPlan, err := initialPlanner.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	needsMatch, _ := initialPlan.Diagnostics["needs_match"].([]map[string]any)
+	if len(needsMatch) != 1 {
+		t.Fatalf("初始计划应有 1 个待手动匹配作品: %+v", initialPlan.Diagnostics["needs_match"])
+	}
+	for _, action := range initialPlan.Actions {
+		if tmdbID, ok := action.Metadata["tmdb_id"]; ok && strings.TrimSpace(fmt.Sprint(tmdbID)) != "" {
+			t.Fatalf("模拟未匹配计划不应包含 TMDB ID: %+v", action)
+		}
+	}
+
+	entry := needsMatch[0]
+	matchedPlanner := planner.New(
+		context.Background(), fs, 1, cfg, settings, "task-manual-match",
+		nil, func(string) {}, nil, func() error { return nil },
+	)
+	matchedPlan, err := matchedPlanner.ReplanMatchedGroup(planner.ManualMatchGroup{
+		GroupUID:  fmt.Sprint(entry["group_uid"]),
+		MediaKind: "movie",
+		DirID:     fmt.Sprint(entry["dir_id"]),
+		DirName:   fmt.Sprint(entry["dir_name"]),
+		Title:     fmt.Sprint(entry["title"]),
+	}, map[string]any{
+		"id":             999001,
+		"title":          "模拟电影",
+		"original_title": "Mock Movie",
+		"release_date":   "2026-01-02",
+		"media_type":     "movie",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var fileAction *moplan.PlanAction
+	for i := range matchedPlan.Actions {
+		action := &matchedPlan.Actions[i]
+		if action.SourceID == "video1" {
+			fileAction = action
+			break
+		}
+	}
+	if fileAction == nil || fmt.Sprint(fileAction.Metadata["tmdb_id"]) != "999001" {
+		t.Fatalf("手动匹配后未生成带 TMDB ID 的文件动作: %+v", matchedPlan.Actions)
+	}
+	if !strings.Contains(fileAction.TargetName, "模拟电影 - Mock Movie (2026)") {
+		t.Fatalf("手动匹配后文件名不正确: %q", fileAction.TargetName)
+	}
+
+	ex := executor.New(context.Background(), fs, matchedPlan, 1, false, func(msg string) { t.Log(msg) }, nil)
+	result, err := ex.Apply()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats, _ := result["stats"].(map[string]any)
+	if fmt.Sprint(stats["failed"]) != "0" {
+		t.Fatalf("执行手动匹配计划失败: %+v", result)
+	}
+	newWorkDirID := "target/模拟电影 (2026) {tmdb-999001}"
+	if len(fs.dirs[newWorkDirID]) != 1 || !strings.Contains(fs.dirs[newWorkDirID][0].Name, "模拟电影 - Mock Movie (2026)") {
+		t.Fatalf("执行后媒体文件未正确移动和改名: %+v", fs.dirs[newWorkDirID])
+	}
+	foundWorkDir := false
+	for _, item := range fs.dirs["target"] {
+		if item.ID == newWorkDirID && item.Name == "模拟电影 (2026) {tmdb-999001}" {
+			foundWorkDir = true
+			break
+		}
+	}
+	if !foundWorkDir {
+		t.Fatalf("执行后作品目录未正确移动和改名: target=%+v root=%+v", fs.dirs["target"], fs.dirs["root"])
+	}
 }
 
 func TestApplyDeletesEmptyCategoryDirsAfterMove(t *testing.T) {
