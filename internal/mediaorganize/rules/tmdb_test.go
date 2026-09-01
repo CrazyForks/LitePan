@@ -121,13 +121,48 @@ func TestPickUniqueTMDBAdjacentYearMatch(t *testing.T) {
 	}
 }
 
-func TestPickTMDBSearchMatchAcceptsSingleLowRiskCandidate(t *testing.T) {
+func TestPickTMDBSearchMatchRejectsUnrelatedSingleCandidateWithoutYear(t *testing.T) {
 	results := RawJSONListToMaps([]json.RawMessage{
 		json.RawMessage(`{"id":220999,"name":"Chronicles of an Aristocrat Reborn in Another World","original_name":"転生貴族の異世界冒険録","first_air_date":"2023-04-03"}`),
 	})
-	selected := PickTMDBSearchMatchForYear(results, nil, "tv", "转生贵族的异世界冒险录")
-	if id, _, _, _ := ExtractTMDBDisplayFields(selected, "tv"); id != "220999" {
-		t.Fatalf("唯一且低风险候选应接受，实际 tmdb id=%q", id)
+	if selected := PickTMDBSearchMatchForYear(results, nil, "tv", "转生贵族的异世界冒险录"); selected != nil {
+		t.Fatalf("无年份时不应仅凭唯一候选放宽完全不同的标题，实际=%v", selected)
+	}
+}
+
+func TestPickTMDBSearchMatchRejectsGarbledSingleCandidate(t *testing.T) {
+	results := RawJSONListToMaps([]json.RawMessage{
+		json.RawMessage(`{"id":25538,"title":"一一","release_date":"2000-01-01"}`),
+	})
+	query := "一ge丨乱am的消丶sssssss de人"
+	if selected := PickTMDBSearchMatchForYear(results, nil, "movie", query); selected != nil {
+		t.Fatalf("乱码片名与唯一候选完全不相关时应拒绝，实际=%v", selected)
+	}
+}
+
+func TestTMDBMatchRejectsSingleChineseCharacterExtractedFromGarbledTitle(t *testing.T) {
+	if IsTMDBTitleCompatible("这", "一直在这里", "Always Here") {
+		t.Fatal("单个汉字不应作为模糊片名匹配依据")
+	}
+
+	cases := []struct {
+		title       string
+		shortCore   string
+		resultTitle string
+	}{
+		{title: "一ge丨乱am的消丶sssssss de人", shortCore: "一", resultTitle: "一一"},
+		{title: "这 Bu 丨 画s添zzzzz吗", shortCore: "这", resultTitle: "一直在这里"},
+	}
+	for _, tc := range cases {
+		attempts := BuildTMDBMatchAttempts(tc.title, nil, tc.title, nil)
+		for _, attempt := range attempts {
+			if attempt.Title == tc.shortCore {
+				t.Fatalf("乱码标题 %q 不应生成单汉字 TMDB 搜索尝试，实际=%v", tc.title, attempts)
+			}
+			if IsTMDBTitleCompatible(attempt.Title, tc.resultTitle, "") {
+				t.Fatalf("乱码标题 %q 的搜索尝试 %q 不应命中 %q", tc.title, attempt.Title, tc.resultTitle)
+			}
+		}
 	}
 }
 

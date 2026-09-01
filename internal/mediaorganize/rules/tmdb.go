@@ -69,6 +69,10 @@ func IsTMDBTitleCompatible(query, resultTitle, resultOriginal string) bool {
 	}
 
 	cnQ := hanOnlyRe.ReplaceAllString(q, "")
+	if len([]rune(cnQ)) == 1 {
+		// 单个汉字信息量过低，“一”“这”等字会误命中大量无关片名。
+		return false
+	}
 	if len([]rune(cnQ)) >= 2 {
 		for _, t := range candidates {
 			cnT := hanOnlyRe.ReplaceAllString(t, "")
@@ -167,13 +171,10 @@ func PickTMDBMatchForYear(results []map[string]any, expectedYear *int, mediaType
 	return results[0]
 }
 
-// PickTMDBSearchMatchForYear 先走严格标题兼容匹配；当 TMDB 只返回唯一候选且查询词本身足够可靠时，
-// 允许降级接收该唯一候选，避免中文查询被英文/日文标题误杀。明确年份冲突仍然拒绝。
+// PickTMDBSearchMatchForYear 先走严格标题兼容匹配。只有在同时存在明确年份且年份一致时，
+// 才允许 TMDB 搜索命中的译名/别名候选放宽标题校验；不再仅凭“唯一候选”自动接受。
 func PickTMDBSearchMatchForYear(results []map[string]any, expectedYear *int, mediaType, queryTitle string) map[string]any {
 	if selected := PickTMDBMatchForYear(results, expectedYear, mediaType, queryTitle); selected != nil {
-		return selected
-	}
-	if selected := PickSingleLowRiskTMDBMatch(results, expectedYear, mediaType, queryTitle); selected != nil {
 		return selected
 	}
 	if expectedYear == nil {
@@ -186,47 +187,6 @@ func PickTMDBSearchMatchForYear(results []map[string]any, expectedYear *int, med
 		}
 	}
 	return nil
-}
-
-func PickSingleLowRiskTMDBMatch(results []map[string]any, expectedYear *int, mediaType, queryTitle string) map[string]any {
-	if len(results) != 1 {
-		return nil
-	}
-	query := strings.TrimSpace(queryTitle)
-	if !IsSingleTMDBFallbackSafeQuery(query) {
-		return nil
-	}
-	item := results[0]
-	_, _, _, resultYear := ExtractTMDBDisplayFields(item, mediaType)
-	if expectedYear != nil && (resultYear == nil || *resultYear != *expectedYear) {
-		return nil
-	}
-	return item
-}
-
-func IsSingleTMDBFallbackSafeQuery(query string) bool {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return false
-	}
-	if ScoreTitleForTMDB(query) < 0.6 {
-		return false
-	}
-	if pureChineseTitleRe.MatchString(query) {
-		return len([]rune(query)) >= 5
-	}
-	queryKey := strongTMDBTitleKey(query)
-	if len([]rune(queryKey)) < 8 {
-		return false
-	}
-	if enWords := enWordRe.FindAllString(strings.ToLower(query), -1); len(enWords) > 0 {
-		totalLen := 0
-		for _, word := range enWords {
-			totalLen += len(word)
-		}
-		return totalLen >= 8
-	}
-	return true
 }
 
 // PickUniqueTMDBAdjacentYearMatch 仅接受唯一、片名强相等且相差一年的候选，不使用别名放宽。
@@ -356,7 +316,7 @@ func BuildTMDBMatchAttempts(groupTitle string, groupYear *int, dirName string, f
 	snapshot := append([]TMDBMatchAttempt(nil), attempts...)
 	for _, item := range snapshot {
 		cnCore := ExtractChineseTitleCore(item.Title)
-		if cnCore != "" && cnCore != item.Title {
+		if len([]rune(cnCore)) >= 2 && cnCore != item.Title {
 			if hasNumericSuffixAfterChineseCore(item.Title, cnCore) {
 				continue
 			}
