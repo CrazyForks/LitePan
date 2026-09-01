@@ -96,7 +96,7 @@ func (d *Driver) Init(ctx context.Context) error {
 			return err
 		}
 	}
-	return d.Ping(ctx)
+	return nil
 }
 
 func (d *Driver) Drop(context.Context) error {
