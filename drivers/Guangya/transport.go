@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"litepan/internal/domain"
 	"litepan/internal/driver"
@@ -98,6 +99,50 @@ func (d *Driver) buildAccountHeaders() map[string]string {
 		"X-Client-Version":   "0.0.1",
 		"X-Device-Id":        deviceID,
 	}
+}
+
+func (d *Driver) accountPOST(ctx context.Context, path string, body map[string]any, out any) error {
+	if d.client == nil {
+		d.client = httpx.NewClient(httpx.ClientOptions{Timeout: 30 * time.Second})
+	}
+	req, err := httpx.NewJSONRequest(ctx, http.MethodPost, d.accountBase()+path, nil, body)
+	if err != nil {
+		return domain.Wrap(domain.CodeInternal, err)
+	}
+	httpx.SetHeaders(req, d.buildAccountHeaders())
+	resp, data, err := httpx.Execute(d.client, req, httpx.DefaultReadLimit)
+	if err != nil {
+		return domain.Wrap(domain.CodeDriverError, err)
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return domain.Errorf(domain.CodeRateLimited, "光鸭认证请求过于频繁，请稍后重试")
+	}
+	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return domain.Errorf(domain.CodeAuthExpired, "%s", accountErrorMessage(data))
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return domain.Errorf(domain.CodeDriverError, "光鸭认证 HTTP %d: %s", resp.StatusCode, accountErrorMessage(data))
+	}
+	if out != nil {
+		if err := json.Unmarshal(data, out); err != nil {
+			return domain.Wrap(domain.CodeDriverError, err)
+		}
+	}
+	return nil
+}
+
+func accountErrorMessage(data []byte) string {
+	var payload struct {
+		Error            string `json:"error"`
+		ErrorDescription string `json:"error_description"`
+		Message          string `json:"message"`
+	}
+	if json.Unmarshal(data, &payload) == nil {
+		if msg := strutil.FirstNonEmpty(payload.ErrorDescription, payload.Error, payload.Message); msg != "" {
+			return httpx.Truncate([]byte(msg), 300)
+		}
+	}
+	return httpx.Truncate(data, 300)
 }
 
 func (d *Driver) waitOperationDelay(ctx context.Context) error {

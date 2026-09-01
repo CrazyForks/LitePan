@@ -30,6 +30,7 @@ type QRStartResult struct {
 type QRPollResult struct {
 	Status      QRStatus
 	Credentials domain.AuthCredentials
+	Fields      map[string]string // 需要一并回填到账号配置的驱动字段
 	Message     string
 }
 

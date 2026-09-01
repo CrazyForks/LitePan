@@ -1,4 +1,4 @@
-// Package guangya 接入光鸭云盘（逆向 API + 短信登录换 Token）。
+// Package guangya 接入光鸭云盘（逆向 API + 扫码登录换 Token）。
 package guangya
 
 import (
@@ -19,8 +19,6 @@ type Driver struct {
 	add    Addition
 	client *http.Client
 
-	oauthBase string
-
 	intervalGate driver.RequestIntervalGate
 	persist      driver.AuthPersistFunc
 
@@ -34,14 +32,13 @@ var config = driver.Config{
 	Name:                   "guangya",
 	DisplayName:            "光鸭云盘",
 	Description:            "光鸭云盘接入",
-	CardTags:               []string{"短信登录", "支持302", "支持秒传"},
+	CardTags:               []string{"扫码登录", "支持302", "支持秒传"},
 	SortOrder:              7,
-	AuthLabel:              "短信登录",
+	AuthLabel:              "扫码登录",
 	CardColor:              "#FF7A1A",
 	CardLogo:               "/logos/guangya.png",
 	DefaultRoot:            "",
 	AuthType:               driver.AuthToken,
-	OAuthName:              "光鸭云盘",
 	TokenLifetime:          7200 * time.Second,
 	RefreshAdvance:         15 * time.Minute,
 	ProvideHashes:          []string{"md5"},
@@ -57,8 +54,6 @@ func init() { driver.Register(New) }
 func (d *Driver) Config() driver.Config { return config }
 
 func (d *Driver) GetAddition() any { return &d.add }
-
-func (d *Driver) SetOAuthServer(baseURL string) { d.oauthBase = strings.TrimSpace(baseURL) }
 
 func (d *Driver) SetAuthCredentials(creds domain.AuthCredentials) {
 	d.mu.Lock()
@@ -159,11 +154,11 @@ func (d *Driver) ExplainConnectionError(technical string, saving bool) string {
 	lower := strings.ToLower(technical)
 	switch {
 	case strings.Contains(technical, "refresh_token") && strings.Contains(technical, "不能都为空"):
-		return prefix + "：请填写 refresh_token，或点击「自动获取 Token」完成短信登录"
+		return prefix + "：请填写 refresh_token，或点击「扫码获取授权」"
 	case strings.Contains(lower, "auth_expired") ||
 		strings.Contains(technical, "认证失败") ||
 		strings.Contains(lower, "oauth 代理刷新失败"):
-		return prefix + "：光鸭 Token 无效或已过期，请重新点击「自动获取 Token」"
+		return prefix + "：光鸭 Token 无效或已过期，请重新扫码登录"
 	case strings.Contains(technical, "光鸭 HTTP") || strings.Contains(technical, "光鸭 API"):
 		return prefix + "：" + technical
 	default:
@@ -321,7 +316,7 @@ var (
 	_ driver.OfflineTaskRefresher     = (*Driver)(nil)
 	_ driver.OfflineTaskDeleter       = (*Driver)(nil)
 	_ driver.AuthRefresher            = (*Driver)(nil)
-	_ driver.OAuthConsumer            = (*Driver)(nil)
+	_ driver.QRLoginProvider          = (*Driver)(nil)
 	_ driver.AuthCredentialConsumer   = (*Driver)(nil)
 	_ driver.AuthPersistConsumer      = (*Driver)(nil)
 	_ driver.ConnectionErrorExplainer = (*Driver)(nil)

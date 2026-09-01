@@ -30,11 +30,12 @@ type qrPollReq struct {
 }
 
 type qrPollResp struct {
-	Status       string `json:"status"`
-	Cookie       string `json:"cookie,omitempty"`
-	AccessToken  string `json:"access_token,omitempty"`
-	RefreshToken string `json:"refresh_token,omitempty"`
-	Message      string `json:"message,omitempty"`
+	Status       string            `json:"status"`
+	Cookie       string            `json:"cookie,omitempty"`
+	AccessToken  string            `json:"access_token,omitempty"`
+	RefreshToken string            `json:"refresh_token,omitempty"`
+	Fields       map[string]string `json:"fields,omitempty"`
+	Message      string            `json:"message,omitempty"`
 }
 
 func (h *Handler) qrEphemeralConfig() driver.EphemeralConfig {
@@ -120,6 +121,7 @@ func (h *Handler) pollQRLogin(w http.ResponseWriter, r *http.Request) {
 		Cookie:       res.Credentials.Cookie,
 		AccessToken:  res.Credentials.AccessToken,
 		RefreshToken: res.Credentials.RefreshToken,
+		Fields:       res.Fields,
 		Message:      res.Message,
 	})
 }

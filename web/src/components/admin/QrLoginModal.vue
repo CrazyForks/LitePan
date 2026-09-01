@@ -149,11 +149,19 @@ async function poll() {
       throw new Error(res.message || "轮询失败");
     }
     errorStreak = 0;
-    const { status, cookie, access_token: accessToken, refresh_token: refreshToken, message: msg } = res.data;
+    const {
+      status,
+      cookie,
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      fields,
+      message: msg,
+    } = res.data;
     const credentials: Record<string, string> = {};
     if (cookie) credentials.cookie = cookie;
     if (accessToken) credentials.access_token = accessToken;
     if (refreshToken) credentials.refresh_token = refreshToken;
+    if (fields) Object.assign(credentials, fields);
     if (status === "success" && Object.keys(credentials).length > 0) {
       phase.value = "success";
       clearPoll();

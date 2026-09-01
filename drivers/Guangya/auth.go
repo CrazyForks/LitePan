@@ -6,10 +6,7 @@ import (
 
 	"litepan/internal/domain"
 	"litepan/internal/driver"
-	"litepan/internal/httpx"
 )
-
-const oauthRefreshPath = "/api/oauth/refresh"
 
 func (d *Driver) RefreshAuth(ctx context.Context, _ driver.RefreshCaller) (driver.RefreshOutcome, error) {
 	_, err := d.doRefresh(ctx)
@@ -25,13 +22,6 @@ func (d *Driver) currentToken() string {
 	return d.token
 }
 
-func (d *Driver) oauthServer() string {
-	if s := strings.TrimSpace(d.oauthBase); s != "" {
-		return strings.TrimRight(s, "/")
-	}
-	return domain.DefaultOAuthServerURL
-}
-
 func (d *Driver) doRefresh(ctx context.Context) (string, error) {
 	d.mu.Lock()
 	refresh := strings.TrimSpace(d.refresh)
@@ -40,33 +30,25 @@ func (d *Driver) doRefresh(ctx context.Context) (string, error) {
 		return "", domain.Errorf(domain.CodeAuthExpired, "缺少 refresh_token，无法刷新访问令牌")
 	}
 
-	body := map[string]string{
-		"driver_type":   config.OAuthName,
+	var result struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := d.accountPOST(ctx, "/v1/auth/token", map[string]any{
+		"client_id":     d.clientID(),
+		"grant_type":    "refresh_token",
 		"refresh_token": refresh,
-	}
-	var env struct {
-		Success bool   `json:"success"`
-		Message string `json:"message"`
-		Data    struct {
-			AccessToken  string `json:"access_token"`
-			RefreshToken string `json:"refresh_token"`
-		} `json:"data"`
-	}
-	if err := httpx.PostOAuthProxyJSON(ctx, d.client, d.oauthServer()+oauthRefreshPath, body, &env); err != nil {
+	}, &result); err != nil {
 		return "", err
 	}
-	if !env.Success || env.Data.AccessToken == "" {
-		msg := env.Message
-		if msg == "" {
-			msg = "刷新访问令牌失败"
-		}
-		return "", domain.Errorf(domain.CodeAuthExpired, "%s", msg)
+	if strings.TrimSpace(result.AccessToken) == "" {
+		return "", domain.Errorf(domain.CodeAuthExpired, "光鸭刷新访问令牌失败")
 	}
 
 	d.mu.Lock()
-	d.token = env.Data.AccessToken
-	if env.Data.RefreshToken != "" {
-		d.refresh = env.Data.RefreshToken
+	d.token = strings.TrimSpace(result.AccessToken)
+	if strings.TrimSpace(result.RefreshToken) != "" {
+		d.refresh = strings.TrimSpace(result.RefreshToken)
 	}
 	token := d.token
 	refreshTok := d.refresh

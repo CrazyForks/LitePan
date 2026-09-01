@@ -16,6 +16,7 @@ export interface QrPollResult {
   cookie?: string;
   access_token?: string;
   refresh_token?: string;
+  fields?: Record<string, string>;
   message?: string;
 }
 
