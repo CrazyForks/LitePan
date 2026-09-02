@@ -332,7 +332,6 @@ func TestReplaceUsesDefaultInstanceAtRuntime(t *testing.T) {
 	if rt.BaseURL != "https://api.openai.com/v1" || rt.APIKey != "key-b" || rt.Model != "gpt-4o" {
 		t.Fatalf("运行时未使用默认项: %+v", rt)
 	}
-	// 切换默认项到 DeepSeek
 	st, err = svc.Replace(context.Background(), true, []UpdateRequest{
 		{ID: st.Items[0].ID, Name: "DeepSeek", BaseURL: "https://api.deepseek.com", APIKey: "key-a", Model: "deepseek-chat", Default: true},
 		{ID: st.Items[1].ID, Name: "OpenAI", BaseURL: "https://api.openai.com/v1", APIKey: "key-b", Model: "gpt-4o", Default: false},

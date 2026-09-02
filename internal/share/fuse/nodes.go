@@ -276,7 +276,7 @@ func (d *cloudDir) renameStaging(ctx context.Context, st *stagingFile, targetDir
 	return 0
 }
 
-// renameRemote 对网盘上已存在的文件/目录执行移动与改名（原 Rename 逻辑）。
+// renameRemote 对网盘上已存在的文件或目录执行移动与改名。
 func (d *cloudDir) renameRemote(ctx context.Context, item domain.FileItem, targetDir *cloudDir, newName string) syscall.Errno {
 	if targetDir.item.ID == d.item.ID && item.Name == newName {
 		return 0

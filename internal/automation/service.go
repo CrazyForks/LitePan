@@ -110,7 +110,7 @@ type WebhookEvent struct {
 	Event  string `json:"event"`
 	Source string `json:"source"`
 	Path   string `json:"path"`
-	// CloudSaver 的 webhook 请求会携带 delayTime,必须接受该字段以保证触发兼容,当前不参与执行逻辑
+	// 兼容外部 webhook 携带的延迟字段，当前不参与执行逻辑。
 	DelayTime int `json:"delayTime,omitempty"`
 }
 

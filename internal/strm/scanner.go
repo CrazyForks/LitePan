@@ -506,7 +506,7 @@ func looksLikeNotFound(err error) bool {
 	if ae, ok := domain.AsAppError(err); ok && ae.Code == domain.CodeNotFound {
 		return true
 	}
-	// 仅对 OpenList 的「object not found」做文案兜底，避免误伤 token/path 等其他 not found。
+	// 兼容未返回结构化错误码的对象不存在响应。
 	return strings.Contains(strings.ToLower(err.Error()), "object not found")
 }
 

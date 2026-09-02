@@ -32,7 +32,6 @@ const device = ref("");
 
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
-let errorStreak = 0;
 
 const showDevicePicker = computed(() => props.deviceOptions.length > 0);
 
@@ -115,7 +114,6 @@ async function start() {
   expiresIn.value = 0;
   panelTitle.value = "扫码登录";
   hintText.value = "请使用对应网盘 App扫码，成功后授权信息将填入表单";
-  errorStreak = 0;
   try {
     const res = await qrStart(props.driverType, buildStartConfig());
     if (!res.success || !res.data?.token || !res.data.qr_image_base64) {
@@ -145,10 +143,10 @@ async function poll() {
   if (!token.value) return;
   try {
     const res = await qrPoll(props.driverType, token.value);
+    if (!props.open || !token.value) return;
     if (!res.success || !res.data?.status) {
       throw new Error(res.message || "轮询失败");
     }
-    errorStreak = 0;
     const {
       status,
       cookie,
@@ -186,14 +184,15 @@ async function poll() {
     }
     scheduleNextPoll(2000);
   } catch {
-    errorStreak += 1;
-    if (errorStreak >= 5) {
-      phase.value = "error";
-      message.value = "网络异常，请重试";
+    if (!props.open || !token.value) return;
+    if (expiresIn.value <= 0) {
+      phase.value = "expired";
+      message.value = "二维码已过期，请重新获取";
       clearPoll();
       clearCountdown();
       return;
     }
+    // 短暂断网或上游轮询异常时继续尝试，由二维码真实有效期收口。
     scheduleNextPoll(3000);
   }
 }
@@ -201,6 +200,7 @@ async function poll() {
 function handleClose() {
   clearPoll();
   clearCountdown();
+  token.value = "";
   emit("close");
 }
 

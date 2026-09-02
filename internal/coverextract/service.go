@@ -35,9 +35,9 @@ import (
 )
 
 const (
-	maxFiles       = 20
-	maxFrames      = 50
-	maxImageBytes  = int64(200 << 20)
+	maxFiles      = 20
+	maxFrames     = 50
+	maxImageBytes = int64(200 << 20)
 	// defaultReadMax 是单次提取读取量的基础上限；newSource 会按文件大小
 	// 提升为 max(256MB, 文件大小)，避免深位置取帧（MKV 无 Cues）被截断。
 	defaultReadMax = int64(256 << 20)
@@ -523,13 +523,11 @@ func (s *Service) ServeSource(w http.ResponseWriter, r *http.Request, token stri
 		cur.Read += n
 		return cur.Read <= cur.MaxRead
 	}}
-	// 海报生成固定用夸克驱动本体读取（OriginalFile→playback=false→hook 不接管）：
-	// 夸克TV 转码直链在深位置/随机取帧上不稳定（实测丢帧），驱动本体读原始文件稳定，
-	// 虽取链较慢但可靠。ForceProxy 保证 Litepan 代取（不走 302，ffmpeg 只面对本机）。
+	// 取帧固定读取原文件并由本机代理，避免转码流影响定位。
 	return s.opts.Playback.ServeHTTP(cw, r, playback.Request{AccountID: accountID, FileID: fileID}, playback.Intent{
-		FileName:     "source",
-		OriginalFile: true,
-		ForceProxy:   true,
+		FileName:       "source",
+		OriginalFile:   true,
+		ForceProxy:     true,
 		SkipRangeLimit: true,
 	})
 }
@@ -645,7 +643,6 @@ func probeDuration(parent context.Context, bin, url string) (int64, error) {
 	out, _ := exec.CommandContext(ctx, bin, "-hide_banner", "-i", url).CombinedOutput()
 	match := durationPattern.FindSubmatch(out)
 	if len(match) != 4 {
-		// 带上 FFmpeg 实际输出便于定位拉流失败原因（截断尾部）
 		detail := strings.TrimSpace(string(out))
 		if len(detail) > 800 {
 			detail = detail[len(detail)-800:]

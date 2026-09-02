@@ -189,8 +189,7 @@ func (c *Client) doOnce(ctx context.Context, method, pathname string, extra url.
 		return nil, domain.Errorf(domain.CodeDriverError, "二维码等待用户确认")
 	}
 
-	// 先处理 token 失效：夸克 TV 的 Access Token 失效响应是 HTTP 400 + errno 11001/10001，
-	// 必须放在 400 分支之前，否则刷新保护永远走不到（形同虚设）。
+	// Token 失效会和 HTTP 400 同时出现，需先尝试刷新。
 	if !retried && c.tokenInvalid(env) && c.hasRefreshToken() {
 		if err := c.refresh(ctx); err != nil {
 			return nil, err
@@ -426,7 +425,7 @@ func (c *Client) exchangeToken(ctx context.Context, deviceID, secret string, isR
 
 func tokenExpiresAt(seconds int) time.Time {
 	if seconds <= 0 {
-		// 接口异常未返回 expires_in 时的兜底：实测夸克 TV access token 有效期为 604800s（7 天）。
+		// 接口未返回有效期时按 7 天兜底。
 		seconds = 604800
 	}
 	return time.Now().Add(time.Duration(seconds) * time.Second)

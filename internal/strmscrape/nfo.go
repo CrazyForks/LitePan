@@ -45,7 +45,7 @@ type episodeNFO struct {
 	ShowTitle string   `xml:"showtitle,omitempty"`
 }
 
-// workMetaPaths 返回 Emby/Jellyfin 兼容的电影或剧集元数据路径。
+// workMetaPaths 返回电影或剧集的兼容元数据路径。
 func workMetaPaths(g workGroup, mediaType string) (nfoPath, posterPath string) {
 	if mediaType == MediaTypeTV && g.flatFile == "" {
 		return filepath.Join(g.absDir, "tvshow.nfo"), filepath.Join(g.absDir, "poster.jpg")

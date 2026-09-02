@@ -2,8 +2,6 @@ package rules
 
 import "testing"
 
-// 以下用例覆盖 2026-08-21 从 fork 吸收的解析增强（H.265 误判集号 / 季-only / 中文标签剥离 / 季信息在中间）。
-
 func TestParseNotMisjudgeVideoCodecAsEpisode(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -63,20 +61,20 @@ func TestParseSeasonOnly(t *testing.T) {
 	}{
 		{
 			name:       "s01 only",
-			input:     "Some.Show.S01.2160p.WEB-DL.mkv",
-			wantTitle: "Some Show",
+			input:      "Some.Show.S01.2160p.WEB-DL.mkv",
+			wantTitle:  "Some Show",
 			wantSeason: intPtr(1),
 		},
 		{
 			name:       "season 2 only",
-			input:     "Some.Show.Season 2.1080p.BluRay.mkv",
-			wantTitle: "Some Show",
+			input:      "Some.Show.Season 2.1080p.BluRay.mkv",
+			wantTitle:  "Some Show",
 			wantSeason: intPtr(2),
 		},
 		{
 			name:       "chinese season only",
-			input:     "Some.Show.第2季.1080p.WEB-DL.mkv",
-			wantTitle: "Some Show",
+			input:      "Some.Show.第2季.1080p.WEB-DL.mkv",
+			wantTitle:  "Some Show",
 			wantSeason: intPtr(2),
 		},
 	}

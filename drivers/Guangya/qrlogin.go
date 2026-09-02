@@ -106,16 +106,17 @@ func (d *Driver) PollQRLogin(ctx context.Context, opaque string) (*driver.QRPoll
 		"device_code": sess.DeviceCode,
 	}, &result)
 	if err != nil {
-		message := strings.ToLower(err.Error())
+		message := normalizeQRStatusMessage(err.Error())
 		switch {
-		case strings.Contains(message, "authorization_pending"), strings.Contains(message, "slow_down"):
+		case isQRWaitingMessage(message):
 			return &driver.QRPollResult{Status: driver.QRWaiting, Message: "请扫码并在手机上确认登录"}, nil
-		case strings.Contains(message, "expired_token"):
+		case strings.Contains(message, "expiredtoken"), strings.Contains(message, "二维码已过期"):
 			return &driver.QRPollResult{Status: driver.QRExpired, Message: "二维码已过期，请重新获取"}, nil
-		case strings.Contains(message, "access_denied"):
+		case strings.Contains(message, "accessdenied"), strings.Contains(message, "取消授权"), strings.Contains(message, "拒绝授权"):
 			return &driver.QRPollResult{Status: driver.QRFailed, Message: "已取消扫码登录"}, nil
 		default:
-			return nil, err
+			// 轮询期间的短暂网络或上游异常不应提前结束二维码会话。
+			return &driver.QRPollResult{Status: driver.QRWaiting, Message: "正在等待扫码确认"}, nil
 		}
 	}
 	if strings.TrimSpace(result.AccessToken) == "" {
@@ -132,6 +133,28 @@ func (d *Driver) PollQRLogin(ctx context.Context, opaque string) (*driver.QRPoll
 			"client_id": d.clientID(),
 		},
 	}, nil
+}
+
+func normalizeQRStatusMessage(message string) string {
+	replacer := strings.NewReplacer("_", "", "-", "", " ", "", "\t", "", "\r", "", "\n", "")
+	return replacer.Replace(strings.ToLower(message))
+}
+
+func isQRWaitingMessage(message string) bool {
+	for _, marker := range []string{
+		"authorizationpending",
+		"slowdown",
+		"等待授权",
+		"等待确认",
+		"尚未授权",
+		"未确认",
+		"请扫码",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func encodeQRSession(sess qrSession) (string, error) {

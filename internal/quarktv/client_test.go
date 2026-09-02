@@ -163,8 +163,6 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-// 覆盖 2026-08-24 修复：片源只有 m3u8 档位（无 mp4）时，负分 m3u8 也要兜底选中最高档，
-// 而不是报"未返回符合播放偏好的档位"。
 func TestPickStreamingCandidateAllM3U8FallsBackToBest(t *testing.T) {
 	infos := []streamingVideoInfo{
 		{Resolution: "4k", Accessable: 1, Format: "m3u8", URL: "https://example/4k.m3u8"},

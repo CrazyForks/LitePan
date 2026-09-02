@@ -117,7 +117,7 @@ func PublicBase(r *http.Request, port string) string {
 	return scheme + "://" + host
 }
 
-// EmbyClientName 从 Emby/Jellyfin 请求头中提取客户端名称。
+// EmbyClientName 从媒体服务器请求头中提取客户端名称。
 func EmbyClientName(r *http.Request) string {
 	if r == nil {
 		return ""

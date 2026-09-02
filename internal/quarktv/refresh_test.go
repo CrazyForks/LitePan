@@ -13,9 +13,6 @@ import (
 	"litepan/internal/domain"
 )
 
-// 覆盖 2026-08-24 修复：夸克 TV 的 Access Token 失效响应是 HTTP 400 + errno 11001，
-// 刷新保护必须优先于 400 分支执行（此前被 400 短路，形同虚设）。
-
 func TestDoOnceRefreshesOnHTTP400TokenInvalid(t *testing.T) {
 	var fileCalls, tokenCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
