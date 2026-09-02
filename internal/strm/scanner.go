@@ -86,6 +86,7 @@ type branchScanState struct {
 	remoteChildren       map[string]map[string]struct{}
 	metadataDirs         map[string]metadataDirectory
 	pendingBranchDeletes []*domain.StrmBranch
+	cleanupBlockedReason string
 }
 
 func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode string) (ScanResult, error) {
@@ -290,7 +291,10 @@ func finalizeScan(
 	// 小规模清理不保护（误删几十个可快速恢复）。手动执行视为用户确认，直接放行。
 	// 触发时本次所有删除动作（过期 strm/旁路/目录级/元数据）停止，生成与更新照常。
 	protectReason := ""
-	if cleanupEnabled && !deps.ManualCleanupConfirm {
+	if cleanupEnabled {
+		protectReason = strings.TrimSpace(state.cleanupBlockedReason)
+	}
+	if protectReason == "" && cleanupEnabled && !deps.ManualCleanupConfirm {
 		impact, countErr := collectCleanupImpact(root, taskRelDir, cleanupScopes, cleanupSkipped, seen, state.remoteChildren)
 		if countErr != nil {
 			return result, countErr

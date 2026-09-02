@@ -2,13 +2,25 @@ package strm
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
 	"litepan/internal/domain"
 	"litepan/internal/driver"
 )
+
+const (
+	enhancedDirCacheBatchSize   = 100
+	enhancedDirResolveRetryWait = 250 * time.Millisecond
+)
+
+type unresolvedEnhancedDir struct {
+	fileCount int
+	examples  []string
+}
 
 func useEnhancedScan(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode string) (bool, error) {
 	if !deps.Settings.Tool115TreeEnabled {
@@ -48,12 +60,35 @@ func scanEnhancedTask(
 	if err != nil {
 		return result, err
 	}
-	dirPaths, err := resolveDirPaths(ctx, deps, task.AccountID, entries)
+	dirPaths, unresolved, err := resolveDirPaths(ctx, deps, task.AccountID, entries)
 	if err != nil {
 		return result, err
 	}
-	if derr := pruneDirCache(ctx, deps, task, entries); derr != nil {
-		log.Warn("strm dir cache prune failed", "account_id", task.AccountID, "err", derr.Error())
+	if len(unresolved) == 0 {
+		if derr := pruneDirCache(ctx, deps, task, entries); derr != nil {
+			log.Warn("strm dir cache prune failed", "account_id", task.AccountID, "err", derr.Error())
+		}
+	} else {
+		log.Info("115 STRM 增强检测到失效目录，本次跳过映射清理", "task_id", task.ID,
+			"task_name", task.Name, "account_id", task.AccountID, "directory_count", len(unresolved))
+	}
+	if len(unresolved) > 0 {
+		ids := make([]string, 0, len(unresolved))
+		for id := range unresolved {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			detail := unresolved[id]
+			reason := fmt.Sprintf("115 返回目录不存在，已跳过关联的 %d 个文件", detail.fileCount)
+			if len(detail.examples) > 0 {
+				reason += "；文件示例：" + strings.Join(detail.examples, "、")
+			}
+			log.Info("115 STRM 增强跳过失效目录", "task_id", task.ID, "task_name", task.Name,
+				"account_id", task.AccountID, "directory_id", id, "file_count", detail.fileCount,
+				"examples", detail.examples)
+			failures.Add(ScanFailureStrm, "远端目录 ID "+id, reason)
+		}
 	}
 
 	rootSegs := splitRemotePath(task.Path)
@@ -68,15 +103,26 @@ func scanEnhancedTask(
 		cleanupScopes:  []cleanupScope{{recursive: true}},
 		remoteChildren: nil, // 清单不含空目录，禁用目录级清理避免误删
 	}
+	if len(unresolved) > 0 {
+		totalFiles := 0
+		for _, detail := range unresolved {
+			totalFiles += detail.fileCount
+		}
+		state.cleanupBlockedReason = fmt.Sprintf("115 全量清单中有 %d 个目录无法解析，已跳过关联的 %d 个文件；为避免误删，本次不执行任何本地清理", len(unresolved), totalFiles)
+	}
 
 	for _, e := range entries {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
+		pid := strings.TrimSpace(e.ParentID)
+		if _, missing := unresolved[pid]; missing {
+			continue
+		}
 		if matchesKeywordRules(e.Name, excludeFiles) {
 			continue
 		}
-		relDirs, ok := relDirsOf(dirPaths[e.ParentID], e.Name, rootSegs)
+		relDirs, ok := relDirsOf(dirPaths[pid], e.Name, rootSegs)
 		if !ok {
 			continue // 远端路径不在任务根范围内，忽略
 		}
@@ -153,12 +199,15 @@ func pruneDirCache(ctx context.Context, deps ScanDeps, task *domain.StrmTask, en
 
 // resolveDirPaths 返回 pid→完整远端路径 映射：
 // 优先查 SQLite 缓存，未命中的调驱动 ResolveDirPath 反查并落库。
-func resolveDirPaths(ctx context.Context, deps ScanDeps, accountID int64, entries []driver.FullListEntry) (map[string]string, error) {
+func resolveDirPaths(ctx context.Context, deps ScanDeps, accountID int64, entries []driver.FullListEntry) (map[string]string, map[string]unresolvedEnhancedDir, error) {
 	out := make(map[string]string, 64)
+	unresolved := make(map[string]unresolvedEnhancedDir)
 	if deps.DirCache == nil || deps.Files == nil {
-		return out, nil
+		return out, unresolved, nil
 	}
 	seen := make(map[string]struct{}, 64)
+	fileCounts := make(map[string]int, 64)
+	examples := make(map[string][]string, 64)
 	for _, e := range entries {
 		pid := strings.TrimSpace(e.ParentID)
 		if pid == "" || pid == "0" {
@@ -166,20 +215,29 @@ func resolveDirPaths(ctx context.Context, deps ScanDeps, accountID int64, entrie
 			continue
 		}
 		if _, dup := seen[pid]; dup {
+			fileCounts[pid]++
+			if len(examples[pid]) < 3 && strings.TrimSpace(e.Name) != "" {
+				examples[pid] = append(examples[pid], strings.TrimSpace(e.Name))
+			}
 			continue
 		}
 		seen[pid] = struct{}{}
+		fileCounts[pid] = 1
+		if strings.TrimSpace(e.Name) != "" {
+			examples[pid] = []string{strings.TrimSpace(e.Name)}
+		}
 	}
 	if len(seen) == 0 {
-		return out, nil
+		return out, unresolved, nil
 	}
 	ids := make([]string, 0, len(seen))
 	for pid := range seen {
 		ids = append(ids, pid)
 	}
+	sort.Strings(ids)
 	hit, err := deps.DirCache.GetBatch(ctx, accountID, ids)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var missing []string
 	for _, pid := range ids {
@@ -190,26 +248,66 @@ func resolveDirPaths(ctx context.Context, deps ScanDeps, accountID int64, entrie
 		}
 	}
 	if len(missing) == 0 {
-		return out, nil
+		return out, unresolved, nil
 	}
 	now := time.Now()
 	var fresh []domain.StrmDirCacheEntry
+	flush := func() error {
+		if len(fresh) == 0 {
+			return nil
+		}
+		if err := deps.DirCache.UpsertBatch(ctx, fresh); err != nil {
+			return err
+		}
+		fresh = fresh[:0]
+		return nil
+	}
 	for _, pid := range missing {
-		p, rerr := deps.Files.ResolveDirPath(ctx, accountID, pid)
+		p, rerr := resolveDirPathWithRetry(ctx, deps, accountID, pid)
 		if rerr != nil {
-			return nil, rerr
+			if isNotFoundError(rerr) {
+				unresolved[pid] = unresolvedEnhancedDir{fileCount: fileCounts[pid], examples: examples[pid]}
+				continue
+			}
+			if flushErr := flush(); flushErr != nil {
+				return nil, nil, flushErr
+			}
+			return nil, nil, rerr
 		}
 		out[pid] = p
 		fresh = append(fresh, domain.StrmDirCacheEntry{
 			AccountID: accountID, DirID: pid, DirPath: p, LastSeenAt: now,
 		})
-	}
-	if len(fresh) > 0 {
-		if err := deps.DirCache.UpsertBatch(ctx, fresh); err != nil {
-			return nil, err
+		if len(fresh) >= enhancedDirCacheBatchSize {
+			if err := flush(); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
-	return out, nil
+	if err := flush(); err != nil {
+		return nil, nil, err
+	}
+	return out, unresolved, nil
+}
+
+func resolveDirPathWithRetry(ctx context.Context, deps ScanDeps, accountID int64, dirID string) (string, error) {
+	path, err := deps.Files.ResolveDirPath(ctx, accountID, dirID)
+	if err == nil || !isNotFoundError(err) {
+		return path, err
+	}
+	timer := time.NewTimer(enhancedDirResolveRetryWait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-timer.C:
+	}
+	return deps.Files.ResolveDirPath(ctx, accountID, dirID)
+}
+
+func isNotFoundError(err error) bool {
+	appErr, ok := domain.AsAppError(err)
+	return ok && appErr.Code == domain.CodeNotFound
 }
 
 // relDirsOf 把远端完整路径裁掉任务根前缀，得到本地相对目录。

@@ -16,9 +16,11 @@ import (
 )
 
 type enhancedTestDriver struct {
-	entries    []driver.FullListEntry
-	dirPaths   map[string]string
-	resolveCnt int
+	entries         []driver.FullListEntry
+	dirPaths        map[string]string
+	resolveErrors   map[string]error
+	resolveAttempts map[string]int
+	resolveCnt      int
 }
 
 type standardScanTestDriver struct{ listCalls int }
@@ -46,6 +48,13 @@ func (d *enhancedTestDriver) ListAllFiles(_ context.Context, _ string) ([]driver
 }
 func (d *enhancedTestDriver) ResolveDirPath(_ context.Context, dirID string) (string, error) {
 	d.resolveCnt++
+	if d.resolveAttempts == nil {
+		d.resolveAttempts = make(map[string]int)
+	}
+	d.resolveAttempts[dirID]++
+	if err := d.resolveErrors[dirID]; err != nil {
+		return "", err
+	}
 	return d.dirPaths[dirID], nil
 }
 
@@ -409,6 +418,96 @@ func TestEnhancedScanSkipsPruneWhenEmptyList(t *testing.T) {
 	}
 	if _, ok, _ := cache.Get(context.Background(), 1, "d-x"); !ok {
 		t.Fatal("远端清单为空时不应清理映射（防止 API 异常误清）")
+	}
+}
+
+func TestEnhancedScanSkipsMissingDirectoryAndBlocksCleanup(t *testing.T) {
+	root := t.TempDir()
+	drv := &enhancedTestDriver{
+		entries: []driver.FullListEntry{
+			{FileID: "f-good", ParentID: "d-good", Name: "正常电影.mkv", Size: 1024},
+			{FileID: "f-missing-1", ParentID: "d-missing", Name: "失效剧集01.mkv", Size: 1024},
+			{FileID: "f-missing-2", ParentID: "d-missing", Name: "失效剧集02.mkv", Size: 1024},
+		},
+		dirPaths: map[string]string{"d-good": "/库/正常目录"},
+		resolveErrors: map[string]error{
+			"d-missing": domain.Errorf(domain.CodeNotFound, "115 API 错误(430004)：文件（夹）不存在或已删除"),
+		},
+	}
+	files := file.NewService(driverexec.New(enhancedTestProvider{drv: drv}, nil), nil, nil, nil, nil, nil)
+	cache := newMemDirCache()
+	stalePath := filepath.Join(root, "任务", "旧目录", "旧影片.strm")
+	if err := os.MkdirAll(filepath.Dir(stalePath), 0o755); err != nil {
+		t.Fatalf("创建旧目录失败: %v", err)
+	}
+	if err := os.WriteFile(stalePath, []byte("https://example.test/old"), 0o644); err != nil {
+		t.Fatalf("创建旧 STRM 失败: %v", err)
+	}
+	task := &domain.StrmTask{
+		ID:           7,
+		Name:         "115 容错测试",
+		AccountID:    1,
+		ParentID:     "lib",
+		Path:         "/库",
+		ScanMode:     domain.StrmScanModeIncrementalUpdate,
+		Extensions:   "mkv",
+		OutputFolder: "任务",
+	}
+	failures := NewFailureCollector()
+	result, err := ScanTask(context.Background(), task, ScanDeps{
+		Files:                files,
+		DirCache:             cache,
+		StrmDir:              root,
+		Settings:             ScanSettings{Tool115TreeEnabled: true},
+		ManualCleanupConfirm: true,
+		Failures:             failures,
+	}, domain.StrmRunModeFull)
+	if err != nil {
+		t.Fatalf("单个失效目录不应中断整个任务: %v", err)
+	}
+	if result.GeneratedCount != 1 {
+		t.Fatalf("正常目录应生成 1 个 STRM，实际 %d", result.GeneratedCount)
+	}
+	if !result.Protected || !strings.Contains(result.ProtectReason, "1 个目录") || !strings.Contains(result.ProtectReason, "2 个文件") {
+		t.Fatalf("失效目录应强制阻止清理，实际 protected=%v reason=%q", result.Protected, result.ProtectReason)
+	}
+	if _, err := os.Stat(stalePath); err != nil {
+		t.Fatalf("即使手动执行，失效目录存在时也不得删除旧 STRM: %v", err)
+	}
+	if _, ok, _ := cache.Get(context.Background(), 1, "d-good"); !ok {
+		t.Fatal("成功解析的目录映射应当立即落库")
+	}
+	if _, ok, _ := cache.Get(context.Background(), 1, "d-missing"); ok {
+		t.Fatal("失效目录不应写入路径映射")
+	}
+	if drv.resolveAttempts["d-missing"] != 2 {
+		t.Fatalf("目录不存在应短暂重试一次，实际请求 %d 次", drv.resolveAttempts["d-missing"])
+	}
+	items := failures.Items()
+	if len(items) != 1 || !strings.Contains(items[0].Path, "d-missing") || !strings.Contains(items[0].Reason, "失效剧集01.mkv") {
+		t.Fatalf("铃铛通知所需的失败详情不完整: %#v", items)
+	}
+}
+
+func TestEnhancedScanPersistsResolvedMappingsBeforeFatalError(t *testing.T) {
+	drv := &enhancedTestDriver{
+		entries: []driver.FullListEntry{
+			{FileID: "f1", ParentID: "d-1", Name: "正常.mkv", Size: 1024},
+			{FileID: "f2", ParentID: "d-2", Name: "异常.mkv", Size: 1024},
+		},
+		dirPaths: map[string]string{"d-1": "/库/正常"},
+		resolveErrors: map[string]error{
+			"d-2": domain.Errorf(domain.CodeDriverError, "远程服务暂时异常"),
+		},
+	}
+	files := file.NewService(driverexec.New(enhancedTestProvider{drv: drv}, nil), nil, nil, nil, nil, nil)
+	cache := newMemDirCache()
+	_, _, err := resolveDirPaths(context.Background(), ScanDeps{Files: files, DirCache: cache}, 1, drv.entries)
+	if err == nil {
+		t.Fatal("非目录不存在错误应中断本次扫描")
+	}
+	if _, ok, _ := cache.Get(context.Background(), 1, "d-1"); !ok {
+		t.Fatal("中断前已成功解析的目录映射应保存，避免下次从零开始")
 	}
 }
 

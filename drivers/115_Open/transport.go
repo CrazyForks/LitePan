@@ -233,6 +233,8 @@ func mapResponseError(code int64, msg string) error {
 		msg = "Unknown error"
 	}
 	switch {
+	case code == 430004:
+		return domain.Errorf(domain.CodeNotFound, "115 API 错误(%d)：%s", code, msg)
 	case code == 406:
 		return domain.Errorf(domain.CodeRateLimited, "115 API 访问限制：%s", msg)
 	case isAuthCode(code):
