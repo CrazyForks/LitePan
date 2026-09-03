@@ -51,9 +51,12 @@ type Config struct {
 // State 返回完整配置状态（API 读取，APIKey 脱敏）。
 func (s *Service) State() State {
 	if s == nil || s.settings == nil {
-		return State{}
+		return State{Items: []Instance{}}
 	}
 	items := s.instancesFromSettings()
+	if items == nil {
+		items = []Instance{}
+	}
 	for i := range items {
 		if items[i].APIKey != "" {
 			items[i].APIKey = maskAPIKey(items[i].APIKey)
