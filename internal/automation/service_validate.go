@@ -73,13 +73,13 @@ func (s *Service) ValidateRule(ctx context.Context, actions []RuleAction) (Valid
 			if !hasFollowingTask {
 				issues = append(issues, ValidationIssue{Level: "error", Message: "刷新目录后面需要有整理任务或 STRM 任务", ActionIndex: index, ActionType: action.Type})
 			}
-		case domain.AutomationActionEmbyRefresh:
+		case domain.AutomationActionEmbyRefresh, domain.AutomationActionEmbyCompleteMediaInfo:
 			mode := strings.TrimSpace(anyString(action.Params["mode"]))
 			if mode == "" {
 				mode = "global"
 			}
 			if mode != "global" && mode != "library" {
-				issues = append(issues, ValidationIssue{Level: "error", Message: "Emby 刷库模式无效", ActionIndex: index, ActionType: action.Type})
+				issues = append(issues, ValidationIssue{Level: "error", Message: "Emby 执行范围无效", ActionIndex: index, ActionType: action.Type})
 				continue
 			}
 			if mode == "library" && strings.TrimSpace(anyString(action.Params["library_id"])) == "" {
@@ -214,7 +214,7 @@ func (s *Service) normalizeInput(ctx context.Context, in RuleInput) (RuleInput, 
 		}
 		in.Actions[i].Type = strings.TrimSpace(in.Actions[i].Type)
 		switch in.Actions[i].Type {
-		case domain.AutomationActionOrganize, domain.AutomationActionStrm, domain.AutomationActionStrmScrape, domain.AutomationActionCacheClear, domain.AutomationActionDelay, domain.AutomationActionEmbyRefresh:
+		case domain.AutomationActionOrganize, domain.AutomationActionStrm, domain.AutomationActionStrmScrape, domain.AutomationActionCacheClear, domain.AutomationActionDelay, domain.AutomationActionEmbyRefresh, domain.AutomationActionEmbyCompleteMediaInfo:
 		default:
 			return in, domain.Errorf(domain.CodeValidation, "存在不支持的动作")
 		}

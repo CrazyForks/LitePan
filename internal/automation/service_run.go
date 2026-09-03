@@ -128,6 +128,8 @@ func (s *Service) executeAction(ctx context.Context, action RuleAction) map[stri
 		return s.runStrmScrape(ctx, action.Params)
 	case domain.AutomationActionEmbyRefresh:
 		return s.runEmbyRefresh(ctx, action.Params)
+	case domain.AutomationActionEmbyCompleteMediaInfo:
+		return s.runEmbyCompleteMediaInfo(ctx, action.Params)
 	default:
 		return map[string]any{"status": "failed", "success": false, "message": "动作类型不支持"}
 	}
@@ -497,6 +499,45 @@ func (s *Service) runEmbyRefresh(ctx context.Context, params map[string]any) map
 	}
 }
 
+func (s *Service) runEmbyCompleteMediaInfo(ctx context.Context, params map[string]any) map[string]any {
+	if s.emby == nil {
+		return map[string]any{"status": "failed", "success": false, "message": "Emby 服务未就绪"}
+	}
+	result, err := s.emby.CompleteMediaInfo(ctx, embyproxy.CompleteMediaInfoRequest{
+		ConfigID:  strings.TrimSpace(anyString(params["emby_id"])),
+		Mode:      strings.TrimSpace(anyString(params["mode"])),
+		LibraryID: strings.TrimSpace(anyString(params["library_id"])),
+	})
+	if err != nil {
+		return map[string]any{"status": "failed", "success": false, "message": err.Error()}
+	}
+	status, success := "success", true
+	message := fmt.Sprintf("已检查 %d 个条目，补全 %d 个", result.Scanned, result.Completed)
+	if result.Missing == 0 {
+		message = fmt.Sprintf("已检查 %d 个条目，媒体信息均完整", result.Scanned)
+	} else if result.Failed > 0 || result.TimedOut > 0 || result.Unchanged > 0 {
+		status = "partial"
+		message = fmt.Sprintf("已检查 %d 个条目，补全 %d 个，仍缺失 %d 个，等待超时 %d 个，失败 %d 个", result.Scanned, result.Completed, result.Unchanged, result.TimedOut, result.Failed)
+		if result.TimedOut > 0 {
+			message += "；超时条目可能仍在 Emby 后台处理"
+		}
+		if len(result.FailedItems) > 0 {
+			names := result.FailedItems
+			if len(names) > 3 {
+				names = names[:3]
+			}
+			message += "；失败：" + strings.Join(names, "、")
+			if len(result.FailedItems) > len(names) {
+				message += fmt.Sprintf("等 %d 个", len(result.FailedItems))
+			}
+		}
+		if result.Completed == 0 && result.TimedOut == 0 && result.Unchanged == 0 {
+			status, success = "failed", false
+		}
+	}
+	return map[string]any{"status": status, "success": success, "message": message, "data": result}
+}
+
 type submitRunResult struct {
 	queued bool
 }
@@ -624,6 +665,8 @@ func actionDisplayName(action RuleAction) string {
 		return "刷新目录"
 	case domain.AutomationActionEmbyRefresh:
 		return "Emby 刷库"
+	case domain.AutomationActionEmbyCompleteMediaInfo:
+		return "Emby 补全媒体信息"
 	default:
 		return action.Type
 	}

@@ -496,7 +496,7 @@
               <input v-model.number="configAction.params.seconds" type="number" class="ctrl" min="1" max="86400">
             </div>
           </template>
-          <template v-else-if="configAction.type === 'emby_refresh'">
+          <template v-else-if="isEmbyScopedAction(configAction)">
             <div class="cfg-row">
               <label>Emby配置</label>
               <AppSelect
@@ -507,7 +507,7 @@
               />
             </div>
             <div class="cfg-row">
-              <label>扫描方式</label>
+              <label>执行范围</label>
               <AppSelect v-model="configAction.params.mode" :options="embyRefreshModeOptions" @update:model-value="mode => onEmbyRefreshModeChange(configAction, mode)" />
             </div>
             <div v-if="configAction.params.mode === 'library'" class="cfg-row">
@@ -730,6 +730,23 @@ const ACTION_DEFINITIONS = {
     ),
     nodeTitle: action => `Emby ${embyRefreshModeLabel(action)}「${embyRefreshTargetLabel(action)}」`,
     previewTitle: action => `Emby${embyRefreshModeLabel(action)}[${embyRefreshTargetLabel(action)}]`
+  },
+  emby_complete_media_info: {
+    label: 'Emby 补全媒体信息',
+    optionLabel: 'Emby 补全媒体信息',
+    icon: 'fas fa-circle-info',
+    desc: '检查媒体流信息缺失的条目，并通知 Emby 重新提取',
+    normalize: params => ({
+      emby_id: String(params.emby_id || defaultEmbyConfig()?.id || ''),
+      mode: params.mode === 'library' ? 'library' : 'global',
+      library_id: String(params.library_id || ''),
+      library_name: String(params.library_name || '')
+    }),
+    canApply: action => Boolean(findEmbyConfig(action?.params?.emby_id)?.emby_url) && (
+      action?.params?.mode !== 'library' || Boolean(String(action?.params?.library_id || '').trim())
+    ),
+    nodeTitle: action => `Emby 补全媒体信息「${embyRefreshTargetLabel(action)}」`,
+    previewTitle: action => `Emby补全媒体信息[${embyRefreshTargetLabel(action)}]`
   }
 }
 
@@ -1100,8 +1117,8 @@ const openConfig = (mode, actionIndex = -1) => {
   if (actionIndex >= 0) ensureStrmRunMode(form.actions[actionIndex])
   if (mode === 'action') {
     const targetAction = pendingConfigAction.value || form.actions[actionIndex]
-    if (targetAction?.type === 'emby_refresh') {
-      normalizeEmbyRefreshAction(targetAction)
+    if (isEmbyScopedAction(targetAction)) {
+      normalizeEmbyScopedAction(targetAction)
       void ensureEmbyLibrariesLoaded()
     }
   }
@@ -1311,7 +1328,7 @@ const applyConfig = () => {
   }
   if (configMode.value === 'trigger') commitTrigger()
   if (configAction.value) ensureStrmRunMode(configAction.value)
-  if (configAction.value?.type === 'emby_refresh') normalizeEmbyRefreshAction(configAction.value)
+  if (isEmbyScopedAction(configAction.value)) normalizeEmbyScopedAction(configAction.value)
   if (pendingConfigAction.value) {
     const action = pendingConfigAction.value
     const insertIndex = pendingConfigInsertIndex.value
@@ -1396,8 +1413,10 @@ const findEmbyConfig = (embyId) => (
   (options.value.emby_configs || []).find(item => String(item.id) === String(embyId)) || null
 )
 
-const normalizeEmbyRefreshAction = (action) => {
-  if (!action || action.type !== 'emby_refresh') return
+const isEmbyScopedAction = action => ['emby_refresh', 'emby_complete_media_info'].includes(action?.type)
+
+const normalizeEmbyScopedAction = (action) => {
+  if (!isEmbyScopedAction(action)) return
   if (!findEmbyConfig(action.params.emby_id)) action.params.emby_id = defaultEmbyConfig()?.id || ''
   action.params.mode = action.params.mode === 'library' ? 'library' : 'global'
   if (action.params.mode !== 'library') {
@@ -1430,7 +1449,7 @@ const ensureEmbyLibrariesLoaded = async (force = false) => {
 }
 
 const onEmbyConfigChange = (action, embyId) => {
-  if (!action || action.type !== 'emby_refresh') return
+  if (!isEmbyScopedAction(action)) return
   action.params.emby_id = String(embyId || '')
   action.params.library_id = ''
   action.params.library_name = ''
@@ -1441,7 +1460,7 @@ const onEmbyConfigChange = (action, embyId) => {
 }
 
 const onEmbyRefreshModeChange = (action, mode) => {
-  if (!action || action.type !== 'emby_refresh') return
+  if (!isEmbyScopedAction(action)) return
   action.params.mode = mode === 'library' ? 'library' : 'global'
   if (action.params.mode === 'library') {
     void ensureEmbyLibrariesLoaded()
@@ -1452,7 +1471,7 @@ const onEmbyRefreshModeChange = (action, mode) => {
 }
 
 const onEmbyLibraryChange = (action, libraryId) => {
-  if (!action || action.type !== 'emby_refresh') return
+  if (!isEmbyScopedAction(action)) return
   action.params.library_id = String(libraryId || '')
   action.params.library_name = findEmbyLibraryName(action.params.library_id)
 }
@@ -2694,7 +2713,8 @@ defineExpose({
   color: var(--warn);
 }
 
-.node-ico.emby_refresh {
+.node-ico.emby_refresh,
+.node-ico.emby_complete_media_info {
   background: color-mix(in srgb, #8b5cf6 18%, var(--panel));
   color: #8b5cf6;
 }
@@ -3162,7 +3182,8 @@ defineExpose({
   color: var(--warn);
 }
 
-.pick-ico.emby_refresh {
+.pick-ico.emby_refresh,
+.pick-ico.emby_complete_media_info {
   background: color-mix(in srgb, #8b5cf6 18%, var(--panel));
   color: #8b5cf6;
 }
