@@ -23,6 +23,8 @@ func PostOAuthProxyJSON(ctx context.Context, client *http.Client, fullURL string
 	}
 	resp, data, err := DoJSON(ctx, client, http.MethodPost, fullURL, nil, body, map[string]string{
 		"Content-Type": "application/json",
+		// 显式携带程序 UA：便于 OAuth 服务端区分官方 litepan 与其它调用方的请求。
+		"User-Agent": DefaultUserAgent,
 	}, 1<<20)
 	if err != nil {
 		return WrapTransportError(err)
