@@ -13,6 +13,7 @@ import { toast } from "@/composables/useToast";
 import AppButton from "@/components/base/AppButton.vue";
 import AppModal from "@/components/base/AppModal.vue";
 import CloudToolCard from "@/components/admin/CloudToolCard.vue";
+import SettingsHelpTooltip from "@/components/admin/SettingsHelpTooltip.vue";
 
 const props = withDefaults(defineProps<{ searchQuery?: string }>(), { searchQuery: "" });
 
@@ -145,7 +146,7 @@ function toggleFold(index: number) {
 }
 
 function addCustomRootRule(template: ClassificationTemplate) {
-  template.rules.push({ name: "新分类", condition: "type=tv", fallback_to_self: false, children: [] });
+  template.rules.push({ name: "新分类", condition: "type=tv", children: [] });
   selectRoot(template.rules.length - 1);
 }
 
@@ -157,12 +158,17 @@ function addChildRule(template: ClassificationTemplate, parent: ClassificationRu
       : template.kind === "custom"
         ? "genres=剧情"
         : "type=movie";
-  (parent.children ??= []).push({ name: "新分类", condition, fallback_to_self: false, children: [] });
+  (parent.children ??= []).push({ name: "新分类", condition, children: [] });
   selectChild(rootIdx, parent.children.length - 1);
 }
 
 function removeRule(rules: ClassificationRule[], index: number) {
   rules.splice(index, 1);
+}
+
+function useFallbackDirectory(rule: ClassificationRule, enabled: boolean) {
+  rule.fallback_mode = enabled ? "directory" : "self";
+  if (enabled && !rule.fallback_dir?.trim()) rule.fallback_dir = "其他";
 }
 
 // 删除一级后修正选中
@@ -317,7 +323,7 @@ async function saveSettings() {
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>
         </button>
       </template>
-      移动整理时按所选模板放入分类目录；无法归类时放入目标根目录，本地重命名模式不受影响。
+      移动整理时按所选模板放入分类目录；无法识别影视类型时放入目标根目录，本地重命名模式不受影响。
       <template #actions>
         <AppButton size="sm" variant="secondary" :disabled="saving" @click="openSettings">分类设置</AppButton>
       </template>
@@ -429,16 +435,45 @@ async function saveSettings() {
                 />
               </div>
 
-              <label
-                v-if="selectedTemplate.kind === 'custom' && selectedNode.level === 0 && (selectedNode.rule.children?.length ?? 0) > 0"
+              <div
+                v-if="selectedNode.level === 0 && (selectedNode.rule.children?.length ?? 0) > 0"
                 class="cls-fallback"
               >
-                <input v-model="selectedNode.rule.fallback_to_self" type="checkbox" />
-                <div>
-                  <b>子分类均未命中时，放入「{{ selectedNode.rule.name || "当前" }}」目录</b>
-                  <span>未勾选则放入目标根目录。</span>
+                <div class="cls-fallback__head">
+                  <span>子分类均未命中时</span>
+                  <SettingsHelpTooltip title="未命中处理说明">
+                    <p>已识别为电影或电视剧，但未命中二级分类时，按这里的设置放置。</p>
+                    <p>影视类型也无法识别时，将放在任务目标根目录。</p>
+                  </SettingsHelpTooltip>
                 </div>
-              </label>
+                <div class="cls-fallback__options">
+                  <button
+                    type="button"
+                    class="cls-fallback__choice"
+                    :class="{ active: selectedNode.rule.fallback_mode !== 'directory' }"
+                    @click="useFallbackDirectory(selectedNode.rule, false)"
+                  >
+                    <span class="cls-fallback__radio"></span>
+                    <span>放入一级分类</span>
+                  </button>
+                  <div
+                    class="cls-fallback__choice cls-fallback__choice--custom"
+                    :class="{ active: selectedNode.rule.fallback_mode === 'directory' }"
+                    @click="useFallbackDirectory(selectedNode.rule, true)"
+                  >
+                    <span class="cls-fallback__radio"></span>
+                    <span>放入指定目录</span>
+                    <input
+                      v-model.trim="selectedNode.rule.fallback_dir"
+                      maxlength="120"
+                      placeholder="其他"
+                      aria-label="未命中目录名称"
+                      @focus="useFallbackDirectory(selectedNode.rule, true)"
+                      @click.stop
+                    />
+                  </div>
+                </div>
+              </div>
             </template>
             <div v-else class="cls-edit__empty">从左侧选择一个分类目录开始编辑</div>
           </section>
@@ -454,7 +489,7 @@ async function saveSettings() {
       <template #header>
         <div class="cls-help-head">
           <h3 class="modal-help-title">分类帮助</h3>
-          <span class="cls-help-head__sub">移动整理时，影片会按模板放进分类目录；没匹配上就放在任务目标根目录。本地重命名不受影响。</span>
+          <span class="cls-help-head__sub">移动整理时，影片会按模板放进分类目录；二级未命中时使用对应一级目录的设置，影视类型也无法识别时才放在目标根目录。</span>
         </div>
       </template>
 
@@ -591,10 +626,19 @@ async function saveSettings() {
 .cls-field input:read-only { background: var(--surface-sunken); color: var(--text-muted); cursor: default; }
 .cls-field__mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
 
-.cls-fallback { display: flex; align-items: flex-start; gap: 8px; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-sunken); cursor: pointer; }
-.cls-fallback input { margin: 3px 0 0; accent-color: var(--brand); flex-shrink: 0; }
-.cls-fallback b { display: block; font-size: 13px; font-weight: 600; color: var(--text); }
-.cls-fallback span { display: block; font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.cls-fallback { display: flex; flex-direction: column; gap: 7px; min-width: 0; padding: 0; }
+.cls-fallback__head { display: flex; align-items: center; gap: 6px; color: var(--text-regular); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.cls-fallback__options { display: flex; align-items: center; gap: 7px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.cls-fallback__options::-webkit-scrollbar { display: none; }
+.cls-fallback__choice { min-height: 34px; display: flex; align-items: center; gap: 7px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-regular); background: transparent; font-family: inherit; font-size: 12.5px; white-space: nowrap; cursor: pointer; transition: border-color .15s, color .15s, background .15s; }
+.cls-fallback__choice:hover { border-color: color-mix(in srgb, var(--brand) 45%, var(--border)); }
+.cls-fallback__choice.active { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
+.cls-fallback__choice--custom { flex: 1; min-width: 280px; }
+.cls-fallback__radio { width: 14px; height: 14px; border: 1.5px solid var(--border2); border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 3px var(--surface); flex-shrink: 0; }
+.cls-fallback__choice.active .cls-fallback__radio { border-color: var(--brand); background: var(--brand); }
+.cls-fallback__choice input { min-width: 100px; width: 100%; height: 25px; padding: 0 8px; border: 0; border-left: 1px solid var(--border); border-radius: 0; outline: none; color: var(--text); background: transparent; font-family: inherit; font-size: 12px; }
+.cls-fallback__choice:not(.active) input { color: var(--text-faint); background: var(--surface-sunken); pointer-events: none; }
+.cls-fallback__choice.active input:focus { border-color: var(--brand); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 14%, transparent); }
 
 .classification-help-button { margin-right: auto; }
 

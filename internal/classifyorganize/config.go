@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	ConfigVersion  = 1
+	ConfigVersion  = 2
 	TemplateMedia  = "media"
 	TemplateRegion = "region"
 	TemplateGenre  = "genre"
@@ -21,12 +21,13 @@ const (
 )
 
 // Rule 用同一种结构描述一级、二级分类。
-// 自定义模板允许用逗号连接多个条件；FallbackToSelf 表示子分类均未命中时使用当前目录。
+// 自定义模板允许用逗号连接多个条件；FallbackMode 控制子分类均未命中时使用一级目录或指定子目录。
 type Rule struct {
-	Name           string `json:"name"`
-	Condition      string `json:"condition"`
-	FallbackToSelf bool   `json:"fallback_to_self,omitempty"`
-	Children       []Rule `json:"children,omitempty"`
+	Name         string `json:"name"`
+	Condition    string `json:"condition"`
+	FallbackMode string `json:"fallback_mode,omitempty"`
+	FallbackDir  string `json:"fallback_dir,omitempty"`
+	Children     []Rule `json:"children,omitempty"`
 }
 
 type Template struct {
@@ -92,11 +93,11 @@ func DefaultConfig() Config {
 			}},
 			{Kind: TemplateCustom, Rules: []Rule{
 				{Name: "综艺", Condition: "type=tv，genres=脱口秀;真人秀"},
-				{Name: "电影", Condition: "type=movie", FallbackToSelf: true, Children: []Rule{
+				{Name: "电影", Condition: "type=movie", Children: []Rule{
 					{Name: "国产", Condition: "origin_country=CN"},
 					{Name: "港台", Condition: "origin_country=TW;HK"},
 				}},
-				{Name: "电视剧", Condition: "type=tv", FallbackToSelf: true, Children: []Rule{
+				{Name: "电视剧", Condition: "type=tv", Children: []Rule{
 					{Name: "日本动漫", Condition: "origin_country=JP，genres=动画"},
 					{Name: "国产剧", Condition: "origin_country=CN"},
 				}},
@@ -227,14 +228,18 @@ func normalizeBuiltInTemplate(tpl *Template) error {
 		}
 		seenTypes[mediaType] = true
 		rule.Condition = "type=" + mediaType
-		rule.FallbackToSelf = false
 		if tpl.Kind == TemplateMedia {
+			rule.FallbackMode = ""
+			rule.FallbackDir = ""
 			if len(rule.Children) > 0 {
 				return domain.Errorf(domain.CodeValidation, "内置模板一只支持一级目录")
 			}
 			continue
 		}
 		if err := normalizeBuiltInChildren(&rule.Children, builtInTemplateName(tpl.Kind), rule.Name, childField); err != nil {
+			return err
+		}
+		if err := normalizeFallbackDir(rule, builtInTemplateName(tpl.Kind)); err != nil {
 			return err
 		}
 	}
@@ -267,7 +272,8 @@ func normalizeBuiltInChildren(rules *[]Rule, templateName, parentName, field str
 			return domain.Errorf(domain.CodeValidation, "%s二级分类只能使用 %s 匹配条件", templateName, field)
 		}
 		rule.Condition = condition
-		rule.FallbackToSelf = false
+		rule.FallbackMode = ""
+		rule.FallbackDir = ""
 		if len(rule.Children) > 0 {
 			return domain.Errorf(domain.CodeValidation, "分类目录最多支持两级")
 		}
@@ -331,9 +337,35 @@ func normalizeCustomRules(rules *[]Rule, label string) error {
 			if err := normalizeCustomRules(&rule.Children, "二级分类"); err != nil {
 				return err
 			}
+			if err := normalizeFallbackDir(rule, "自定义模板"); err != nil {
+				return err
+			}
 		} else {
-			rule.FallbackToSelf = false
+			rule.FallbackMode = ""
+			rule.FallbackDir = ""
 		}
+	}
+	return nil
+}
+
+func normalizeFallbackDir(rule *Rule, templateName string) error {
+	rule.FallbackMode = strings.ToLower(strings.TrimSpace(rule.FallbackMode))
+	rule.FallbackDir = strings.TrimSpace(rule.FallbackDir)
+	if rule.FallbackMode == "" {
+		rule.FallbackMode = "self"
+	}
+	if rule.FallbackMode == "self" {
+		rule.FallbackDir = ""
+		return nil
+	}
+	if rule.FallbackMode != "directory" {
+		return domain.Errorf(domain.CodeValidation, "%s“%s”的未命中处理方式无效", templateName, rule.Name)
+	}
+	if rule.FallbackDir == "" {
+		return domain.Errorf(domain.CodeValidation, "%s“%s”的未命中目录不能为空", templateName, rule.Name)
+	}
+	if err := validatePathSegment(rule.FallbackDir); err != nil {
+		return domain.Errorf(domain.CodeValidation, "%s“%s”的未命中目录：%v", templateName, rule.Name, err)
 	}
 	return nil
 }

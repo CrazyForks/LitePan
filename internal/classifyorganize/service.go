@@ -88,11 +88,6 @@ func (s *Service) Classify(ctx context.Context, req classification.Request) (cla
 	}
 	if matched {
 		if len(parent.Children) == 0 {
-			if tpl.Kind != TemplateMedia {
-				decision.DegradedReason = fallbackReason(state.degradedReason)
-				decision.Evidence = unmatchedEvidence(state, parent.Condition)
-				return decision, nil
-			}
 			decision.Matched = true
 			decision.Category = parent.Name
 			decision.RelativeSegments = []string{parent.Name}
@@ -110,8 +105,11 @@ func (s *Service) Classify(ctx context.Context, req classification.Request) (cla
 			decision.Evidence = matchedEvidence(state, []string{parent.Condition, child.Condition})
 			return decision, nil
 		}
-		decision.DegradedReason = fallbackReason(state.degradedReason)
+		decision.Matched = true
+		decision.RelativeSegments = fallbackSegments(parent)
+		decision.Category = decision.RelativeSegments[len(decision.RelativeSegments)-1]
 		decision.Evidence = unmatchedEvidence(state, parent.Condition)
+		decision.Evidence["fallback"] = true
 		return decision, nil
 	}
 
@@ -179,9 +177,13 @@ func buildCustomCandidates(rules []Rule) ([]customCandidate, error) {
 			segments := append(append([]string(nil), parentSegments...), rule.Name)
 			pathConditions := append(append([]parsedCondition(nil), parentConditions...), conditions...)
 			expressions := append(append([]string(nil), parentExpressions...), rule.Condition)
-			if len(rule.Children) == 0 || rule.FallbackToSelf {
+			if len(rule.Children) == 0 {
 				candidates = append(candidates, customCandidate{
 					segments: segments, conditions: pathConditions, expressions: expressions,
+				})
+			} else {
+				candidates = append(candidates, customCandidate{
+					segments: fallbackSegments(rule), conditions: pathConditions, expressions: expressions,
 				})
 			}
 			if len(rule.Children) > 0 {
@@ -196,6 +198,14 @@ func buildCustomCandidates(rules []Rule) ([]customCandidate, error) {
 		return nil, err
 	}
 	return candidates, nil
+}
+
+func fallbackSegments(rule Rule) []string {
+	segments := []string{rule.Name}
+	if rule.FallbackMode == "directory" && strings.TrimSpace(rule.FallbackDir) != "" {
+		segments = append(segments, rule.FallbackDir)
+	}
+	return segments
 }
 
 func (s *Service) customCandidateMatches(ctx context.Context, state *evaluationState, candidate customCandidate) (bool, customMatchScore, error) {

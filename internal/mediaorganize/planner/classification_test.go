@@ -60,6 +60,43 @@ func TestMoveClassificationBuildsRelativeCategoryPath(t *testing.T) {
 	}
 }
 
+func TestMoveClassificationBuildsMissingFallbackDirectory(t *testing.T) {
+	fs := &mockFS{dirs: map[string][]domain.FileItem{
+		"root":  {{ID: "movie", Name: "未知地区影片 (2026)", IsDir: true}},
+		"movie": {{ID: "f1", Name: "未知地区影片.2026.mkv"}},
+	}}
+	tmdb := &mockTMDB{searchFn: func(string, *int) []map[string]any {
+		return []map[string]any{{"id": 10086, "title": "未知地区影片", "release_date": "2026-01-01"}}
+	}}
+	p := planner.New(context.Background(), fs, 1, planner.TaskConfig{
+		TargetDirectoryID: "root",
+		TargetRootID:      "target",
+		ActionType:        "move",
+		UseTMDB:           true,
+		Recursive:         true,
+	}, planner.Settings{"mo_tmdb_api_key": "test-key"}, "task", tmdb, nil, nil, nil)
+	p.SetClassificationEnhancer(classificationStub{available: true, decision: classification.Decision{
+		Applied: true, Matched: true, Template: "region", Category: "其他", RelativeSegments: []string{"电影", "其他"},
+	}})
+
+	plan, err := p.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	movieDir := findEnsureDir(plan.Actions, "电影")
+	fallbackDir := findEnsureDir(plan.Actions, "其他")
+	workDir := findWorkDir(plan.Actions)
+	if movieDir == nil || movieDir.TargetParentID != "target" {
+		t.Fatalf("未生成一级分类目录动作: %+v", movieDir)
+	}
+	if fallbackDir == nil || fallbackDir.TargetParentID != "ref:"+movieDir.ID {
+		t.Fatalf("未生成指定兜底目录动作: %+v", fallbackDir)
+	}
+	if workDir == nil || workDir.TargetParentID != "ref:"+fallbackDir.ID {
+		t.Fatalf("作品目录未放入指定兜底目录: %+v", workDir)
+	}
+}
+
 func TestMoveClassificationUnmatchedUsesTargetRoot(t *testing.T) {
 	fs := &mockFS{dirs: map[string][]domain.FileItem{
 		"root":     {{ID: "category", Name: "原目录分类", IsDir: true}},

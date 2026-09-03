@@ -88,7 +88,7 @@ func TestDefaultConfigMatchesFourTemplates(t *testing.T) {
 	if got := cfg.Templates[3].Rules[0]; got.Name != "综艺" || got.Condition != "type=tv，genres=脱口秀;真人秀" {
 		t.Fatalf("自定义模板一级示例异常: %+v", got)
 	}
-	if got := cfg.Templates[3].Rules[2]; !got.FallbackToSelf || got.Children[0].Condition != "origin_country=JP，genres=动画" {
+	if got := cfg.Templates[3].Rules[2]; got.FallbackDir != "" || got.Children[0].Condition != "origin_country=JP，genres=动画" {
 		t.Fatalf("自定义模板混合层级示例异常: %+v", got)
 	}
 }
@@ -239,6 +239,68 @@ func TestClassifyRegionAndGenreUseTMDBValueOrder(t *testing.T) {
 	}
 }
 
+func TestBuiltInChildFallbackSupportsRootAndNamedDirectory(t *testing.T) {
+	svc := newService(t, true)
+	cfg := svc.Config()
+	cfg.SelectedTemplate = TemplateRegion
+	if _, err := svc.Update(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	req := classification.Request{
+		MediaType: "movie",
+		Raw:       map[string]any{"origin_country": []string{"BR"}},
+	}
+	decision, err := svc.Classify(context.Background(), req)
+	if err != nil || !decision.Matched || strings.Join(decision.RelativeSegments, "/") != "电影" {
+		t.Fatalf("二级未命中时应默认放入一级目录: decision=%+v err=%v", decision, err)
+	}
+
+	cfg = svc.Config()
+	cfg.Templates[1].Rules[0].FallbackMode = "directory"
+	cfg.Templates[1].Rules[0].FallbackDir = "其他"
+	if _, err := svc.Update(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	decision, err = svc.Classify(context.Background(), req)
+	if err != nil || !decision.Matched || decision.Category != "其他" || strings.Join(decision.RelativeSegments, "/") != "电影/其他" {
+		t.Fatalf("二级未命中时应放入指定目录: decision=%+v err=%v", decision, err)
+	}
+}
+
+func TestUnrecognizedMediaTypeStillUsesMoveRoot(t *testing.T) {
+	svc := newService(t, true)
+	cfg := svc.Config()
+	cfg.SelectedTemplate = TemplateRegion
+	cfg.Templates[1].Rules[0].FallbackMode = "directory"
+	cfg.Templates[1].Rules[0].FallbackDir = "其他"
+	if _, err := svc.Update(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	decision, err := svc.Classify(context.Background(), classification.Request{MediaType: "unknown"})
+	if err != nil || decision.Matched || len(decision.RelativeSegments) != 0 {
+		t.Fatalf("一级无法识别时应保持任务目标根: decision=%+v err=%v", decision, err)
+	}
+}
+
+func TestCustomChildFallbackSupportsNamedDirectory(t *testing.T) {
+	svc := newService(t, true)
+	cfg := svc.Config()
+	cfg.SelectedTemplate = TemplateCustom
+	cfg.Templates[3].Rules[2].FallbackMode = "directory"
+	cfg.Templates[3].Rules[2].FallbackDir = "其他剧集"
+	if _, err := svc.Update(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	decision, err := svc.Classify(context.Background(), classification.Request{
+		MediaType: "tv",
+		Raw:       map[string]any{"origin_country": []string{"US"}, "genres": []string{"剧情"}},
+	})
+	if err != nil || !decision.Matched || strings.Join(decision.RelativeSegments, "/") != "电视剧/其他剧集" {
+		t.Fatalf("自定义模板应使用指定未命中目录: decision=%+v err=%v", decision, err)
+	}
+}
+
 func TestClassifySupportsUserDefinedFieldCondition(t *testing.T) {
 	svc := newService(t, true)
 	cfg := svc.Config()
@@ -282,7 +344,7 @@ func TestClassifyLoadsAndCachesTMDBDetail(t *testing.T) {
 	}
 }
 
-func TestClassifyDetailFailureFallsBackToMoveRoot(t *testing.T) {
+func TestClassifyDetailFailureFallsBackToMatchedRoot(t *testing.T) {
 	svc := newService(t, true)
 	cfg := svc.Config()
 	cfg.SelectedTemplate = TemplateRegion
@@ -298,12 +360,12 @@ func TestClassifyDetailFailureFallsBackToMoveRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !decision.Applied || decision.Matched || decision.DegradedReason != "tmdb_detail_failed" || len(decision.RelativeSegments) != 0 {
+	if !decision.Applied || !decision.Matched || strings.Join(decision.RelativeSegments, "/") != "电影" {
 		t.Fatalf("失败降级异常: %+v", decision)
 	}
 }
 
-func TestClassifyMissingDetailFallsBackToMoveRoot(t *testing.T) {
+func TestClassifyMissingDetailFallsBackToMatchedRoot(t *testing.T) {
 	svc := newService(t, true)
 	cfg := svc.Config()
 	cfg.SelectedTemplate = TemplateRegion
@@ -314,12 +376,12 @@ func TestClassifyMissingDetailFallsBackToMoveRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Matched || decision.DegradedReason != "tmdb_detail_unavailable" {
-		t.Fatalf("缺少 TMDB 详情时应落目标根: %+v", decision)
+	if !decision.Matched || strings.Join(decision.RelativeSegments, "/") != "电视剧" {
+		t.Fatalf("缺少 TMDB 详情时应落已识别的一级目录: %+v", decision)
 	}
 }
 
-func TestBuiltInTemplateWithoutChildrenFallsBackToMoveRoot(t *testing.T) {
+func TestBuiltInTemplateWithoutChildrenUsesMatchedRoot(t *testing.T) {
 	svc := newService(t, true)
 	cfg := svc.Config()
 	cfg.SelectedTemplate = TemplateRegion
@@ -334,8 +396,8 @@ func TestBuiltInTemplateWithoutChildrenFallsBackToMoveRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !decision.Applied || decision.Matched || decision.DegradedReason != "no_rule_matched" || len(decision.RelativeSegments) != 0 {
-		t.Fatalf("内置模板二没有二级分类时应落任务目标根: %+v", decision)
+	if !decision.Applied || !decision.Matched || strings.Join(decision.RelativeSegments, "/") != "电视剧" {
+		t.Fatalf("内置模板二没有二级分类时应落已识别的一级目录: %+v", decision)
 	}
 }
 
