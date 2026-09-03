@@ -139,47 +139,37 @@ func (s *Service) runCacheClear(ctx context.Context, params map[string]any) map[
 	if s.files == nil {
 		return map[string]any{"status": "failed", "success": false, "message": "文件服务未就绪"}
 	}
-	targets := s.collectCacheClearTargets(ctx, params["_following_actions"])
-	if len(targets) == 0 {
+	accountIDs := s.collectCacheClearAccountIDs(ctx, params["_following_actions"])
+	if len(accountIDs) == 0 {
 		return map[string]any{"status": "failed", "success": false, "message": "刷新目录后面需要有整理任务或 STRM 任务"}
 	}
-	cleaned := make([]map[string]any, 0, len(targets))
-	for _, target := range targets {
-		if _, err := s.files.List(ctx, target.accountID, target.parentID, true); err != nil {
-			return map[string]any{"status": "failed", "success": false, "message": err.Error()}
-		}
-		cleaned = append(cleaned, map[string]any{
-			"account_id": target.accountID,
-			"parent_id":  target.parentID,
-			"path":       target.path,
-		})
+	for _, accountID := range accountIDs {
+		s.files.InvalidateDirectoryCaches(accountID)
 	}
 	return map[string]any{
 		"status":  "success",
 		"success": true,
-		"message": fmt.Sprintf("已刷新 %d 个目录", len(cleaned)),
-		"data":    map[string]any{"targets": cleaned},
+		"message": fmt.Sprintf("已刷新 %d 个账号的目录缓存", len(accountIDs)),
+		"data":    map[string]any{"account_ids": accountIDs},
 	}
 }
 
-func (s *Service) collectCacheClearTargets(ctx context.Context, raw any) []cacheClearTarget {
+func (s *Service) collectCacheClearAccountIDs(ctx context.Context, raw any) []int64 {
 	actions, ok := raw.([]RuleAction)
 	if !ok {
 		return nil
 	}
-	targets := make([]cacheClearTarget, 0)
-	seen := make(map[string]struct{})
-	addTarget := func(accountID int64, parentID string, path string) {
-		parentID = strings.TrimSpace(parentID)
-		if accountID <= 0 || parentID == "" {
+	accountIDs := make([]int64, 0)
+	seen := make(map[int64]struct{})
+	addAccount := func(accountID int64) {
+		if accountID <= 0 {
 			return
 		}
-		key := fmt.Sprintf("%d|%s", accountID, parentID)
-		if _, exists := seen[key]; exists {
+		if _, exists := seen[accountID]; exists {
 			return
 		}
-		seen[key] = struct{}{}
-		targets = append(targets, cacheClearTarget{accountID: accountID, parentID: parentID, path: strings.TrimSpace(path)})
+		seen[accountID] = struct{}{}
+		accountIDs = append(accountIDs, accountID)
 	}
 	for _, action := range actions {
 		switch action.Type {
@@ -200,10 +190,7 @@ func (s *Service) collectCacheClearTargets(ctx context.Context, raw any) []cache
 			if accountID <= 0 {
 				accountID = int64(anyInt(cfg["account_id"]))
 			}
-			addTarget(accountID, anyString(cfg["target_directory_id"]), anyString(cfg["target_directory"]))
-			if strings.TrimSpace(anyString(cfg["action_type"])) == "move" {
-				addTarget(accountID, anyString(cfg["target_root_id"]), anyString(cfg["target_root"]))
-			}
+			addAccount(accountID)
 		case domain.AutomationActionStrm:
 			if s.strm == nil {
 				continue
@@ -216,10 +203,10 @@ func (s *Service) collectCacheClearTargets(ctx context.Context, raw any) []cache
 			if err != nil {
 				continue
 			}
-			addTarget(task.AccountID, task.ParentID, task.Path)
+			addAccount(task.AccountID)
 		}
 	}
-	return targets
+	return accountIDs
 }
 
 func (s *Service) runDelay(ctx context.Context, params map[string]any) map[string]any {

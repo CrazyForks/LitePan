@@ -114,12 +114,6 @@ type WebhookEvent struct {
 	DelayTime int `json:"delayTime,omitempty"`
 }
 
-type cacheClearTarget struct {
-	accountID int64
-	parentID  string
-	path      string
-}
-
 type queuedRun struct {
 	ruleID        int64
 	triggerSource string

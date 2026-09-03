@@ -11,12 +11,55 @@ import (
 	"time"
 
 	"litepan/internal/apikey"
+	"litepan/internal/cache"
 	"litepan/internal/domain"
+	filesvc "litepan/internal/file"
 	"litepan/internal/mediaorganize"
 	"litepan/internal/settings"
 	"litepan/internal/strm"
 	"litepan/internal/strmscrape"
 )
+
+func TestRefreshDirectoryClearsOnlyFollowingAccountDirectoryCaches(t *testing.T) {
+	const accountID int64 = 1
+	c := cache.NewService(cache.Options{MaxItems: 32})
+	t.Cleanup(c.Close)
+	c.Set(cache.DirKey(accountID, "deep-a"), cache.DirList{{ID: "old-a"}}, time.Hour)
+	c.Set(cache.DirKey(accountID, "deep-b"), cache.DirList{{ID: "old-b"}}, time.Hour)
+	c.Set(cache.FileInfoKey(accountID, "file-1"), domain.FileItem{ID: "file-1"}, time.Hour)
+	c.Set(cache.DirKey(2, "other-account"), cache.DirList{{ID: "keep"}}, time.Hour)
+
+	organizeSvc := mediaorganize.NewService(mediaorganize.ServiceOptions{
+		Repo: newMediaOrganizeTaskRepo(&domain.MediaOrganizeTask{ID: "org-1", AccountID: accountID}),
+	})
+	strmSvc := newTestStrmService(t, newStrmTaskRepo(&domain.StrmTask{ID: 10, AccountID: accountID}))
+	service := New(Options{
+		Files:    filesvc.NewService(nil, c, nil, nil, nil, nil),
+		Organize: organizeSvc,
+		Strm:     strmSvc,
+	})
+
+	result := service.runCacheClear(context.Background(), map[string]any{
+		"_following_actions": []RuleAction{
+			{Type: domain.AutomationActionOrganize, Params: map[string]any{"task_id": "org-1"}},
+			{Type: domain.AutomationActionStrm, Params: map[string]any{"task_id": 10}},
+		},
+	})
+	if result["success"] != true || result["message"] != "已刷新 1 个账号的目录缓存" {
+		t.Fatalf("刷新结果异常: %#v", result)
+	}
+	for _, parentID := range []string{"deep-a", "deep-b"} {
+		if _, ok := c.Get(cache.DirKey(accountID, parentID)); ok {
+			t.Fatalf("深层目录缓存未清除: %s", parentID)
+		}
+	}
+	if _, ok := c.Get(cache.FileInfoKey(accountID, "file-1")); !ok {
+		t.Fatal("文件详情缓存不应被清除")
+	}
+	if _, ok := c.Get(cache.DirKey(2, "other-account")); !ok {
+		t.Fatal("其他账号的目录缓存不应被清除")
+	}
+}
 
 func TestSubmitRunQueuesWhileStartupGateBlocked(t *testing.T) {
 	service := New(Options{})

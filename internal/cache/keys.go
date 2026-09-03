@@ -55,6 +55,14 @@ func InvalidateDirKeys(c *Service, accountID int64, parentID string) {
 	}
 }
 
+// InvalidateAccountDirKeys 失效指定账号的全部目录列表缓存，不影响文件详情与下载直链缓存。
+func InvalidateAccountDirKeys(c *Service, accountID int64) {
+	if c == nil || accountID <= 0 {
+		return
+	}
+	c.InvalidatePrefix(prefixDir + sep + strconv.FormatInt(accountID, 10) + sep)
+}
+
 // FileInfoKey 单文件详情缓存键。
 func FileInfoKey(accountID int64, fileID string) string {
 	return prefixFileInfo + sep + strconv.FormatInt(accountID, 10) + sep + fileID

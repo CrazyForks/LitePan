@@ -42,6 +42,14 @@ func (s *Service) SetLogger(log *slog.Logger) {
 	}
 }
 
+// InvalidateDirectoryCaches 清除指定账号的全部目录列表缓存。
+func (s *Service) InvalidateDirectoryCaches(accountID int64) {
+	if s == nil {
+		return
+	}
+	cache.InvalidateAccountDirKeys(s.cache, accountID)
+}
+
 // List 列举某账号下 parentID 目录的子项。forceRefresh 时跳过并失效该目录缓存。
 func (s *Service) List(ctx context.Context, accountID int64, parentID string, forceRefresh bool) ([]domain.FileItem, error) {
 	parentID = cache.NormalizeDirParentID(parentID)

@@ -658,7 +658,7 @@ const ACTION_DEFINITIONS = {
     label: '刷新目录',
     optionLabel: '刷新目录',
     icon: 'fas fa-broom',
-    desc: '自动清理后续任务涉及账号的目录缓存',
+    desc: '清理后续任务涉及账号的全部目录缓存',
     normalize: () => ({}),
     canApply: () => true,
     nodeTitle: () => '刷新目录',
