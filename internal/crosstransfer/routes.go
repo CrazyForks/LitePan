@@ -36,9 +36,6 @@ func BuildRoutes() []Route {
 	feasible := map[[2]string][]string{}
 	for _, a := range names {
 		for _, b := range names {
-			if a == b {
-				continue
-			}
 			methods := feasibleMethods(byName[a], byName[b])
 			if len(methods) > 0 {
 				feasible[[2]string{a, b}] = methods
@@ -50,9 +47,6 @@ func BuildRoutes() []Route {
 	seen := map[[2]string]struct{}{}
 	for _, a := range names {
 		for _, b := range names {
-			if a == b {
-				continue
-			}
 			key := [2]string{a, b}
 			if _, ok := seen[key]; ok {
 				continue

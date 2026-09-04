@@ -219,6 +219,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Post("/scan/stream", h.crossTransferScanStream)
 				r.Post("/probe", h.crossTransferProbe)
 				r.Post("/execute", h.crossTransferExecute)
+				r.Post("/plain-enqueue", h.crossTransferPlainEnqueue)
 			})
 			r.Get("/logs", h.listLogs)
 			r.Get("/logs/stats", h.logStats)

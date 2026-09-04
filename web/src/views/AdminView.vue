@@ -22,7 +22,7 @@ const adminPageLoaders = {
   settings: () => import("@/components/admin/SystemSettings.vue"),
   tasks: () => import("@/components/admin/TaskManagement.vue"),
   tools: () => import("@/components/admin/AuxToolsManagement.vue"),
-  "cross-transfer": () => import("@/components/admin/CrossDriveTransfer.vue"),
+  "cross-transfer": () => import("@/components/admin/CrossDriveTransferPage.vue"),
   share: () => import("@/components/admin/FileShareManagement.vue"),
 };
 const DashboardManagement = defineAsyncComponent(adminPageLoaders.dashboard);
@@ -30,7 +30,7 @@ const AccountManagement = defineAsyncComponent(adminPageLoaders.accounts);
 const SystemSettings = defineAsyncComponent(adminPageLoaders.settings);
 const TaskManagement = defineAsyncComponent(adminPageLoaders.tasks);
 const AuxToolsManagement = defineAsyncComponent(adminPageLoaders.tools);
-const CrossDriveTransfer = defineAsyncComponent(adminPageLoaders["cross-transfer"]);
+const CrossDriveTransferPage = defineAsyncComponent(adminPageLoaders["cross-transfer"]);
 const FileShareManagement = defineAsyncComponent(adminPageLoaders.share);
 import { logout, fetchSystemConfig } from "@/api/auth";
 import { useAuthStore } from "@/stores/auth";
@@ -48,7 +48,7 @@ const nav = [
   { key: "settings", label: "系统设置", icon: "cogs" },
   { key: "tasks", label: "任务管理", icon: "tasks" },
   { key: "tools", label: "辅助工具", icon: "toolbox" },
-  { key: "cross-transfer", label: "跨盘秒传", icon: "right-left" },
+  { key: "cross-transfer", label: "跨盘传输", icon: "right-left" },
   { key: "share", label: "文件共享", icon: "share-alt" },
 ];
 const navKeys = nav.map((n) => n.key);
@@ -69,6 +69,7 @@ const PAGE_TABS: Record<string, { defaultTab: string; tabs: Record<string, strin
     tabs: { scrape: "STRM 刮削", enhanced: "增强工具", backup: "备份管理" },
   },
   share: { defaultTab: "webdav", tabs: { webdav: "WebDAV", fuse: "本地挂载" } },
+  "cross-transfer": { defaultTab: "plain", tabs: { plain: "跨盘普传", rapid: "跨盘秒传" } },
 };
 
 const route = useRoute();
@@ -327,7 +328,7 @@ onBeforeUnmount(() => {
         @password-updated="handlePasswordUpdated"
         @admin-ui-updated="loadAdminUiConfig"
       />
-      <CrossDriveTransfer v-else-if="page === 'cross-transfer'" />
+      <CrossDriveTransferPage v-else-if="page === 'cross-transfer'" />
       <FileShareManagement v-else-if="page === 'share'" />
       <component :is="cachedPageComponent" v-else-if="cachedPageComponent" :key="page" />
     </KeepAlive>

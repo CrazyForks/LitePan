@@ -121,3 +121,37 @@ export function executeCrossTransferStream(
 ) {
   return streamCrossTransferNDJSON<Record<string, unknown>>("/cross-transfer/execute", body, signal);
 }
+
+export interface CrossTransferPlainEnqueueSource {
+  parent_id: string;
+  display_path: string;
+  ancestor_ids?: string[];
+}
+
+export interface CrossTransferPlainEnqueueRequest {
+  source_account_id: number;
+  source_account_name: string;
+  source_driver_type: string;
+  target_account_id: number;
+  target_account_name: string;
+  target_driver_type: string;
+  target_parent_id: string;
+  target_display_path: string;
+  sources: CrossTransferPlainEnqueueSource[];
+  conflict: "skip" | "rename" | "overwrite";
+}
+
+export interface CrossTransferPlainEnqueueResult {
+  enqueued: number;
+  skipped: number;
+  failed: number;
+  truncated: boolean;
+  message?: string;
+  failed_name?: string;
+  failed_message?: string;
+}
+
+/** 跨盘普传：服务端枚举源目录并直接创建持久化 relay 任务，入队即返回。 */
+export function enqueueCrossTransferPlain(body: CrossTransferPlainEnqueueRequest) {
+  return http.post<CrossTransferPlainEnqueueResult>("/cross-transfer/plain-enqueue", body);
+}
