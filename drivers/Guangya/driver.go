@@ -16,6 +16,7 @@ import (
 )
 
 type Driver struct {
+	driver.AuthRefreshControl
 	add    Addition
 	client *http.Client
 
@@ -94,6 +95,9 @@ func (d *Driver) Init(ctx context.Context) error {
 		}
 	}
 	if err := d.validateToken(ctx); err != nil {
+		if !domain.IsAuthExpiredError(err) {
+			return err
+		}
 		if _, rerr := d.doRefresh(ctx); rerr != nil {
 			return rerr
 		}

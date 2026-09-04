@@ -19,6 +19,7 @@ const (
 )
 
 type Driver struct {
+	driver.AuthRefreshControl
 	add    Addition
 	client *http.Client
 

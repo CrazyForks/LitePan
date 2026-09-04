@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -52,7 +51,6 @@ const (
 type Service struct {
 	url    string
 	client *http.Client
-	log    *slog.Logger
 
 	mu       sync.Mutex
 	cached   *Announcement
@@ -61,11 +59,10 @@ type Service struct {
 }
 
 // New 构造公告服务。
-func New(url string, log *slog.Logger) *Service {
+func New(url string) *Service {
 	return &Service{
 		url:    strings.TrimSpace(url),
 		client: &http.Client{Timeout: fetchTimeout},
-		log:    log,
 	}
 }
 
@@ -98,9 +95,6 @@ func (s *Service) Fetch(ctx context.Context) (*Announcement, error) {
 		s.mu.Lock()
 		s.failedAt = time.Now()
 		s.mu.Unlock()
-		if s.log != nil {
-			s.log.Warn("announcement fetch failed", "url", s.url, "err", err)
-		}
 		s.mu.Lock()
 		item := s.cached
 		s.mu.Unlock()
@@ -113,9 +107,6 @@ func (s *Service) Fetch(ctx context.Context) (*Announcement, error) {
 		s.failedAt = time.Now()
 		cached := s.cached
 		s.mu.Unlock()
-		if s.log != nil {
-			s.log.Warn("announcement content ignored", "url", s.url, "reason", "invalid json or empty content")
-		}
 		return cached, nil
 	}
 	item.FetchedAt = time.Now()

@@ -11,6 +11,8 @@ func (s *Service) PauseTask(ctx context.Context, id int64, reason domain.PauseRe
 	if s == nil || s.repo == nil {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	task, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -21,13 +23,16 @@ func (s *Service) PauseTask(ctx context.Context, id int64, reason domain.PauseRe
 	if task.Status != domain.RetentionStatusRunning {
 		return nil
 	}
-	s.mu.Lock()
-	s.forceStopLocked(id)
-	s.mu.Unlock()
 	task.Status = domain.RetentionStatusPaused
 	task.PausedReason = string(reason)
 	task.ErrorMessage = message
-	return s.repo.Update(ctx, task)
+	if err := s.repo.Update(ctx, task); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.forceStopLocked(id)
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *Service) ResumeTask(ctx context.Context, id int64) error {

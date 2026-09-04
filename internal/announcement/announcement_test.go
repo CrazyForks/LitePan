@@ -168,7 +168,7 @@ func TestHashChangesWithContent(t *testing.T) {
 }
 
 func TestDisabledWhenURLBlank(t *testing.T) {
-	s := New("   ", nil)
+	s := New("   ")
 	if s.Enabled() {
 		t.Fatal("blank url should be disabled")
 	}
@@ -187,7 +187,7 @@ func TestFetchFromRemoteAndCache(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	s := New(ts.URL, nil)
+	s := New(ts.URL)
 	ctx := context.Background()
 
 	first, err := s.Fetch(ctx)
@@ -220,7 +220,7 @@ func TestFetchInvalidContentSilentlyIgnored(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	s := New(ts.URL, nil)
+	s := New(ts.URL)
 	item, err := s.Fetch(context.Background())
 	if err != nil || item != nil {
 		t.Fatalf("异常公告应静默返回暂无公告: item=%v err=%v", item, err)
@@ -239,7 +239,7 @@ func TestFetchFailureKeepsPrevious(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	s := New(ts.URL, nil)
+	s := New(ts.URL)
 	ctx := context.Background()
 
 	// 首次失败：无缓存可保留，返回 nil 且不报错
@@ -271,7 +271,7 @@ func TestFetchOversizeRejected(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	s := New(ts.URL, nil)
+	s := New(ts.URL)
 	item, err := s.Fetch(context.Background())
 	if err != nil || item != nil {
 		t.Fatalf("oversize should degrade to nil: item=%v err=%v", item, err)

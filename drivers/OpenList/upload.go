@@ -153,6 +153,9 @@ func (d *Driver) uploadStream(ctx context.Context, targetPath string, size int64
 		return domain.Wrap(domain.CodeDriverError, err)
 	}
 	if resp.StatusCode >= 400 {
+		if resp.StatusCode == 401 || resp.StatusCode == 403 || resp.StatusCode == 429 {
+			return mapAPIError(resp.StatusCode, "")
+		}
 		return domain.Errorf(domain.CodeDriverError, "OpenList 上传 HTTP %d: %s", resp.StatusCode, httpx.Truncate(data, 300))
 	}
 	var env respEnvelope
@@ -160,12 +163,6 @@ func (d *Driver) uploadStream(ctx context.Context, targetPath string, size int64
 		return domain.Wrap(domain.CodeDriverError, err)
 	}
 	if env.Code != 200 {
-		if env.Code == 401 || env.Code == 403 {
-			if strings.TrimSpace(d.add.Username) != "" {
-				_ = d.login(ctx)
-			}
-			return domain.Errorf(domain.CodeAuthExpired, "OpenList 认证过期，已尝试重新登录，请重试上传")
-		}
 		return mapAPIError(env.Code, env.Message)
 	}
 	return nil

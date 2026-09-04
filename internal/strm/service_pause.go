@@ -2,6 +2,7 @@ package strm
 
 import (
 	"context"
+	"time"
 
 	"litepan/internal/domain"
 )
@@ -10,6 +11,8 @@ func (s *Service) PauseTask(ctx context.Context, id int64, reason domain.PauseRe
 	if s == nil || s.repo == nil {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	task, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return err
@@ -17,13 +20,17 @@ func (s *Service) PauseTask(ctx context.Context, id int64, reason domain.PauseRe
 	if task.Status == domain.StrmStatusPaused {
 		return nil
 	}
-	_, _ = s.ForceStopTask(ctx, id)
 	task.Status = domain.StrmStatusPaused
 	task.PausedReason = string(reason)
 	if message != "" {
 		task.ErrorMessage = message
 	}
-	return s.repo.Update(ctx, task)
+	// 先保存暂停，再取消执行，取消后的扫描收尾才能保留暂停状态。
+	if err := s.repo.Update(ctx, task); err != nil {
+		return err
+	}
+	_, err = s.ForceStopTask(ctx, id)
+	return err
 }
 
 func (s *Service) ResumeTask(ctx context.Context, id int64) error {

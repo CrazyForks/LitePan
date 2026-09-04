@@ -60,7 +60,11 @@ func (h *Handler) markAnnouncementRead(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, domain.Errorf(domain.CodeValidation, "公告版本过长"))
 		return
 	}
-	if err := h.settings.Update(r.Context(), map[string]string{
+	if isAnnouncementVersionRead(h.settings, version) {
+		writeOK(w, map[string]string{"notice_version": version})
+		return
+	}
+	if err := h.settings.UpdateSilent(r.Context(), map[string]string{
 		settings.KeyAnnouncementReadVersion: version,
 	}); err != nil {
 		writeErr(w, err)

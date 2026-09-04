@@ -232,8 +232,8 @@ func (d *Driver) rawRequest(ctx context.Context, method, apiPath string, body, o
 	if err != nil {
 		return domain.Wrap(domain.CodeDriverError, err)
 	}
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return domain.Errf(domain.CodeAuthExpired)
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
+		return mapAPIError(resp.StatusCode, "")
 	}
 	if resp.StatusCode != http.StatusOK {
 		return domain.Errorf(domain.CodeDriverError, "OpenList HTTP %d: %s", resp.StatusCode, httpx.Truncate(data, 300))
@@ -243,9 +243,6 @@ func (d *Driver) rawRequest(ctx context.Context, method, apiPath string, body, o
 		return domain.Wrap(domain.CodeDriverError, err)
 	}
 	if env.Code != 200 {
-		if env.Code == 401 || env.Code == 403 {
-			return domain.Errf(domain.CodeAuthExpired)
-		}
 		return mapAPIError(env.Code, env.Message)
 	}
 	if out != nil && len(env.Data) > 0 && string(env.Data) != "null" {
@@ -258,6 +255,10 @@ func (d *Driver) rawRequest(ctx context.Context, method, apiPath string, body, o
 
 func mapAPIError(code int, msg string) error {
 	switch code {
+	case 401:
+		return domain.Errf(domain.CodeAuthExpired)
+	case 403:
+		return domain.Errf(domain.CodePermissionDenied)
 	case 404:
 		return domain.Errf(domain.CodeNotFound)
 	case 429:

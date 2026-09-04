@@ -14,6 +14,7 @@ import (
 
 // Driver 是 OpenList 挂载驱动实例；令牌失效时可凭账号密码自动重新登录。
 type Driver struct {
+	driver.AuthRefreshControl
 	add    Addition
 	client *http.Client
 
@@ -123,6 +124,27 @@ func (d *Driver) waitOperationDelay(ctx context.Context) error {
 }
 
 func (d *Driver) login(ctx context.Context) error {
+	_, err := d.RefreshToken(ctx, d.currentToken, func(ctx context.Context) (string, error) {
+		err := d.loginOnce(ctx)
+		return d.currentToken(), err
+	}, driver.ClassifyOAuthRefreshError)
+	return err
+}
+
+func (d *Driver) RefreshAuth(ctx context.Context, _ driver.RefreshCaller) (driver.RefreshOutcome, error) {
+	var err error
+	if strings.TrimSpace(d.add.Username) == "" {
+		err = d.verifyMe(ctx)
+	} else {
+		err = d.login(ctx)
+	}
+	if err != nil {
+		return driver.ClassifyOAuthRefreshError(err), err
+	}
+	return driver.RefreshSuccess, nil
+}
+
+func (d *Driver) loginOnce(ctx context.Context) error {
 	username := strings.TrimSpace(d.add.Username)
 	if username == "" {
 		return domain.Errorf(domain.CodeValidation, "未配置用户名，无法自动登录")
@@ -136,7 +158,7 @@ func (d *Driver) login(ctx context.Context) error {
 		Password: d.add.Password,
 	}, &out, nil); err != nil {
 		if ae, ok := domain.AsAppError(err); ok && ae.Code == domain.CodeAuthExpired {
-			return domain.Errorf(domain.CodeValidation, "OpenList 用户名或密码不正确")
+			return domain.Errorf(domain.CodeAuthExpired, "OpenList 用户名或密码不正确")
 		}
 		return err
 	}
@@ -148,7 +170,7 @@ func (d *Driver) login(ctx context.Context) error {
 	d.token = token
 	d.mu.Unlock()
 	if d.persist != nil {
-		_ = d.persist(ctx, domain.AuthCredentials{AccessToken: token})
+		return d.persist(ctx, domain.AuthCredentials{AccessToken: token})
 	}
 	return nil
 }

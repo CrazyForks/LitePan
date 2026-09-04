@@ -27,6 +27,10 @@ func (d *Driver) oauthServer() string {
 }
 
 func (d *Driver) doRefresh(ctx context.Context) (string, error) {
+	return d.RefreshToken(ctx, d.currentToken, d.exchangeToken, driver.ClassifyOAuthRefreshError)
+}
+
+func (d *Driver) exchangeToken(ctx context.Context) (string, error) {
 	d.refreshMu.Lock()
 	defer d.refreshMu.Unlock()
 	refresh := d.currentRefreshToken()
@@ -52,7 +56,7 @@ func (d *Driver) doRefresh(ctx context.Context) (string, error) {
 		if message == "" {
 			message = "刷新 OneDrive 访问令牌失败"
 		}
-		return "", domain.Errorf(domain.CodeAuthExpired, "%s", message)
+		return "", httpx.OAuthProxyResponseError(message)
 	}
 	d.mu.Lock()
 	d.token = strings.TrimSpace(env.Data.AccessToken)

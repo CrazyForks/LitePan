@@ -3,8 +3,10 @@ package api
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"litepan/internal/settings"
@@ -12,6 +14,7 @@ import (
 
 type announcementConfigRepo struct {
 	values map[string]string
+	sets   int
 }
 
 func (r *announcementConfigRepo) Get(_ context.Context, key string) (string, bool, error) {
@@ -20,6 +23,7 @@ func (r *announcementConfigRepo) Get(_ context.Context, key string) (string, boo
 }
 
 func (r *announcementConfigRepo) Set(_ context.Context, key, value string) error {
+	r.sets++
 	r.values[key] = value
 	return nil
 }
@@ -38,6 +42,8 @@ func TestMarkAnnouncementReadPersistsVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var logOutput strings.Builder
+	settingsSvc.SetLogger(slog.New(slog.NewTextHandler(&logOutput, nil)))
 	handler := &Handler{settings: settingsSvc}
 
 	request := httptest.NewRequest(http.MethodPost, "/api/admin/announcement/read", bytes.NewBufferString(`{"notice_version":" 2026-08-24-1 "}`))
@@ -62,6 +68,19 @@ func TestMarkAnnouncementReadPersistsVersion(t *testing.T) {
 	}
 	if isAnnouncementVersionRead(settingsSvc, "2026-08-24-2") {
 		t.Fatal("新公告版本不应判定为已读")
+	}
+	if logOutput.Len() != 0 {
+		t.Fatalf("公告已读状态不应产生设置日志: %s", logOutput.String())
+	}
+
+	repeatRequest := httptest.NewRequest(http.MethodPost, "/api/admin/announcement/read", bytes.NewBufferString(`{"notice_version":"2026-08-24-1"}`))
+	repeatResponse := httptest.NewRecorder()
+	handler.markAnnouncementRead(repeatResponse, repeatRequest)
+	if repeatResponse.Code != http.StatusOK {
+		t.Fatalf("重复标记 status=%d body=%s", repeatResponse.Code, repeatResponse.Body.String())
+	}
+	if repo.sets != 1 {
+		t.Fatalf("相同公告版本不应重复写入，sets=%d", repo.sets)
 	}
 }
 

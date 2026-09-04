@@ -16,6 +16,7 @@ import (
 
 // Driver 为实例骨架，复制后按需增删字段。
 type Driver struct {
+	driver.AuthRefreshControl
 	add    Addition
 	client *http.Client
 
@@ -112,17 +113,17 @@ func (d *Driver) currentToken() string {
 }
 
 var (
-	_ driver.Driver                   = (*Driver)(nil)
-	_ driver.InfoGetter               = (*Driver)(nil)
-	_ driver.Downloader               = (*Driver)(nil)
-	_ driver.Deleter                  = (*Driver)(nil)
-	_ driver.Mover                    = (*Driver)(nil)
-	_ driver.Copier                   = (*Driver)(nil)
-	_ driver.Renamer                  = (*Driver)(nil)
-	_ driver.FolderCreator            = (*Driver)(nil)
-	_ driver.OAuthConsumer            = (*Driver)(nil)
-	_ driver.AuthCredentialConsumer   = (*Driver)(nil)
-	_ driver.AuthPersistConsumer      = (*Driver)(nil)
-	_ driver.AuthRefresher            = (*Driver)(nil)
-	_ driver.RequestIntervalConsumer  = (*Driver)(nil)
+	_ driver.Driver                  = (*Driver)(nil)
+	_ driver.InfoGetter              = (*Driver)(nil)
+	_ driver.Downloader              = (*Driver)(nil)
+	_ driver.Deleter                 = (*Driver)(nil)
+	_ driver.Mover                   = (*Driver)(nil)
+	_ driver.Copier                  = (*Driver)(nil)
+	_ driver.Renamer                 = (*Driver)(nil)
+	_ driver.FolderCreator           = (*Driver)(nil)
+	_ driver.OAuthConsumer           = (*Driver)(nil)
+	_ driver.AuthCredentialConsumer  = (*Driver)(nil)
+	_ driver.AuthPersistConsumer     = (*Driver)(nil)
+	_ driver.AuthRefresher           = (*Driver)(nil)
+	_ driver.RequestIntervalConsumer = (*Driver)(nil)
 )

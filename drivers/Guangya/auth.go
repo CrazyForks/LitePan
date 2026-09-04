@@ -23,6 +23,10 @@ func (d *Driver) currentToken() string {
 }
 
 func (d *Driver) doRefresh(ctx context.Context) (string, error) {
+	return d.RefreshToken(ctx, d.currentToken, d.exchangeToken, driver.ClassifyOAuthRefreshError)
+}
+
+func (d *Driver) exchangeToken(ctx context.Context) (string, error) {
 	d.mu.Lock()
 	refresh := strings.TrimSpace(d.refresh)
 	d.mu.Unlock()
@@ -42,7 +46,7 @@ func (d *Driver) doRefresh(ctx context.Context) (string, error) {
 		return "", err
 	}
 	if strings.TrimSpace(result.AccessToken) == "" {
-		return "", domain.Errorf(domain.CodeAuthExpired, "光鸭刷新访问令牌失败")
+		return "", domain.Errorf(domain.CodeDriverError, "光鸭刷新响应缺少 access_token")
 	}
 
 	d.mu.Lock()

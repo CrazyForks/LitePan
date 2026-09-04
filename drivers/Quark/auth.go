@@ -42,6 +42,8 @@ func (d *Driver) RefreshAuth(ctx context.Context, _ driver.RefreshCaller) (drive
 		if ae, ok := domain.AsAppError(err); ok {
 			switch ae.Code {
 			case domain.CodeAuthExpired, domain.CodePermissionDenied:
+				// 夸克无 refresh_token 无法自愈：凭据失效（AuthExpired）或封号/权限不足（PermissionDenied）
+				// 都直接标记不可用并暂停关联任务，避免每分钟探测空打上游。
 				return driver.RefreshFatal, err
 			}
 		}

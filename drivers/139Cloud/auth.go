@@ -75,6 +75,12 @@ func (d *Driver) doRefresh(ctx context.Context) (string, error) {
 }
 
 func (d *Driver) refreshAuthorization(ctx context.Context, force bool) (string, error) {
+	return d.RefreshToken(ctx, d.currentAuthorization, func(ctx context.Context) (string, error) {
+		return d.exchangeAuthorization(ctx, force)
+	}, driver.ClassifyOAuthRefreshError)
+}
+
+func (d *Driver) exchangeAuthorization(ctx context.Context, force bool) (string, error) {
 	d.refreshMu.Lock()
 	defer d.refreshMu.Unlock()
 	info, err := parseAuthorization(d.currentAuthorization())
@@ -100,7 +106,14 @@ func (d *Driver) refreshAuthorization(ctx context.Context, force bool) (string, 
 		return "", domain.Wrap(domain.CodeDriverError, err)
 	}
 	if response.StatusCode != 200 {
-		return "", domain.Errorf(domain.CodeAuthExpired, "移动云盘令牌刷新失败 HTTP %d: %s", response.StatusCode, httpx.Truncate(data, 300))
+		code := domain.CodeDriverError
+		if response.StatusCode == http.StatusUnauthorized {
+			code = domain.CodeAuthExpired
+		}
+		if response.StatusCode == http.StatusTooManyRequests {
+			code = domain.CodeRateLimited
+		}
+		return "", domain.Errorf(code, "移动云盘令牌刷新失败 HTTP %d", response.StatusCode)
 	}
 	var refreshed refreshTokenResponse
 	if err := xml.Unmarshal(data, &refreshed); err != nil {
@@ -118,7 +131,7 @@ func (d *Driver) refreshAuthorization(ctx context.Context, force bool) (string, 
 		newToken = strings.TrimSpace(refreshed.AccessToken)
 	}
 	if newToken == "" {
-		return "", domain.Errorf(domain.CodeAuthExpired, "移动云盘刷新成功但未返回新令牌")
+		return "", domain.Errorf(domain.CodeDriverError, "移动云盘刷新成功但未返回新令牌")
 	}
 	prefix := info.Prefix
 	if prefix == "" {
@@ -127,7 +140,7 @@ func (d *Driver) refreshAuthorization(ctx context.Context, force bool) (string, 
 	newAuthorization := base64.StdEncoding.EncodeToString([]byte(prefix + ":" + info.Account + ":" + newToken))
 	newInfo, err := parseAuthorization(newAuthorization)
 	if err != nil {
-		return "", domain.Errorf(domain.CodeAuthExpired, "移动云盘刷新令牌格式异常: %s", err.Error())
+		return "", domain.Errorf(domain.CodeDriverError, "移动云盘刷新令牌格式异常: %s", err.Error())
 	}
 	d.setAuthorization(newInfo)
 	if d.persist != nil {

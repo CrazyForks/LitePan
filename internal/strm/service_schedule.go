@@ -145,7 +145,9 @@ func (s *Service) runTaskAsync(task *domain.StrmTask) {
 				"error", err.Error(),
 			)
 			if auth.IsAuthError(err) {
-				_ = s.PauseTask(ctx, task.ID, domain.PauseReasonAuthFailure, err.Error())
+				if pauseErr := s.PauseTask(ctx, task.ID, domain.PauseReasonAuthFailure, err.Error()); pauseErr != nil {
+					s.log.Warn("STRM 任务暂停状态保存失败", "task_id", task.ID, "error", pauseErr)
+				}
 			} else {
 				_ = s.finalizeScanPersist(task.ID, domain.StrmScanPatch{
 					Status:         domain.StrmStatusActive,
@@ -181,7 +183,9 @@ func (s *Service) runTaskAsync(task *domain.StrmTask) {
 				"error", err.Error(),
 			)
 			if auth.IsAuthError(err) {
-				_ = s.PauseTask(ctx, task.ID, domain.PauseReasonAuthFailure, err.Error())
+				if pauseErr := s.PauseTask(ctx, task.ID, domain.PauseReasonAuthFailure, err.Error()); pauseErr != nil {
+					s.log.Warn("STRM 任务暂停状态保存失败", "task_id", task.ID, "error", pauseErr)
+				}
 				return
 			}
 		} else if errors.Is(err, context.Canceled) {

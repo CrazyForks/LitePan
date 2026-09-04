@@ -180,6 +180,16 @@ func (s *Service) Snapshot() Payload {
 
 // Update 校验并写入一批设置（只接受已知键），成功后增量更新内存快照。
 func (s *Service) Update(ctx context.Context, in map[string]string) error {
+	return s.update(ctx, in, true)
+}
+
+// UpdateSilent 校验并写入内部状态，但不产生“系统设置已更新”日志。
+// 仅用于公告已读版本等非用户设置，普通设置更新仍应调用 Update。
+func (s *Service) UpdateSilent(ctx context.Context, in map[string]string) error {
+	return s.update(ctx, in, false)
+}
+
+func (s *Service) update(ctx context.Context, in map[string]string, writeLog bool) error {
 	normalized := make(map[string]string, len(in))
 	for k, v := range in {
 		sp := s.byKey[k]
@@ -202,7 +212,7 @@ func (s *Service) Update(ctx context.Context, in map[string]string) error {
 		s.vals[k] = v
 	}
 	s.mu.Unlock()
-	if s.log != nil && len(normalized) > 0 {
+	if writeLog && s.log != nil && len(normalized) > 0 {
 		keys := make([]string, 0, len(normalized))
 		for k := range normalized {
 			keys = append(keys, k)
