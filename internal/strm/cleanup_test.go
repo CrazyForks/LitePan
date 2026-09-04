@@ -56,3 +56,41 @@ func TestCleanupScopedStaleFilesRemovesSameStemSidecarsOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupMovedMediaSidecars(t *testing.T) {
+	for _, keepVersion := range []bool{false, true} {
+		t.Run(map[bool]string{false: "移走后删除空目录", true: "保留其他版本字幕"}[keepVersion], func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, "任务", "旧目录")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			names := []string{"影片.strm", "影片-fanart.JPG", "影片.ass", "影片.zh-Hans.ass", "影片.en.forced.srt", "影片.idx", "影片.sub"}
+			names = append(names, "poster.jpg", "fanart.jpg", "movie.nfo")
+			seen := map[string]struct{}{}
+			if keepVersion {
+				names = append(names, "影片.加长版.strm", "影片.加长版.zh.ass")
+				seen["任务/旧目录/影片.加长版.strm"] = struct{}{}
+			}
+			for _, name := range names {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte("test"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			n, err := cleanupScopedStaleFiles(root, "任务", seen, []cleanupScope{{recursive: true}}, nil, NewFailureCollector())
+			if err != nil || n != 1 {
+				t.Fatalf("清理结果 %d, %v", n, err)
+			}
+			if !keepVersion {
+				if _, err := os.Stat(dir); !os.IsNotExist(err) {
+					t.Fatalf("旧目录仍然存在: %v", err)
+				}
+			} else {
+				entries, err := os.ReadDir(dir)
+				if err != nil || len(entries) != 5 {
+					t.Fatalf("应只保留另一版本及共用海报: %v, %v", entries, err)
+				}
+			}
+		})
+	}
+}
