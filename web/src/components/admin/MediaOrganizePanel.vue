@@ -164,16 +164,35 @@ const planEditingName = ref("");
 const planEditingSaving = ref(false);
 const tmdbTesting = ref(false);
 let planProgressTimer: number | null = null;
-const aiWaitSeconds = ref(0);
-let aiWaitStartedAt = 0;
+const aiClock = ref(Date.now());
+let aiAttemptToken = 0;
+let aiAttemptObservedAt = 0;
 let aiWaitTimer: number | null = null;
 
 const isAIRecognizing = computed(() => planProgress.value.stage === "ai_recognition");
+const aiAttemptTimeout = computed(() => planProgress.value.ai_attempt_timeout_seconds || 120);
+const aiAttemptElapsed = computed(() => {
+  if (!aiAttemptObservedAt) return 0;
+  return Math.max(0, Math.floor((aiClock.value - aiAttemptObservedAt) / 1000));
+});
+const aiRemainingSeconds = computed(() => Math.max(0, aiAttemptTimeout.value - aiAttemptElapsed.value));
+const aiCountdownPercent = computed(() => {
+  if (!aiAttemptTimeout.value) return 0;
+  return Math.min(100, (aiAttemptElapsed.value / aiAttemptTimeout.value) * 100);
+});
 const aiProgressTitle = computed(() => {
+  if (planProgress.value.ai_retrying) return "模型响应超时，已缩小批次重新提交";
+  return "正在等待 AI 模型响应";
+});
+const aiProgressDetail = computed(() => {
+  const parts: string[] = [];
   const chunk = planProgress.value.ai_chunk || 0;
   const chunks = planProgress.value.ai_chunks || 0;
-  if (chunks > 1 && chunk > 0) return `正在进行 AI 辅助识别 · 第 ${chunk}/${chunks} 批`;
-  return "正在等待 AI 识别";
+  const batchSize = planProgress.value.ai_batch_size || 0;
+  if (chunk > 0 && chunks > 0) parts.push(`第 ${chunk}/${chunks} 批`);
+  if (batchSize > 0) parts.push(`本次提交 ${batchSize} 部`);
+  parts.push(`剩余 ${aiRemainingSeconds.value} 秒`);
+  return parts.join(" · ");
 });
 
 const preview = useOrganizePlanPreview();
@@ -621,7 +640,7 @@ function startPlanProgressPolling(taskId: string) {
     try {
       const next = await fetchMediaOrganizeProgress(taskId);
       planProgress.value = next;
-      if (next.stage === "ai_recognition") startAIWaitTimer();
+      if (next.stage === "ai_recognition") startAIWaitTimer(next.ai_attempt_started_at);
       else stopAIWaitTimer();
     } catch {}
   };
@@ -637,12 +656,16 @@ function stopPlanProgressPolling() {
   stopAIWaitTimer();
 }
 
-function startAIWaitTimer() {
+function startAIWaitTimer(attemptToken?: number) {
+  const nextToken = Number(attemptToken || 0);
+  if (nextToken > 0 && nextToken !== aiAttemptToken) {
+    aiAttemptToken = nextToken;
+    aiAttemptObservedAt = Date.now();
+  }
   if (aiWaitTimer) return;
-  aiWaitStartedAt = Date.now();
-  aiWaitSeconds.value = 0;
+  aiClock.value = Date.now();
   aiWaitTimer = window.setInterval(() => {
-    aiWaitSeconds.value = Math.floor((Date.now() - aiWaitStartedAt) / 1000);
+    aiClock.value = Date.now();
   }, 1000);
 }
 
@@ -651,8 +674,9 @@ function stopAIWaitTimer() {
     window.clearInterval(aiWaitTimer);
     aiWaitTimer = null;
   }
-  aiWaitStartedAt = 0;
-  aiWaitSeconds.value = 0;
+  aiAttemptToken = 0;
+  aiAttemptObservedAt = 0;
+  aiClock.value = Date.now();
 }
 
 async function previewPlan(task: MediaOrganizeTask) {
@@ -1091,13 +1115,13 @@ defineExpose({
       </template>
 
       <div class="organize-plan-content">
-          <div v-if="planLoading" class="organize-plan-loading">
+        <div v-if="planLoading" class="organize-plan-loading">
         <BusySpinner variant="notch" :size="42" color="var(--brand)" />
         <div class="organize-plan-loading__title">
           {{ isAIRecognizing ? aiProgressTitle : "正在扫描并生成计划…" }}
         </div>
         <div v-if="isAIRecognizing" class="organize-plan-loading__metrics">
-          <span class="organize-plan-metric">待识别 {{ planProgress.ai_total || 0 }} 部</span>
+          <span class="organize-plan-metric">共需识别 {{ planProgress.ai_total || 0 }} 部</span>
           <span class="organize-plan-metric">已完成 {{ planProgress.ai_completed || 0 }} 部</span>
           <span v-if="planProgress.ai_cached" class="organize-plan-metric">复用结果 {{ planProgress.ai_cached }} 部</span>
         </div>
@@ -1107,8 +1131,18 @@ defineExpose({
           <span class="organize-plan-metric">已分组 {{ planProgress.groups || 0 }}</span>
           <span class="organize-plan-metric">已生成 {{ planProgress.actions || 0 }} 个动作</span>
         </div>
-        <div v-if="isAIRecognizing" class="organize-plan-loading__current">
-          已等待 {{ aiWaitSeconds }} 秒 · 模型响应后会自动继续
+        <div v-if="isAIRecognizing" class="organize-ai-countdown">
+          <div
+            class="organize-ai-countdown__track"
+            role="progressbar"
+            aria-label="AI 模型响应等待时间"
+            :aria-valuenow="Math.round(aiCountdownPercent)"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          >
+            <span class="organize-ai-countdown__bar" :style="{ width: `${aiCountdownPercent}%` }"></span>
+          </div>
+          <div class="organize-plan-loading__current">{{ aiProgressDetail }}</div>
         </div>
         <div v-else-if="planProgress.current_dir" class="organize-plan-loading__current">
           当前批次: {{ planProgress.current_dir }}
@@ -1773,6 +1807,28 @@ defineExpose({
   color: var(--text-muted);
   text-align: center;
   word-break: break-all;
+}
+
+.organize-ai-countdown {
+  width: min(100%, 460px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.organize-ai-countdown__track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+}
+
+.organize-ai-countdown__bar {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--brand), var(--brand-light, var(--brand)));
+  transition: width 0.25s linear;
 }
 
 .organize-plan-tmdb-banner {
