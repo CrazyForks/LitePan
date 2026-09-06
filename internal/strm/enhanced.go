@@ -64,11 +64,35 @@ func scanEnhancedTask(
 	if err != nil {
 		return result, err
 	}
-	if len(unresolved) == 0 {
+	// 清单来自任务根，但缓存路径可能已过时；先核实矛盾，不能据此静默漏扫并删除本地文件。
+	rootSegs := splitRemotePath(task.Path)
+	pathConflict := ""
+	for pid, oldPath := range dirPaths {
+		if _, ok := relDirsOf(oldPath, "check", rootSegs); ok {
+			continue
+		}
+		freshPath, resolveErr := resolveDirPathWithRetry(ctx, deps, task.AccountID, pid)
+		if resolveErr != nil {
+			return result, fmt.Errorf("核实 STRM 目录路径失败（目录 ID %s，任务根 %s）: %w", pid, task.Path, resolveErr)
+		}
+		if _, ok := relDirsOf(freshPath, "check", rootSegs); !ok {
+			pathConflict = "全量清单中的目录路径与任务根不一致，本次已停止本地清理，请检查任务目录和路径映射"
+			log.Warn("STRM 扫描目录路径不一致", "task_id", task.ID, "account_id", task.AccountID,
+				"directory_id", pid, "task_path", task.Path, "cached_path", oldPath, "resolved_path", freshPath)
+			continue
+		}
+		dirPaths[pid] = freshPath
+		if err := deps.DirCache.UpsertBatch(ctx, []domain.StrmDirCacheEntry{{
+			AccountID: task.AccountID, DirID: pid, DirPath: freshPath, LastSeenAt: time.Now(),
+		}}); err != nil {
+			return result, err
+		}
+	}
+	if len(unresolved) == 0 && pathConflict == "" {
 		if derr := pruneDirCache(ctx, deps, task, entries); derr != nil {
 			log.Warn("strm dir cache prune failed", "account_id", task.AccountID, "err", derr.Error())
 		}
-	} else {
+	} else if len(unresolved) > 0 {
 		log.Info("115 STRM 增强检测到失效目录，本次跳过映射清理", "task_id", task.ID,
 			"task_name", task.Name, "account_id", task.AccountID, "directory_count", len(unresolved))
 	}
@@ -91,17 +115,17 @@ func scanEnhancedTask(
 		}
 	}
 
-	rootSegs := splitRemotePath(task.Path)
 	outputFolder := TaskRelDir(task.GroupDir, task.OutputFolder)
 	var candidates []mediaCandidate
 	var metadataItems []metadataItem
 	dirHasMedia := make(map[string]bool)
 	subtreeHasMedia := make(map[string]bool)
 	state := &branchScanState{
-		skippedDirs:    make(map[string]struct{}),
-		metadataDirs:   make(map[string]metadataDirectory),
-		cleanupScopes:  []cleanupScope{{recursive: true}},
-		remoteChildren: nil, // 清单不含空目录，禁用目录级清理避免误删
+		cleanupBlockedReason: pathConflict,
+		skippedDirs:          make(map[string]struct{}),
+		metadataDirs:         make(map[string]metadataDirectory),
+		cleanupScopes:        []cleanupScope{{recursive: true}},
+		remoteChildren:       nil, // 清单不含空目录，禁用目录级清理避免误删
 	}
 	if len(unresolved) > 0 {
 		totalFiles := 0

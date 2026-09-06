@@ -2,6 +2,7 @@ package strm
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,6 +158,52 @@ func (c *memDirCache) CountByAccount(_ context.Context, _ int64) (int64, error) 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return int64(len(c.m)), nil
+}
+
+func TestEnhancedScanConflictingPathSafety(t *testing.T) {
+	for _, manual := range []bool{false, true} {
+		for _, corrected := range []bool{false, true} {
+			t.Run(fmt.Sprintf("manual=%t/corrected=%t", manual, corrected), func(t *testing.T) {
+				ctx := context.Background()
+				root := t.TempDir()
+				cache := newMemDirCache()
+				_ = cache.UpsertBatch(ctx, []domain.StrmDirCacheEntry{{AccountID: 1, DirID: "d", DirPath: "/旧库/剧集"}})
+				resolved := "/其他库/剧集"
+				if corrected {
+					resolved = "/库/剧集"
+				}
+				drv := &enhancedTestDriver{entries: []driver.FullListEntry{{FileID: "f", ParentID: "d", Name: "第1集.mkv", Size: 1024}}, dirPaths: map[string]string{"d": resolved}}
+				drv.entries = append(drv.entries, driver.FullListEntry{FileID: "f2", ParentID: "d", Name: "第2集.mkv", Size: 1024})
+				files := file.NewService(driverexec.New(enhancedTestProvider{drv: drv}, nil), nil, nil, nil, nil, nil)
+				local := filepath.Join(root, "任务", "剧集", "第1集.strm")
+				if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(local, []byte("existing"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				task := &domain.StrmTask{ID: 1, AccountID: 1, ParentID: "lib", Path: "/库", ScanMode: domain.StrmScanModeIncrementalUpdate, Extensions: "mkv", OutputFolder: "任务"}
+				result, err := ScanTask(ctx, task, ScanDeps{Files: files, DirCache: cache, StrmDir: root, Settings: ScanSettings{Tool115TreeEnabled: true}, ManualCleanupConfirm: manual}, domain.StrmRunModeFull)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := os.Stat(local); err != nil {
+					t.Fatalf("不得误删本地 STRM: %v", err)
+				}
+				if corrected {
+					if result.ScannedCount != 2 || result.GeneratedCount != 1 || result.Protected {
+						t.Fatalf("修正映射后应正常扫描: %+v", result)
+					}
+					p, _, _ := cache.Get(ctx, 1, "d")
+					if p != resolved {
+						t.Fatalf("映射未修正: %s", p)
+					}
+				} else if !result.Protected || result.RemovedCount != 0 {
+					t.Fatalf("矛盾未解决应阻止清理: %+v", result)
+				}
+			})
+		}
+	}
 }
 
 func TestEnhancedScanGeneratesStrmAndCachesDirPaths(t *testing.T) {
