@@ -795,8 +795,6 @@ func IsActiveStatus(status string) bool {
 	}
 }
 
-var normalSkipMarkers = []string{"已整理", "已是目标名", "已并入", "文件已自动并入", "目录非空"}
-
 func summarizePlan(plan *Plan, aborted bool) map[string]any {
 	if plan == nil {
 		return map[string]any{"stopped": aborted}
@@ -807,7 +805,25 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 			relocates = append(relocates, action)
 		}
 	}
-	total := len(relocates) + len(plan.Skipped)
+	// 规划冲突同时保留动作和诊断记录，统计以动作结果为准。
+	seen := make(map[string]bool)
+	for _, action := range relocates {
+		if action.SourceID != "" {
+			seen[action.SourceID] = true
+		}
+	}
+	skippedItems := make([]map[string]any, 0, len(plan.Skipped))
+	for _, item := range plan.Skipped {
+		id := stringFromAny(item["file_id"])
+		if id != "" && seen[id] {
+			continue
+		}
+		if id != "" {
+			seen[id] = true
+		}
+		skippedItems = append(skippedItems, item)
+	}
+	total := len(relocates) + len(skippedItems)
 	renamed, moved, failed := 0, 0, 0
 	relocateSkips := 0
 	normalSkipped := 0
@@ -828,12 +844,12 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 			failed++
 		}
 	}
-	for _, item := range plan.Skipped {
+	for _, item := range skippedItems {
 		if isNormalSkip("", stringFromAny(item["reason"])) {
 			normalSkipped++
 		}
 	}
-	skipped := relocateSkips + len(plan.Skipped)
+	skipped := relocateSkips + len(skippedItems)
 	abnormalSkipped := skipped - normalSkipped
 	if abnormalSkipped < 0 {
 		abnormalSkipped = 0
@@ -874,12 +890,16 @@ func isNormalSkip(errText, reason string) bool {
 	if text == "" {
 		text = reason
 	}
-	for _, marker := range normalSkipMarkers {
-		if strings.Contains(text, marker) {
-			return true
-		}
-	}
-	return false
+	text = strings.TrimSpace(text)
+	// 限定原因格式，避免冲突文件名含“已整理”等字样时被误判。
+	return text == "已整理" || text == "已是目标名" ||
+		text == "目标已存在同名（未开启覆盖）" || text == "执行期间目标已存在同名" ||
+		strings.HasPrefix(text, "已并入「") ||
+		(strings.HasPrefix(text, "已合并到「") &&
+			(strings.HasSuffix(text, "（同一部作品，文件已自动并入，空目录将清理）") ||
+				strings.HasSuffix(text, "；源目录内文件将自动搬入该目录"))) ||
+		(strings.HasPrefix(text, "作品已在「") && strings.HasSuffix(text, "整理，文件已自动并入")) ||
+		strings.HasPrefix(text, "目录非空（")
 }
 
 func buildProxyURL(settingsDict map[string]any) string {

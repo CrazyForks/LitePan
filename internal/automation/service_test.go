@@ -381,6 +381,12 @@ func TestEvaluateOrganizeAction(t *testing.T) {
 		messagePart string
 	}{
 		{
+			name:      "全部正常跳过不阻断",
+			summary:   map[string]any{"total": 67, "skipped": 67, "normal_skipped": 67},
+			completed: true, success: true, risk: 0, riskTotal: 0,
+			messagePart: "异常比例 0%",
+		},
+		{
 			name: "异常跳过未超过允许比例",
 			summary: map[string]any{
 				"total": 10, "skipped": 4, "normal_skipped": 2, "abnormal_skipped": 2,

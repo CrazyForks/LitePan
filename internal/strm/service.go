@@ -48,6 +48,8 @@ type Service struct {
 	taskCancels              map[int64]context.CancelFunc
 	dirtyAccounts            map[int64]bool
 	pendingRun               map[int64]string
+	waitingRuns              map[int64]queuedRun
+	nextRunOrder             uint64
 	scanProgress             map[int64]liveScanProgress
 	fileOperations           map[int64]struct{}
 	organizeBusy             RunningAccountLister
@@ -102,6 +104,7 @@ func NewService(opts ServiceOptions) *Service {
 		taskCancels:     make(map[int64]context.CancelFunc),
 		dirtyAccounts:   make(map[int64]bool),
 		pendingRun:      make(map[int64]string),
+		waitingRuns:     make(map[int64]queuedRun),
 		fileOperations:  make(map[int64]struct{}),
 	}
 }
@@ -449,12 +452,14 @@ func (s *Service) RunTaskNow(ctx context.Context, id int64, runMode string) (*do
 	if rem := s.StartupRemaining(); rem > 0 {
 		s.mu.Lock()
 		s.pendingRun[id] = runMode
+		s.enqueueRunLocked(task)
 		s.dirtyAccounts[task.AccountID] = true
 		s.mu.Unlock()
 		return nil, domain.Errorf(domain.CodeValidation, "已加入执行队列，启动退避结束后（约 %d 秒）自动执行", rem)
 	}
 	s.mu.Lock()
 	s.pendingRun[id] = runMode
+	s.enqueueRunLocked(task)
 	s.mu.Unlock()
 	s.runTaskAsync(task)
 	return task, nil

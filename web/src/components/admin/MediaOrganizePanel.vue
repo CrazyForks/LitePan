@@ -329,6 +329,7 @@ function isTaskActive(task: MediaOrganizeTask): boolean {
 function organizeStatusVariant(task: MediaOrganizeTask): AdminRunStatusVariant {
   if (isTaskActive(task)) return "running";
   if (task.last_run_result && (task.last_run_result.failed || 0) > 0) return "error";
+  if ((task.last_run_result?.abnormal_skipped || 0) > 0) return "warning";
   if (task.last_run_result) return "success";
   return "pending";
 }
@@ -339,6 +340,7 @@ function statusText(task: MediaOrganizeTask): string {
   if (task.status === "running") return "执行中";
   if (task.last_run_result?.stopped) return "已停止";
   if (task.last_run_result && (task.last_run_result.failed || 0) > 0) return "有失败";
+  if ((task.last_run_result?.abnormal_skipped || 0) > 0) return "已完成，需关注";
   if (task.last_run_result) return "已完成";
   return "未执行";
 }
@@ -352,13 +354,14 @@ function statusTitle(task: MediaOrganizeTask): string {
   if (result.stopped) {
     return `已停止：总数 ${result.total || 0}，改名 ${result.renamed || 0}，移动 ${result.moved || 0}，跳过 ${result.skipped || 0}，失败 ${result.failed || 0}`;
   }
-  return `总数 ${result.total || 0}，改名 ${result.renamed || 0}，移动 ${result.moved || 0}，跳过 ${result.skipped || 0}，失败 ${result.failed || 0}`;
+  return `总数 ${result.total || 0}，改名 ${result.renamed || 0}，移动 ${result.moved || 0}，跳过 ${result.skipped || 0}（无需处理 ${result.normal_skipped || 0} / 需关注 ${result.abnormal_skipped || 0}），失败 ${result.failed || 0}`;
 }
 
 function resultSummary(task: MediaOrganizeTask): string {
   const r = task.last_run_result;
   if (!r) return "";
-  return `${r.total || 0} 项 · 改${r.renamed || 0} · 移${r.moved || 0} · 失${r.failed || 0}`;
+  return `${r.total || 0} 项 · 改${r.renamed || 0} · 移${r.moved || 0} · 失${r.failed || 0}` +
+    ((r.abnormal_skipped || 0) > 0 ? ` · 需关注 ${r.abnormal_skipped}` : "");
 }
 
 function hasActiveTasks(): boolean {

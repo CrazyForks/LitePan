@@ -16,6 +16,10 @@ func (s *Service) ForceStopTask(ctx context.Context, id int64) (bool, error) {
 	cancel := s.taskCancels[id]
 	s.mu.Unlock()
 	if !running {
+		s.mu.Lock()
+		delete(s.waitingRuns, id)
+		delete(s.pendingRun, id)
+		s.mu.Unlock()
 		return false, nil
 	}
 	task, err := s.repo.Get(ctx, id)
@@ -38,6 +42,7 @@ func (s *Service) ForceStopTask(ctx context.Context, id int64) (bool, error) {
 }
 
 func (s *Service) clearTaskRunState(taskID int64, accountID int64) {
+	delete(s.waitingRuns, taskID)
 	delete(s.running, taskID)
 	delete(s.taskCancels, taskID)
 	delete(s.pendingRun, taskID)

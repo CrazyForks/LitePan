@@ -32,6 +32,8 @@ export interface MediaOrganizeRunResult {
   renamed?: number;
   moved?: number;
   skipped?: number;
+  normal_skipped?: number;
+  abnormal_skipped?: number;
   failed?: number;
   stopped?: boolean;
 }
