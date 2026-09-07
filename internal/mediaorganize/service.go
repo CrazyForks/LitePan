@@ -799,35 +799,18 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 	if plan == nil {
 		return map[string]any{"stopped": aborted}
 	}
-	relocates := make([]PlanAction, 0)
-	for _, action := range plan.Actions {
-		if action.Kind == ActionKindRelocate {
-			relocates = append(relocates, action)
-		}
-	}
 	// 规划冲突同时保留动作和诊断记录，统计以动作结果为准。
 	seen := make(map[string]bool)
-	for _, action := range relocates {
+	total, renamed, moved, failed := 0, 0, 0, 0
+	skipped, normalSkipped := 0, 0
+	for _, action := range plan.Actions {
+		if action.Kind != ActionKindRelocate {
+			continue
+		}
+		total++
 		if action.SourceID != "" {
 			seen[action.SourceID] = true
 		}
-	}
-	skippedItems := make([]map[string]any, 0, len(plan.Skipped))
-	for _, item := range plan.Skipped {
-		id := stringFromAny(item["file_id"])
-		if id != "" && seen[id] {
-			continue
-		}
-		if id != "" {
-			seen[id] = true
-		}
-		skippedItems = append(skippedItems, item)
-	}
-	total := len(relocates) + len(skippedItems)
-	renamed, moved, failed := 0, 0, 0
-	relocateSkips := 0
-	normalSkipped := 0
-	for _, action := range relocates {
 		switch action.Status {
 		case "done":
 			if action.SourceParentID == action.TargetParentID {
@@ -836,7 +819,7 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 				moved++
 			}
 		case "skipped":
-			relocateSkips++
+			skipped++
 			if isNormalSkip(action.Error, action.Reason) {
 				normalSkipped++
 			}
@@ -844,15 +827,19 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 			failed++
 		}
 	}
-	for _, item := range skippedItems {
+	for _, item := range plan.Skipped {
+		id := stringFromAny(item["file_id"])
+		if id != "" && seen[id] {
+			continue
+		}
+		if id != "" {
+			seen[id] = true
+		}
+		total++
+		skipped++
 		if isNormalSkip("", stringFromAny(item["reason"])) {
 			normalSkipped++
 		}
-	}
-	skipped := relocateSkips + len(skippedItems)
-	abnormalSkipped := skipped - normalSkipped
-	if abnormalSkipped < 0 {
-		abnormalSkipped = 0
 	}
 	return map[string]any{
 		"total":            total,
@@ -860,7 +847,7 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 		"moved":            moved,
 		"skipped":          skipped,
 		"normal_skipped":   normalSkipped,
-		"abnormal_skipped": abnormalSkipped,
+		"abnormal_skipped": skipped - normalSkipped,
 		"failed":           failed,
 		"stopped":          aborted,
 	}

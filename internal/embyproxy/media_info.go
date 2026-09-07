@@ -342,19 +342,16 @@ func (s *Service) probeMediaInfo(ctx context.Context, base, apiKey, itemID strin
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return true, fmt.Errorf("Emby 媒体信息提取等待超时")
-		}
 		var netErr net.Error
-		if errors.As(err, &netErr) && netErr.Timeout() {
-			return true, fmt.Errorf("Emby 媒体信息提取等待超时")
+		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+			return true, errors.New("等待 Emby 媒体信息提取超时")
 		}
 		return false, embyTestConnectError(err)
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return false, fmt.Errorf("Emby 返回 HTTP %d", resp.StatusCode)
+		return false, fmt.Errorf("媒体信息提取失败，Emby 返回 HTTP %d", resp.StatusCode)
 	}
 	return false, nil
 }

@@ -278,7 +278,6 @@ export function useUploadFolderPlanner(ctx: UploadActionsCtx) {
           batchRootParentId: p.batchRootParentId,
           batchRootOwned: p.batchRootOwned,
         });
-        store.ensureUploadTaskDisplayOrder(p.localTask);
       }
       const localTasks = [...skipped, ...plans.map((p) => p.localTask)];
       store.removeLocalUploadTask(preparingTask.task_id);

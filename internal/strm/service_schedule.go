@@ -81,42 +81,6 @@ func (s *Service) queuedTasks(tasks []*domain.StrmTask, now time.Time) []*domain
 	return result
 }
 
-func (s *Service) hasPendingRun(id int64) bool {
-	if s == nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.pendingRun[id]
-	return ok
-}
-
-func (s *Service) shouldRun(task *domain.StrmTask, now time.Time) bool {
-	if s.isOrganizeBusy(task.AccountID) {
-		return false
-	}
-	if s.isRetentionBusy(task.AccountID) {
-		return false
-	}
-	if s.IsTaskFileOperationBusy(task.ID) {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.running[task.ID] {
-		return false
-	}
-	if s.dirtyAccounts[task.AccountID] {
-		delete(s.dirtyAccounts, task.AccountID)
-		return true
-	}
-	interval := s.effectiveScanIntervalMinutes(task)
-	if task.LastScan.IsZero() {
-		return true
-	}
-	return now.Sub(task.LastScan) >= time.Duration(interval)*time.Minute
-}
-
 func (s *Service) runTaskAsync(task *domain.StrmTask) {
 	if s.StartupRemaining() > 0 {
 		return

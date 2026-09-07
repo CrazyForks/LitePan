@@ -49,7 +49,7 @@ func (r reciprocalRetentionBusy) GetRunningAccountIDs() []int64 {
 	return []int64{7}
 }
 
-func TestShouldRunCrossBusyCheckNoDeadlock(t *testing.T) {
+func TestRunTaskAsyncCrossBusyCheckNoDeadlock(t *testing.T) {
 	svc, _ := testService(t)
 	svc.SetRetentionBusyChecker(reciprocalRetentionBusy{other: svc})
 
@@ -65,7 +65,7 @@ func TestShouldRunCrossBusyCheckNoDeadlock(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		task := &domain.StrmTask{ID: 1, AccountID: 7, LastScan: time.Now().Add(-2 * time.Hour)}
-		svc.shouldRun(task, time.Now())
+		svc.runTaskAsync(task)
 	}()
 	go func() {
 		wg.Wait()
@@ -75,7 +75,7 @@ func TestShouldRunCrossBusyCheckNoDeadlock(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("shouldRun cross busy check deadlocked")
+		t.Fatal("runTaskAsync cross busy check deadlocked")
 	}
 }
 
@@ -121,7 +121,7 @@ func TestTaskStartLimitMatchesLegacyScheduler(t *testing.T) {
 	svc.mu.Unlock()
 }
 
-func TestShouldRunUsesGlobalIntervalForLegacyTasks(t *testing.T) {
+func TestQueuedTasksUsesGlobalIntervalForLegacyTasks(t *testing.T) {
 	svc, _ := testService(t)
 	if err := svc.settings.Update(context.Background(), map[string]string{
 		settings.KeyStrmDefaultScanInterval: "360",
@@ -131,24 +131,26 @@ func TestShouldRunUsesGlobalIntervalForLegacyTasks(t *testing.T) {
 	task := &domain.StrmTask{
 		ID:           1,
 		AccountID:    1,
+		Status:       domain.StrmStatusActive,
 		ScanInterval: 10, // 历史任务里固化过的旧值
 		LastScan:     time.Now().Add(-20 * time.Minute),
 	}
-	if svc.shouldRun(task, time.Now()) {
+	if len(svc.queuedTasks([]*domain.StrmTask{task}, time.Now())) != 0 {
 		t.Fatal("全局扫描间隔应优先于历史任务级间隔，20 分钟后不应触发")
 	}
 }
 
-func TestShouldRunFallsBackToLegacyTaskIntervalWhenGlobalMissing(t *testing.T) {
+func TestQueuedTasksFallsBackToLegacyTaskIntervalWhenGlobalMissing(t *testing.T) {
 	svc, _ := testService(t)
 	svc.settings = nil
 	task := &domain.StrmTask{
 		ID:           1,
 		AccountID:    1,
+		Status:       domain.StrmStatusActive,
 		ScanInterval: 10,
 		LastScan:     time.Now().Add(-20 * time.Minute),
 	}
-	if !svc.shouldRun(task, time.Now()) {
+	if len(svc.queuedTasks([]*domain.StrmTask{task}, time.Now())) != 1 {
 		t.Fatal("全局配置缺失时应回退历史任务级间隔，避免升级后停调度")
 	}
 }

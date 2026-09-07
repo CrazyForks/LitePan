@@ -17,7 +17,6 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
   const taskPanelCategory = ref<"upload" | "relay" | "offline">("upload");
   const uploadTaskPanelLoading = ref(false);
   const uploadTaskPanelLoadingText = ref("正在准备上传任务...");
-  const uploadTaskOrderMap = ref<Record<string, number>>({});
   const uploadTaskServerConcurrency = ref(3);
   const batchPauseInProgress = ref(false);
   const pendingDirRefreshBatches = ref<Record<string, { count: number; creationRefreshed: boolean }>>({});
@@ -48,8 +47,6 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
     pendingDirRefreshBatches.value = next;
   }
 
-  let uploadTaskOrderCounter = 0;
-
   const localUploadTaskControllers = new Map<string, AbortController>();
   const localUploadTaskPayloads = new Map<string, LocalUploadPayload>();
   const canceledLocalUploadTaskIds = new Set<string>();
@@ -64,15 +61,6 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
     if (task.status !== "success" && task.status !== "skipped") return false;
     const parentId = String(task.result?.parent_id ?? task.target_path ?? "");
     return parentId === currentPath || task.target_path === currentPath;
-  }
-
-  function ensureUploadTaskDisplayOrder(task: UploadTask) {
-    const key = getUploadTaskStableKey(task);
-    if (!key || uploadTaskOrderMap.value[key]) return;
-    const preferred = Number(task.queue_order || 0);
-    const next = preferred > 0 ? preferred : uploadTaskOrderCounter + 1;
-    uploadTaskOrderCounter = Math.max(uploadTaskOrderCounter, next);
-    uploadTaskOrderMap.value[key] = next;
   }
 
   const displayUploadTasks = computed(() => {
@@ -163,7 +151,6 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
 
   function addLocalUploadTasks(tasks: UploadTask[]) {
     if (!tasks.length) return;
-    tasks.forEach(ensureUploadTaskDisplayOrder);
     // 调度器按展示顺序取下一个本地任务，追加可保持先加入先上传。
     localUploadTasks.value = [...localUploadTasks.value, ...tasks];
     rebuildLocalUploadTaskIndexes();
@@ -260,7 +247,6 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
         message: "页面已刷新，本地投递已中断，请重新选择文件",
         error: "页面刷新后无法继续本地投递，请重新选择文件",
       })) as UploadTask[];
-      restored.forEach((task) => ensureUploadTaskDisplayOrder(task));
       localUploadTasks.value = restored;
       rebuildLocalUploadTaskIndexes();
       persistLocalUploadTasks();
@@ -294,7 +280,6 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
 
   function upsertRemoteUploadTasks(tasks: UploadTask[]) {
     for (const task of tasks) {
-      ensureUploadTaskDisplayOrder(task);
       const index = remoteUploadTaskIndexes.get(task.task_id);
       if (index === undefined) {
         remoteUploadTaskIndexes.set(task.task_id, uploadTasks.value.length);
@@ -336,7 +321,6 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
     taskPanelCategory,
     uploadTaskPanelLoading,
     uploadTaskPanelLoadingText,
-    uploadTaskOrderMap,
     uploadTaskServerConcurrency,
     batchPauseInProgress,
     localUploadTaskControllers,
@@ -358,7 +342,6 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
     activeUploadTasks,
     uploadTaskLabel,
     uploadAffectsCurrentDirectory,
-    ensureUploadTaskDisplayOrder,
     createLocalUploadTask,
     createSkippedUploadTask,
     addLocalUploadTask,

@@ -2,6 +2,28 @@ package mediaorganize
 
 import "testing"
 
+func TestSummaryCountsPendingAndUnidentifiedDiagnostics(t *testing.T) {
+	plan := &Plan{Actions: []PlanAction{
+		{Kind: ActionKindRelocate, SourceID: "pending", Status: "pending"},
+		{Kind: ActionKindRelocate, SourceID: "rename", Status: "done", SourceParentID: "a", TargetParentID: "a"},
+		{Kind: ActionKindRelocate, SourceID: "move", Status: "done", SourceParentID: "a", TargetParentID: "b"},
+		{Kind: "mkdir", SourceID: "directory", Status: "done"},
+	}, Skipped: []map[string]any{
+		{"file_id": "pending", "reason": "未识别"},
+		{"reason": "已整理"},
+		{"reason": "未识别"},
+	}}
+	got := summarizePlan(plan, true)
+	for key, want := range map[string]int{"total": 5, "renamed": 1, "moved": 1, "skipped": 2, "normal_skipped": 1, "abnormal_skipped": 1, "failed": 0} {
+		if got[key] != want {
+			t.Fatalf("%s=%v，期望%d", key, got[key], want)
+		}
+	}
+	if got["stopped"] != true {
+		t.Fatal("中止标记丢失")
+	}
+}
+
 func TestSummaryDeduplicatesConflictDiagnostics(t *testing.T) {
 	p := &Plan{Actions: []PlanAction{
 		{Kind: ActionKindRelocate, SourceID: "1", Status: "skipped", Error: "目标已存在同名（未开启覆盖）"},
