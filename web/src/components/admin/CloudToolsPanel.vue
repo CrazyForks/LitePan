@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { containsQuery } from "@/utils/format";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { getApiErrorMessage } from "@/api/client";
 import {
@@ -28,8 +29,7 @@ const searchInputRef = ref<HTMLInputElement | null>(null);
 const cardTitles = ["Emby 反代", "飞牛影视反代", "115 STRM 增强", "夸克 STRM 接管", "AI 辅助识别", "目录整理分类", "从服务器上传", "垃圾清理工具", "视频海报生成"];
 
 function matches(title: string) {
-  const q = searchQuery.value.trim().toLowerCase();
-  return !q || title.toLowerCase().includes(q);
+  return containsQuery(title, searchQuery.value);
 }
 
 const hasMatch = computed(() => {

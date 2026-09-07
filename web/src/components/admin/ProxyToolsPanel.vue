@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { containsQuery } from "@/utils/format";
 import { computed, onMounted, reactive, ref } from "vue";
 import { getApiErrorMessage } from "@/api/client";
 import {
@@ -18,8 +19,7 @@ import ProxyWorkspace, { type ProxyField, type ProxyWorkspaceItem } from "@/comp
 const props = withDefaults(defineProps<{ searchQuery?: string }>(), { searchQuery: "" });
 
 function matches(title: string) {
-  const q = props.searchQuery.trim().toLowerCase();
-  return !q || title.toLowerCase().includes(q);
+  return containsQuery(title, props.searchQuery);
 }
 
 /* ── Emby 多配置 ── */

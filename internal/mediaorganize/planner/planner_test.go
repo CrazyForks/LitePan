@@ -829,18 +829,18 @@ func TestRenamePlanAddsTMDBToStructuredMovieDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var dirRename *moplan.PlanAction
+	dirRenameIdx := -1
 	for i := range plan.Actions {
 		if plan.Actions[i].SourceID == "movie" {
-			dirRename = &plan.Actions[i]
+			dirRenameIdx = i
 			break
 		}
 	}
-	if dirRename == nil {
+	if dirRenameIdx < 0 {
 		t.Fatalf("want directory rename action to add tmdb id, actions=%+v skipped=%+v", plan.Actions, plan.Skipped)
 	}
-	if dirRename.TargetName != "千与千寻 (2001) {tmdb-129}" {
-		t.Fatalf("target dir = %q", dirRename.TargetName)
+	if got := plan.Actions[dirRenameIdx].TargetName; got != "千与千寻 (2001) {tmdb-129}" {
+		t.Fatalf("target dir = %q", got)
 	}
 }
 
@@ -1281,18 +1281,19 @@ func TestMovePlanSkipsAlreadyOrganizedTVFileWhenTargetExists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var fileAction *moplan.PlanAction
+	fileIdx := -1
 	for i := range plan.Actions {
 		if plan.Actions[i].SourceID == "ep01" {
-			fileAction = &plan.Actions[i]
+			fileIdx = i
 			break
 		}
 	}
-	if fileAction == nil {
+	if fileIdx < 0 {
 		t.Fatalf("expected file move action, actions=%+v", plan.Actions)
 	}
+	fileAction := plan.Actions[fileIdx]
 	if fileAction.Status != "skipped" {
-		t.Fatalf("expected target conflict skip, status=%q action=%+v", fileAction.Status, *fileAction)
+		t.Fatalf("expected target conflict skip, status=%q action=%+v", fileAction.Status, fileAction)
 	}
 	if !strings.Contains(fileAction.Error, "目标已存在同名") {
 		t.Fatalf("unexpected skip error: %q", fileAction.Error)
@@ -1343,21 +1344,22 @@ func TestMovePlanMarksOverwriteTargetWhenTargetExists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var fileAction *moplan.PlanAction
+	fileIdx := -1
 	for i := range plan.Actions {
 		if plan.Actions[i].SourceID == "ep01" {
-			fileAction = &plan.Actions[i]
+			fileIdx = i
 			break
 		}
 	}
-	if fileAction == nil {
+	if fileIdx < 0 {
 		t.Fatalf("expected file move action, actions=%+v", plan.Actions)
 	}
+	fileAction := plan.Actions[fileIdx]
 	if fileAction.Status == "skipped" {
-		t.Fatalf("overwrite should keep action pending: %+v", *fileAction)
+		t.Fatalf("overwrite should keep action pending: %+v", fileAction)
 	}
 	if got := fmt.Sprint(fileAction.Metadata["_overwrite_target_id"]); got != "existing_ep01" {
-		t.Fatalf("overwrite target id = %q, want existing_ep01; action=%+v", got, *fileAction)
+		t.Fatalf("overwrite target id = %q, want existing_ep01; action=%+v", got, fileAction)
 	}
 }
 
@@ -1410,7 +1412,7 @@ func TestPromotedMovieMoveCreatesMoveAndRenameDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var promoted *moplan.PlanAction
+	promotedIdx := -1
 	for i := range plan.Actions {
 		a := &plan.Actions[i]
 		if a.Kind != moplan.ActionKindMoveAndRenameDir {
@@ -1418,13 +1420,14 @@ func TestPromotedMovieMoveCreatesMoveAndRenameDir(t *testing.T) {
 		}
 		flag, _ := a.Metadata["promoted_from_tv_tree"].(bool)
 		if flag {
-			promoted = a
+			promotedIdx = i
 			break
 		}
 	}
-	if promoted == nil {
+	if promotedIdx < 0 {
 		t.Fatalf("expected promoted move_and_rename_dir, actions=%+v", plan.Actions)
 	}
+	promoted := plan.Actions[promotedIdx]
 	if promoted.SourceID != "d_movie" {
 		t.Fatalf("source_id = %q, want d_movie", promoted.SourceID)
 	}

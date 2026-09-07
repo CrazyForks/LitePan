@@ -540,15 +540,6 @@ func (m *Manager) resolveCrossTransferTarget(ctx context.Context, taskID string)
 	return folderID, joinUploadDisplayPath(displayPath, relDir), nil
 }
 
-func (m *Manager) taskLocalPath(taskID string) string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if st, ok := m.tasks[taskID]; ok {
-		return st.localPath
-	}
-	return ""
-}
-
 func openCrossTransferTempFile(localPath string, resume bool) (*os.File, error) {
 	if resume {
 		return os.OpenFile(localPath, os.O_WRONLY|os.O_CREATE, 0o644)

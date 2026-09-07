@@ -64,5 +64,5 @@ func (g *Gate) HandleRetryFailure(ctx context.Context, accountID int64, cause er
 	if err != nil || st.Status != domain.AuthActive {
 		return
 	}
-	g.svc.recordRefreshFailure(ctx, accountID, st, driver.RefreshRetryable, driver.CallerPassive, cause)
+	g.svc.recordRefreshFailure(ctx, accountID, driver.RefreshRetryable, driver.CallerPassive, cause)
 }

@@ -72,7 +72,6 @@ const (
 )
 
 const (
-	CleanupLocalNone          = ""
 	CleanupLocalFileOnSuccess = "file_on_success"
 	CleanupLocalPathOnSuccess = "path_on_success"
 	CleanupLocalTreeOnSuccess = "tree_on_success"

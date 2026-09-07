@@ -467,3 +467,25 @@ func TestUpdateRejectsUnsafeDirectoryNameAndCondition(t *testing.T) {
 		t.Fatal("应拒绝同级重复匹配值")
 	}
 }
+
+// 防御性加固：firstMatchingRule 命中后，证据必须记录"命中规则"的字段，
+// 而不是循环最后一条被求值规则的残留。（内置模板一级固定 type、二级固定单一字段，
+// 当前校验下同层不会混用字段，属不可触发的加固；直接单测函数行为。）
+func TestFirstMatchingRuleEvidenceUsesWinningField(t *testing.T) {
+	svc := newService(t, true)
+	state := &evaluationState{
+		req:       classification.Request{MediaType: "movie", Raw: map[string]any{}},
+		evaluated: map[string][]string{},
+	}
+	rules := []Rule{
+		{Name: "电影", Condition: "type=movie"},
+		{Name: "中文片", Condition: "original_language=zh"}, // 不命中，且字段不同
+	}
+	rule, matched, err := svc.firstMatchingRule(context.Background(), state, rules)
+	if err != nil || !matched || rule.Name != "电影" {
+		t.Fatalf("命中规则异常: rule=%+v matched=%v err=%v", rule, matched, err)
+	}
+	if state.evaluatedField != "type" || len(state.evaluatedValues) != 1 || state.evaluatedValues[0] != "movie" {
+		t.Fatalf("证据应记录命中规则(type)的字段值，得到 field=%q values=%v", state.evaluatedField, state.evaluatedValues)
+	}
+}

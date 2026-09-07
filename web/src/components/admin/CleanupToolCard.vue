@@ -11,7 +11,7 @@ import {
 } from "@/api/spaceCleanup";
 import { confirm } from "@/composables/useConfirm";
 import { toast } from "@/composables/useToast";
-import { formatSize } from "@/utils/format";
+import { containsQuery, formatSize } from "@/utils/format";
 import AppButton from "@/components/base/AppButton.vue";
 import AppModal from "@/components/base/AppModal.vue";
 import CloudToolCard from "@/components/admin/CloudToolCard.vue";
@@ -25,8 +25,6 @@ interface DisplayItem {
   paths: string[];
   sizeBytes: number;
   memoryBytes: number;
-  fileCount: number;
-  dirCount: number;
 }
 
 interface DisplayGroup {
@@ -79,8 +77,6 @@ const displayGroups = computed<DisplayGroup[]>(() => {
             paths: [],
             sizeBytes: 0,
             memoryBytes: 0,
-            fileCount: 0,
-            dirCount: 0,
           };
           buckets.set(key, display);
         }
@@ -88,8 +84,6 @@ const displayGroups = computed<DisplayGroup[]>(() => {
         if (item.path) display.paths.push(item.path);
         display.sizeBytes += item.size_bytes;
         display.memoryBytes += item.memory_bytes ?? 0;
-        display.fileCount += item.file_count ?? 0;
-        display.dirCount += item.dir_count ?? 0;
       }
       return {
         key: group.key,
@@ -144,8 +138,7 @@ const statValue = computed(() => (report.value ? healthScore.value : "—"));
 const statLabel = computed(() => (report.value ? "综合评分" : "等待体检"));
 
 function matches(title: string) {
-  const query = props.searchQuery.trim().toLowerCase();
-  return !query || title.toLowerCase().includes(query);
+  return containsQuery(title, props.searchQuery);
 }
 
 function replaceSelected(next: Set<string>) {

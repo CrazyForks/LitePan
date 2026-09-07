@@ -62,35 +62,32 @@ func TestReplanMatchedGroupRebuildsTVWorkDir(t *testing.T) {
 		t.Fatalf("手动匹配重建动作过少: %+v", plan.Actions)
 	}
 
-	var workDir, seasonDir, fileAction *moplan.PlanAction
+	workIdx, seasonIdx, fileIdx := -1, -1, -1
 	for i := range plan.Actions {
 		action := &plan.Actions[i]
 		switch {
 		case action.Kind == "ensure_dir" && action.Metadata["is_work_dir"] == true:
-			workDir = action
+			workIdx = i
 		case action.Kind == "ensure_dir" && action.Metadata["is_season_dir"] == true:
-			seasonDir = action
+			seasonIdx = i
 		case action.SourceID == "f1":
-			fileAction = action
+			fileIdx = i
 		}
 	}
-	if workDir == nil {
-		t.Fatalf("未生成作品目录动作: %+v", plan.Actions)
+	if workIdx < 0 || seasonIdx < 0 || fileIdx < 0 {
+		t.Fatalf("未生成预期动作: %+v", plan.Actions)
 	}
-	if workDir.TargetName != "转生贵族的异世界冒险录 (2023) {tmdb-220999}" {
-		t.Fatalf("作品目录名错误: %+v", workDir)
+	if got := plan.Actions[workIdx].TargetName; got != "转生贵族的异世界冒险录 (2023) {tmdb-220999}" {
+		t.Fatalf("作品目录名错误: %q", got)
 	}
-	if seasonDir == nil || seasonDir.TargetParentID != "ref:"+workDir.ID {
-		t.Fatalf("季目录动作错误: %+v", seasonDir)
+	if got, want := plan.Actions[seasonIdx].TargetParentID, "ref:"+plan.Actions[workIdx].ID; got != want {
+		t.Fatalf("季目录动作错误: %+v", plan.Actions[seasonIdx])
 	}
-	if fileAction == nil {
-		t.Fatalf("未生成文件动作: %+v", plan.Actions)
+	if got, want := plan.Actions[fileIdx].TargetParentID, "ref:"+plan.Actions[seasonIdx].ID; got != want {
+		t.Fatalf("文件动作未指向季目录: %+v", plan.Actions[fileIdx])
 	}
-	if fileAction.TargetParentID != "ref:"+seasonDir.ID {
-		t.Fatalf("文件动作未指向季目录: %+v", fileAction)
-	}
-	if !strings.Contains(fileAction.TargetName, "转生贵族的异世界冒险录 (2023) S01E01") {
-		t.Fatalf("文件名未使用手动匹配后的标准名: %q", fileAction.TargetName)
+	if !strings.Contains(plan.Actions[fileIdx].TargetName, "转生贵族的异世界冒险录 (2023) S01E01") {
+		t.Fatalf("文件名未使用手动匹配后的标准名: %q", plan.Actions[fileIdx].TargetName)
 	}
 }
 

@@ -97,3 +97,9 @@ export function formatRelativeTimeAgo(value?: string, emptyLabel = "从未刷新
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
   return `${Math.floor(diff / 86_400_000)} 天前`;
 }
+
+/** 增强工具卡片标题搜索过滤：空查询匹配所有，否则大小写不敏感包含匹配。 */
+export function containsQuery(title: string, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  return !q || title.toLowerCase().includes(q);
+}

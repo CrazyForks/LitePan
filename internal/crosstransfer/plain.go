@@ -195,14 +195,18 @@ func (s *Service) enumeratePlainSources(ctx context.Context, sourceAccountID int
 	}
 	listedDirs := 0
 	for len(queue) > 0 && acc.truncatedReason == "" {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		remainingDirs := maxScanDirs - listedDirs
 		if remainingDirs <= 0 {
 			acc.truncated = true
 			acc.truncatedReason = fmt.Sprintf("目录数量超过 %d 个，已停止枚举，请缩小选择范围", maxScanDirs)
 			break
 		}
-		batch := queue[:min(len(queue), remainingDirs)]
-		queue = queue[len(batch):]
+		batchSize := min(len(queue), scanDirConcurrency, remainingDirs)
+		batch := queue[:batchSize]
+		queue = queue[batchSize:]
 
 		outcomes := make([]plainListOutcome, len(batch))
 		var wg sync.WaitGroup

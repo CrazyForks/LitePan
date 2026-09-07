@@ -352,9 +352,9 @@ function statusTitle(task: MediaOrganizeTask): string {
     return isTaskActive(task) ? "任务正在执行" : "任务尚未执行";
   }
   if (result.stopped) {
-    return `已停止：总数 ${result.total || 0}，改名 ${result.renamed || 0}，移动 ${result.moved || 0}，跳过 ${result.skipped || 0}，失败 ${result.failed || 0}`;
+    return `已停止：总数 ${result.total || 0}，改名 ${result.renamed || 0}，移动 ${result.moved || 0}，跳过 ${result.skipped || 0}，失败 ${result.failed || 0}，未执行 ${result.pending || 0}`;
   }
-  return `总数 ${result.total || 0}，改名 ${result.renamed || 0}，移动 ${result.moved || 0}，跳过 ${result.skipped || 0}（无需处理 ${result.normal_skipped || 0} / 需关注 ${result.abnormal_skipped || 0}），失败 ${result.failed || 0}`;
+  return `总数 ${result.total || 0}，改名 ${result.renamed || 0}，移动 ${result.moved || 0}，跳过 ${result.skipped || 0}（无需处理 ${result.normal_skipped || 0} / 需关注 ${result.abnormal_skipped || 0}），失败 ${result.failed || 0}，未执行 ${result.pending || 0}`;
 }
 
 function resultSummary(task: MediaOrganizeTask): string {

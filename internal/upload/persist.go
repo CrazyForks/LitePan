@@ -9,16 +9,20 @@ import (
 	"litepan/internal/domain"
 )
 
+// persistTask 持久化任务状态。内部先持锁完成快照成稿（含 JSON 序列化），
+// 解锁后仅做数据库 IO —— 避免与其它 goroutine 的进度更新并发读写同一任务状态。
 func (m *Manager) persistTask(st *taskState) error {
 	if m.repo == nil || st == nil {
 		return nil
 	}
+	m.mu.Lock()
 	rec := recordFromState(st)
+	m.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := m.repo.Upsert(ctx, rec)
 	if err != nil && m.log != nil {
-		m.log.Warn("upload task persist failed", "task_id", st.TaskID, "err", err)
+		m.log.Warn("upload task persist failed", "task_id", rec.TaskID, "err", err)
 	}
 	return err
 }

@@ -22,8 +22,10 @@ import (
 )
 
 type fakeDeleterDriver struct {
-	deleted [][]string
-	listed  map[string][]domain.FileItem
+	deleted  [][]string
+	listed   map[string][]domain.FileItem
+	failIDs  map[string]error // 命中其中任一 ID 时 DeleteFiles 返回错误（nil 则全部成功）
+	listErrs map[string]error // 按 parent 返回 List 错误（可选）
 }
 
 func (d *fakeDeleterDriver) Config() driver.Config      { return driver.Config{Name: "x"} }
@@ -32,6 +34,9 @@ func (d *fakeDeleterDriver) Init(context.Context) error { return nil }
 func (d *fakeDeleterDriver) Drop(context.Context) error { return nil }
 func (d *fakeDeleterDriver) Ping(context.Context) error { return nil }
 func (d *fakeDeleterDriver) ListFiles(_ context.Context, parentID string) ([]domain.FileItem, error) {
+	if err := d.listErrs[parentID]; err != nil {
+		return nil, err
+	}
 	return d.listed[parentID], nil
 }
 
@@ -60,6 +65,11 @@ func TestBatchPause(t *testing.T) {
 }
 func (d *fakeDeleterDriver) DeleteFiles(_ context.Context, ids []string) error {
 	d.deleted = append(d.deleted, ids)
+	for _, id := range ids {
+		if err := d.failIDs[id]; err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1447,5 +1457,54 @@ func TestResumePendingCrossTransferDownloadRunsBeforeNormalPending(t *testing.T)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("恢复任务未优先接棒下载")
+	}
+}
+
+// 同账号同目录下两个批次：A 批整目录删除成功、B 批退回逐文件且失败。
+// 回归验证：B 批失败不得把 A 批任务连坐标失败。
+func TestBatchDeleteFailureDoesNotBlameRootDeletedBatch(t *testing.T) {
+	drv := &fakeDeleterDriver{
+		listed: map[string][]domain.FileItem{
+			"parent-a": {{ID: "root-a", Name: "folder-a", IsDir: true}},
+			"parent-b": {{ID: "other", Name: "folder-b", IsDir: true}}, // B 的根目录未确认 → 退回逐文件
+		},
+		failIDs: map[string]error{"b1-file": errors.New("mock 删除失败")},
+	}
+	exec := driverexec.New(fakeProvider{drv: drv}, nil)
+	files := file.NewService(exec, nil, nil, nil, nil, nil)
+	m := NewManager(Options{Exec: exec, Files: files, DataDir: t.TempDir()})
+
+	makeTask := func(id, batchID, batchName, rootID, rootParent string) *taskState {
+		return &taskState{Task: Task{
+			TaskID: id, BatchID: batchID, BatchName: batchName,
+			AccountID: 7, Status: StatusSuccess, TargetPath: "nested-dir",
+			Result: map[string]any{
+				"file_id":              id + "-file",
+				"batch_root_id":        rootID,
+				"batch_root_parent_id": rootParent,
+				"batch_root_owned":     true,
+			},
+		}, runDone: make(chan struct{})}
+	}
+	m.mu.Lock()
+	m.tasks["a1"] = makeTask("a1", "batch-a", "folder-a", "root-a", "parent-a")
+	m.tasks["a2"] = makeTask("a2", "batch-a", "folder-a", "root-a", "parent-a")
+	m.tasks["b1"] = makeTask("b1", "batch-b", "folder-b", "root-b", "parent-b")
+	m.mu.Unlock()
+
+	result := m.BatchDelete(context.Background(), []string{"a1", "a2", "b1"}, true, true)
+
+	if len(result.FailedTaskIDs) != 1 || result.FailedTaskIDs[0] != "b1" {
+		t.Fatalf("FailedTaskIDs=%v，应只有 b1", result.FailedTaskIDs)
+	}
+	if len(result.DeletedTaskIDs) != 2 {
+		t.Fatalf("DeletedTaskIDs=%v，A 批两个任务应删除成功", result.DeletedTaskIDs)
+	}
+	m.mu.Lock()
+	_, a1Left := m.tasks["a1"]
+	_, a2Left := m.tasks["a2"]
+	m.mu.Unlock()
+	if a1Left || a2Left {
+		t.Fatalf("A 批任务被连坐未移除：a1=%v a2=%v", a1Left, a2Left)
 	}
 }

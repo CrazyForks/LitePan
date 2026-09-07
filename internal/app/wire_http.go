@@ -69,9 +69,6 @@ func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core
 		Cache:     core.cache,
 		DB:        st.db,
 		Logs:      logs,
-		LogRetentionDays: func() int {
-			return st.settings.Int(settings.KeyLogRetentionDays)
-		},
 		UploadActivePaths: svc.uploads.ActiveTempPaths,
 		OfflineTempRoots:  svc.offlineDownloads.BuiltinTempRoots,
 		OfflineActivePaths: func(ctx context.Context) []string {

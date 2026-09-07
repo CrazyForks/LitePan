@@ -55,10 +55,6 @@ export function listCrossTransferRoutes() {
   return http.get<CrossTransferRoute[]>("/cross-transfer/routes");
 }
 
-export function scanCrossTransferSource(body: CrossTransferScanRequest) {
-  return http.post<CrossTransferScanResult>("/cross-transfer/scan", body);
-}
-
 export function scanCrossTransferSourceStream(
   body: CrossTransferScanRequest,
   signal?: AbortSignal,

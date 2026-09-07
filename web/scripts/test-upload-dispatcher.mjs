@@ -41,7 +41,6 @@ const store = {
   canceledLocalUploadTaskIds: new Set(),
   pausedLocalUploadTaskIds: new Set(),
   localDispatchingTaskIds: new Set(),
-  batchPauseInProgress: { value: false },
   updateLocalUploadTask() {},
 };
 const stream = {

@@ -39,7 +39,7 @@ func (s *Service) refreshUnlocked(ctx context.Context, accountID int64, caller d
 	drv, err := s.drivers.Get(ctx, accountID)
 	if err != nil {
 		outcome := driver.ClassifyOAuthRefreshError(err)
-		s.recordRefreshFailure(ctx, accountID, st, outcome, caller, err)
+		s.recordRefreshFailure(ctx, accountID, outcome, caller, err)
 		return outcome, err
 	}
 	refresher, ok := drv.(driver.AuthRefresher)
@@ -52,7 +52,7 @@ func (s *Service) refreshUnlocked(ctx context.Context, accountID int64, caller d
 			return driver.RefreshSuccess, nil
 		}
 		err := domain.Errorf(domain.CodeAuthExpired, "该账号不支持自动续期，请更新认证信息")
-		s.recordRefreshFailure(ctx, accountID, st, driver.RefreshFatal, caller, err)
+		s.recordRefreshFailure(ctx, accountID, driver.RefreshFatal, caller, err)
 		return driver.RefreshFatal, err
 	}
 	// 初始化已换取凭据，不紧接着再刷新一遍。
@@ -76,7 +76,7 @@ func (s *Service) refreshUnlocked(ctx context.Context, accountID int64, caller d
 	if rerr == nil {
 		rerr = domain.Errf(domain.CodeAuthExpired)
 	}
-	s.recordRefreshFailure(ctx, accountID, st, outcome, caller, rerr)
+	s.recordRefreshFailure(ctx, accountID, outcome, caller, rerr)
 	return outcome, rerr
 }
 

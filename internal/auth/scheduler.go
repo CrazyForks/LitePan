@@ -161,9 +161,6 @@ func (sch *Scheduler) stopLoop() {
 }
 
 func (sch *Scheduler) mainLoop(ctx context.Context) {
-	sch.svc.setSchedulerLoop(true)
-	defer sch.svc.setSchedulerLoop(false)
-
 	sch.drainRecalc()
 	n := len(sch.svc.managedIDs())
 	sch.log.Info(fmt.Sprintf("认证调度器已启动，管理 %d 个账号", n))

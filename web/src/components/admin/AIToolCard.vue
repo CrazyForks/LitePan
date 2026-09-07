@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { containsQuery } from "@/utils/format";
 import { computed, onMounted, reactive, ref } from "vue";
 import { getApiErrorMessage } from "@/api/client";
 import {
@@ -74,8 +75,7 @@ const workspaceFields: ProxyField[] = [
 ];
 
 function matches(title: string) {
-  const q = props.searchQuery.trim().toLowerCase();
-  return !q || title.toLowerCase().includes(q);
+  return containsQuery(title, props.searchQuery);
 }
 
 function configComplete(values: Record<string, string>) {

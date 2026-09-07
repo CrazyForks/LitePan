@@ -259,8 +259,6 @@ const offline = props.offline;
 
 const {
   displayUploadTasks,
-  uploadTaskPanelLoading,
-  uploadTaskPanelLoadingText,
   getUploadTaskDriverBadge,
   getUploadTaskDisplayStatus,
   getUploadTaskPhaseLabel,
@@ -839,12 +837,9 @@ const emptyText = computed(() => {
 });
 
 const showLoading = computed(() =>
-  (taskPanelCategory.value === "upload" && uploadTaskPanelLoading?.value) ||
-  (taskPanelCategory.value === "offline" && offline.loading?.value),
+  taskPanelCategory.value === "offline" && offline.loading?.value,
 );
-const loadingText = computed(() =>
-  taskPanelCategory.value === "upload" ? uploadTaskPanelLoadingText?.value || "正在加载上传任务..." : "正在加载离线任务...",
-);
+const loadingText = computed(() => "正在加载离线任务...");
 
 function countByState(category: CategoryKey, state: StateKey) {
   if (category === "upload") return uploadRootRows.value.filter((row) => row.state === state).length;

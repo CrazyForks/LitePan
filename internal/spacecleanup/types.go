@@ -125,7 +125,6 @@ type Options struct {
 	DB        *store.DB
 	Logs      *logx.Manager
 
-	LogRetentionDays   func() int
 	UploadActivePaths  func() []string
 	OfflineTempRoots   func() []string
 	OfflineActivePaths func(context.Context) []string

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { containsQuery } from "@/utils/format";
 import { computed, onMounted, ref } from "vue";
 import { getApiErrorMessage } from "@/api/client";
 import {
@@ -52,8 +53,7 @@ function cloneConfig(value: ClassificationConfig): ClassificationConfig {
 }
 
 function matches(title: string) {
-  const query = props.searchQuery.trim().toLowerCase();
-  return !query || title.toLowerCase().includes(query);
+  return containsQuery(title, props.searchQuery);
 }
 
 function templateLabel(kind: ClassificationTemplateKind) {
@@ -65,14 +65,14 @@ const selectedTemplate = computed(() =>
 );
 
 // 当前选中的节点对象（用于右侧编辑绑定）
-const selectedNode = computed<{ rule: ClassificationRule; parent?: ClassificationRule; level: 0 | 1 } | null>(() => {
+const selectedNode = computed<{ rule: ClassificationRule; level: 0 | 1 } | null>(() => {
   const template = selectedTemplate.value;
   if (!template || selectedRootIdx.value < 0 || selectedRootIdx.value >= template.rules.length) return null;
   const rule = template.rules[selectedRootIdx.value];
   if (selectedChildIdx.value < 0) return { rule, level: 0 };
   const child = rule.children?.[selectedChildIdx.value];
   if (!child) return { rule, level: 0 };
-  return { rule: child, parent: rule, level: 1 };
+  return { rule: child, level: 1 };
 });
 
 // 内置模板（非 custom）的一级条件只读

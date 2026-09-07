@@ -35,6 +35,7 @@ export interface MediaOrganizeRunResult {
   normal_skipped?: number;
   abnormal_skipped?: number;
   failed?: number;
+  pending?: number;
   stopped?: boolean;
 }
 

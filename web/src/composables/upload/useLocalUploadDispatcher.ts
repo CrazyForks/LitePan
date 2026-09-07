@@ -45,7 +45,7 @@ export function useLocalUploadDispatcher(
       store.localUploadTaskPayloads.delete(task.task_id);
       return { success: false, canceled: true };
     }
-    if (store.batchPauseInProgress.value || store.pausedLocalUploadTaskIds.has(task.task_id)) {
+    if (store.pausedLocalUploadTaskIds.has(task.task_id)) {
       store.updateLocalUploadTask(task.task_id, { status: "paused", message: "上传已暂停", error: "" });
       return { success: false, paused: true };
     }
@@ -99,7 +99,7 @@ export function useLocalUploadDispatcher(
         store.pausedLocalUploadTaskIds.delete(task.task_id);
         return { success: false, canceled: true };
       }
-      if (store.pausedLocalUploadTaskIds.has(task.task_id) || store.batchPauseInProgress.value) {
+      if (store.pausedLocalUploadTaskIds.has(task.task_id)) {
         store.canceledLocalUploadTaskIds.delete(task.task_id);
         store.pausedLocalUploadTaskIds.delete(task.task_id);
         try {
@@ -129,7 +129,7 @@ export function useLocalUploadDispatcher(
         store.pausedLocalUploadTaskIds.delete(task.task_id);
         return { success: false, canceled: true };
       }
-      if (controller.signal.aborted && (store.pausedLocalUploadTaskIds.has(task.task_id) || store.batchPauseInProgress.value)) {
+      if (controller.signal.aborted && store.pausedLocalUploadTaskIds.has(task.task_id)) {
         store.updateLocalUploadTask(task.task_id, { status: "paused", message: "上传已暂停", error: "" });
         return { success: false, paused: true };
       }

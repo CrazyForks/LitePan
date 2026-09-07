@@ -195,8 +195,7 @@ func (s *Service) PlanTask(ctx context.Context, taskID string) (map[string]any, 
 	s.appendLog(taskID, "[MediaOrganize] 生成计划开始")
 
 	settingsDict := SettingsDict(s.settings)
-	delayMS := intFromAny(settingsDict["api_request_interval_ms"], 300)
-	ctx = driver.WithExtraAPIDelay(ctx, delayMS)
+	ctx = s.withAPIDelay(ctx)
 
 	task.Status = domain.MediaOrganizeStatusPlanning
 	_ = s.repo.Update(ctx, task)
@@ -262,6 +261,13 @@ func (s *Service) ApplyTask(ctx context.Context, taskID string) (map[string]any,
 	return map[string]any{"task_id": taskID, "submitted": true}, nil
 }
 
+// withAPIDelay 按全局 API 间隔设置给上下文叠加请求延迟。
+func (s *Service) withAPIDelay(ctx context.Context) context.Context {
+	settingsDict := SettingsDict(s.settings)
+	delayMS := intFromAny(settingsDict["api_request_interval_ms"], 300)
+	return driver.WithExtraAPIDelay(ctx, delayMS)
+}
+
 func (s *Service) RunTask(ctx context.Context, taskID string) (map[string]any, error) {
 	task, err := s.requireTask(ctx, taskID)
 	if err != nil {
@@ -285,8 +291,7 @@ func (s *Service) RunTask(ctx context.Context, taskID string) (map[string]any, e
 	s.log.Info("整理任务开始执行", "task_id", taskID, "task_name", task.TaskName, "account_id", accountID)
 	s.startRunner(taskID, accountID, func(runCtx context.Context) {
 		settingsDict := SettingsDict(s.settings)
-		delayMS := intFromAny(settingsDict["api_request_interval_ms"], 300)
-		runCtx = driver.WithExtraAPIDelay(runCtx, delayMS)
+		runCtx = s.withAPIDelay(runCtx)
 
 		task.Status = domain.MediaOrganizeStatusPlanning
 		_ = s.repo.Update(runCtx, task)
@@ -595,8 +600,7 @@ func (s *Service) buildPlan(ctx context.Context, taskID string, task *domain.Med
 
 func (s *Service) applyPlanRunner(ctx context.Context, taskID string, plan *Plan, task *domain.MediaOrganizeTask, cfg map[string]any, accountID int64) {
 	settingsDict := SettingsDict(s.settings)
-	delayMS := intFromAny(settingsDict["api_request_interval_ms"], 300)
-	ctx = driver.WithExtraAPIDelay(ctx, delayMS)
+	ctx = s.withAPIDelay(ctx)
 
 	aborted := false
 	task.Status = domain.MediaOrganizeStatusRunning
@@ -802,7 +806,7 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 	// 规划冲突同时保留动作和诊断记录，统计以动作结果为准。
 	seen := make(map[string]bool)
 	total, renamed, moved, failed := 0, 0, 0, 0
-	skipped, normalSkipped := 0, 0
+	skipped, normalSkipped, pending := 0, 0, 0
 	for _, action := range plan.Actions {
 		if action.Kind != ActionKindRelocate {
 			continue
@@ -825,6 +829,10 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 			}
 		case "failed":
 			failed++
+		default:
+			// 未执行（含中止时被留下、状态未落库的动作）单独计数，
+			// 保证 total == 各分桶之和，展示不自相矛盾。
+			pending++
 		}
 	}
 	for _, item := range plan.Skipped {
@@ -849,6 +857,7 @@ func summarizePlan(plan *Plan, aborted bool) map[string]any {
 		"normal_skipped":   normalSkipped,
 		"abnormal_skipped": skipped - normalSkipped,
 		"failed":           failed,
+		"pending":          pending,
 		"stopped":          aborted,
 	}
 }
@@ -862,9 +871,9 @@ func formatSummaryZh(summary map[string]any) string {
 		return 0
 	}
 	line := fmt.Sprintf(
-		"共 %d 项，成功 %d（重命名 %d / 移动 %d），跳过 %d（无需处理 %d / 需关注 %d），失败 %d",
+		"共 %d 项，成功 %d（重命名 %d / 移动 %d），跳过 %d（无需处理 %d / 需关注 %d），失败 %d，未执行 %d",
 		n("total"), n("renamed")+n("moved"), n("renamed"), n("moved"),
-		n("skipped"), n("normal_skipped"), n("abnormal_skipped"), n("failed"),
+		n("skipped"), n("normal_skipped"), n("abnormal_skipped"), n("failed"), n("pending"),
 	)
 	if stopped, _ := summary["stopped"].(bool); stopped {
 		line += "（已中止）"

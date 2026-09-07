@@ -137,8 +137,6 @@ export function useUploadTasks(deps: UploadTaskDeps) {
   return {
     uploadTaskPanelOpen: store.uploadTaskPanelOpen,
     taskPanelCategory: store.taskPanelCategory,
-    uploadTaskPanelLoading: store.uploadTaskPanelLoading,
-    uploadTaskPanelLoadingText: store.uploadTaskPanelLoadingText,
     uploadTaskServerConcurrency: store.uploadTaskServerConcurrency,
     displayUploadTasks: store.displayUploadTasks,
     activeUploadTasks: store.activeUploadTasks,

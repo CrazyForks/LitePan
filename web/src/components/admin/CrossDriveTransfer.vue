@@ -784,7 +784,7 @@ async function scanSource(clearTree = true) {
     if (running.value) phaseStatus.value = ''
     return scan
   } catch (e) {
-    if (e?.name === 'CanceledError' || e?.name === 'AbortError') return null
+    if (e?.name === 'AbortError') return null
     notify('error', '扫描失败: ' + (e?.message || e))
     return null
   } finally {
@@ -1041,8 +1041,6 @@ async function start() {
         const message = `秒传完成 ${metrics.done}/${files.length}${skipText}`
         if (relayQueued > 0) {
           relayNotice.value = {
-            rapidDone: metrics.done,
-            total: files.length,
             relayQueued,
           }
         } else {

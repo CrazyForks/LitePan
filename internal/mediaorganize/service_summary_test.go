@@ -14,10 +14,18 @@ func TestSummaryCountsPendingAndUnidentifiedDiagnostics(t *testing.T) {
 		{"reason": "未识别"},
 	}}
 	got := summarizePlan(plan, true)
-	for key, want := range map[string]int{"total": 5, "renamed": 1, "moved": 1, "skipped": 2, "normal_skipped": 1, "abnormal_skipped": 1, "failed": 0} {
+	for key, want := range map[string]int{"total": 5, "renamed": 1, "moved": 1, "skipped": 2, "normal_skipped": 1, "abnormal_skipped": 1, "failed": 0, "pending": 1} {
 		if got[key] != want {
 			t.Fatalf("%s=%v，期望%d", key, got[key], want)
 		}
+	}
+	// 口径自洽：总数 == 各分桶之和。
+	sum := 0
+	for _, key := range []string{"renamed", "moved", "skipped", "failed", "pending"} {
+		sum += got[key].(int)
+	}
+	if got["total"] != sum {
+		t.Fatalf("total=%v 与分桶之和 %d 不一致", got["total"], sum)
 	}
 	if got["stopped"] != true {
 		t.Fatal("中止标记丢失")

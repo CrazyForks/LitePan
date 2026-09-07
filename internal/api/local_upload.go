@@ -285,16 +285,11 @@ func (h *Handler) createLocalUploadTasks(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	batchID := strings.TrimSpace(in.ClientTaskID)
-	batchName := strings.TrimSpace(in.DisplayName)
-	if batchName == "" && len(in.Items) == 1 && in.Items[0].IsDir {
-		batchName = path.Base(strings.Trim(cleanRelativePath(in.Items[0].RelPath), "/"))
-	}
 
 	ctx := context.WithoutCancel(r.Context())
 	go func() {
 		created, err := h.createLocalUploadTasksSync(ctx, m, in.AccountID, in.TargetPath,
-			strings.TrimSpace(in.TargetDisplay), batchID, batchName, conflict,
-			sources)
+			strings.TrimSpace(in.TargetDisplay), batchID, conflict, sources)
 		if err == nil {
 			return
 		}
@@ -312,7 +307,7 @@ func (h *Handler) createLocalUploadTasksSync(
 	ctx context.Context,
 	m localUploadMapping,
 	accountID int64,
-	targetRoot, targetDisplay, clientTaskID, displayName, conflict string,
+	targetRoot, targetDisplay, clientTaskID, conflict string,
 	sources []localUploadSource,
 ) ([]*upload.Task, error) {
 	const batchSize = 100

@@ -15,10 +15,7 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
   const localUploadTasks = ref<UploadTask[]>([]);
   const uploadTaskPanelOpen = ref(false);
   const taskPanelCategory = ref<"upload" | "relay" | "offline">("upload");
-  const uploadTaskPanelLoading = ref(false);
-  const uploadTaskPanelLoadingText = ref("正在准备上传任务...");
   const uploadTaskServerConcurrency = ref(3);
-  const batchPauseInProgress = ref(false);
   const pendingDirRefreshBatches = ref<Record<string, { count: number; creationRefreshed: boolean }>>({});
   const remoteUploadTaskIndexes = new Map<string, number>();
   const localUploadTaskIndexes = new Map<string, number>();
@@ -319,10 +316,7 @@ export function useUploadTaskStore(deps: UploadTaskDeps) {
     localUploadTasks,
     uploadTaskPanelOpen,
     taskPanelCategory,
-    uploadTaskPanelLoading,
-    uploadTaskPanelLoadingText,
     uploadTaskServerConcurrency,
-    batchPauseInProgress,
     localUploadTaskControllers,
     localUploadTaskPayloads,
     canceledLocalUploadTaskIds,

@@ -6,10 +6,6 @@ export interface CloudTool115Status {
   available: boolean;
 }
 
-export interface CloudTool115Accounts {
-  accounts: { id: number; name: string; is_active: boolean }[];
-}
-
 export interface LocalUploadMapping {
   name: string;
   path: string;
