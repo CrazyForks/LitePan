@@ -9,12 +9,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"litepan/internal/domain"
 	"litepan/internal/driver"
 	"litepan/internal/driver/uploadutil"
 	"litepan/internal/httpx"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,6 +26,19 @@ import (
 	"strings"
 	"time"
 )
+
+const ossUploadAttempts = 3
+
+func newOSSUploadHTTPClient(base *http.Client) *http.Client {
+	return httpx.NewStreamingClient(base, 60*time.Second)
+}
+
+func (d *Driver) ossUploadHTTPClient() *http.Client {
+	if d.uploadClient != nil {
+		return d.uploadClient
+	}
+	return d.client
+}
 
 type uploadInitData struct {
 	PickCode    flexString      `json:"pick_code"`
@@ -1041,7 +1056,7 @@ func (d *Driver) ossSinglePartUpload(ctx context.Context, localPath string, file
 	}
 	req.Header.Set("User-Agent", ossUserAgent)
 	req.ContentLength = fileSize
-	resp, err := d.client.Do(req)
+	resp, err := d.ossUploadHTTPClient().Do(req)
 	if err != nil {
 		return nil, domain.Wrap(domain.CodeDriverError, err)
 	}
@@ -1155,7 +1170,7 @@ func (d *Driver) ossUploadPart(ctx context.Context, token ossTokenData, bucket, 
 	}
 	req.Header.Set("User-Agent", ossUserAgent)
 	req.ContentLength = partSize
-	resp, err := d.client.Do(req)
+	resp, err := d.ossUploadHTTPClient().Do(req)
 	if err != nil {
 		return "", domain.Wrap(domain.CodeDriverError, err)
 	}
@@ -1169,6 +1184,44 @@ func (d *Driver) ossUploadPart(ctx context.Context, token ossTokenData, bucket, 
 		return "", domain.Errorf(domain.CodeDriverError, "上传 115 OSS 分片失败(part %d)，未返回 ETag", partNumber)
 	}
 	return etag, nil
+}
+
+func (d *Driver) ossUploadPartWithRetry(ctx context.Context, token ossTokenData, bucket, objectName, uploadID string, partNumber int, f *os.File, partSize, uploadedOffset, totalSize int64, onProgress driver.UploadProgress, totalParts int) (string, error) {
+	var err error
+	for attempt := 1; attempt <= ossUploadAttempts; attempt++ {
+		if _, seekErr := f.Seek(uploadedOffset, io.SeekStart); seekErr != nil {
+			return "", domain.Wrap(domain.CodeDriverError, seekErr)
+		}
+		var etag string
+		etag, err = d.ossUploadPart(ctx, token, bucket, objectName, uploadID, partNumber, f, partSize, uploadedOffset, totalSize, onProgress, totalParts)
+		if err == nil || ctx.Err() != nil || isOSSCredentialError(err) || !isRetryableOSSUploadError(err) {
+			return etag, err
+		}
+		if attempt < ossUploadAttempts {
+			timer := time.NewTimer(time.Duration(attempt) * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return "", ctx.Err()
+			case <-timer.C:
+			}
+		}
+	}
+	return "", err
+}
+
+func isRetryableOSSUploadError(err error) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{"unexpected eof", "connection reset", "broken pipe", "http 429", "http 500", "http 502", "http 503", "http 504"} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *Driver) ossCompleteMultipart(ctx context.Context, token ossTokenData, bucket, objectName, uploadID string, parts []ossUploadedPart, init *uploadInitData, fileSHA1 string) (map[string]any, error) {
@@ -1305,20 +1358,15 @@ func (d *Driver) ossMultipartUpload(ctx context.Context, localPath string, fileS
 			partNumber++
 			continue
 		}
-		if _, err := f.Seek(offset, io.SeekStart); err != nil {
-			return nil, domain.Wrap(domain.CodeDriverError, err)
-		}
 		token, err = d.ensureFreshOSSToken(ctx, token, false)
 		if err != nil {
 			return nil, err
 		}
-		etag, err := d.ossUploadPart(ctx, token, bucket, objectName, uploadID, partNumber, f, currentPartSize, offset, fileSize, onProgress, totalParts)
+		etag, err := d.ossUploadPartWithRetry(ctx, token, bucket, objectName, uploadID, partNumber, f, currentPartSize, offset, fileSize, onProgress, totalParts)
 		if isOSSCredentialError(err) {
 			token, err = d.ensureFreshOSSToken(ctx, token, true)
 			if err == nil {
-				if _, err = f.Seek(offset, io.SeekStart); err == nil {
-					etag, err = d.ossUploadPart(ctx, token, bucket, objectName, uploadID, partNumber, f, currentPartSize, offset, fileSize, onProgress, totalParts)
-				}
+				etag, err = d.ossUploadPartWithRetry(ctx, token, bucket, objectName, uploadID, partNumber, f, currentPartSize, offset, fileSize, onProgress, totalParts)
 			}
 		}
 		if err != nil {

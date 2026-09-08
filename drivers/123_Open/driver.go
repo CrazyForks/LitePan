@@ -78,11 +78,7 @@ func (d *Driver) Init(ctx context.Context) error {
 		d.client = httpx.NewClient(httpx.ClientOptions{Timeout: 30 * time.Second})
 	}
 	if d.uploadClient == nil {
-		d.uploadClient = httpx.NewClient(httpx.ClientOptions{
-			Timeout:            180 * time.Second,
-			DisableCompression: true,
-			DisableKeepAlives:  true,
-		})
+		d.uploadClient = httpx.NewStreamingClient(d.client, 60*time.Second)
 	}
 	d.mu.Lock()
 	token := d.token

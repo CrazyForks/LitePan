@@ -365,7 +365,7 @@ func (d *Driver) putPart(ctx context.Context, objectURL, uploadID string, partNo
 	req.Header.Set("x-oss-date", timeStr)
 	req.Header.Set("x-oss-user-agent", ossUserAgent)
 
-	resp, err := d.client.Do(req)
+	resp, err := d.uploadClient.Do(req)
 	if err != nil {
 		return "", domain.Wrap(domain.CodeDriverError, err)
 	}

@@ -448,7 +448,7 @@ func (s *Service) UploadLocal(ctx context.Context, accountID int64, req driver.L
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			s.log.Debug("上传文件已取消", "account_id", accountID, "name", req.FileName)
 		} else {
-			s.log.Warn("上传文件失败", "account_id", accountID, "name", req.FileName, "err", err)
+			s.log.Warn("上传文件失败", "account_id", accountID, "name", req.FileName, "error", err.Error())
 		}
 		return nil, err
 	}

@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	DefaultTimeout        = 30 * time.Second
+	DefaultTimeout         = 30 * time.Second
 	defaultIdleConnTimeout = 90 * time.Second
 )
 
@@ -43,6 +43,20 @@ func NewClient(opts ClientOptions) *http.Client {
 		tr.Proxy = opts.Proxy
 	}
 	return &http.Client{Timeout: timeout, Transport: tr}
+}
+
+// NewStreamingClient 复用普通客户端的连接配置，但不限制整段文件传输时长。
+func NewStreamingClient(base *http.Client, responseHeaderTimeout time.Duration) *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	if base != nil {
+		if baseTransport, ok := base.Transport.(*http.Transport); ok {
+			tr = baseTransport.Clone()
+		}
+	}
+	if responseHeaderTimeout > 0 {
+		tr.ResponseHeaderTimeout = responseHeaderTimeout
+	}
+	return &http.Client{Transport: tr}
 }
 
 func CloseClient(c *http.Client) {

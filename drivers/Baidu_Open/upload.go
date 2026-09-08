@@ -493,7 +493,7 @@ func (d *Driver) uploadBaiduPart(ctx context.Context, uploadHost, targetPath, up
 		"Content-Type":   writer.FormDataContentType(),
 		"Content-Length": strconv.Itoa(len(payload)),
 	})
-	resp, data, err := httpx.Execute(d.client, req, httpx.DefaultReadLimit)
+	resp, data, err := httpx.Execute(d.uploadClient, req, httpx.DefaultReadLimit)
 	if err != nil {
 		return domain.Wrap(domain.CodeDriverError, err)
 	}
