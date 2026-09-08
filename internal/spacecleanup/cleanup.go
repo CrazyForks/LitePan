@@ -119,6 +119,8 @@ func (s *Service) cleanupOne(ctx context.Context, item planItem) CleanupItemResu
 		result, err = s.cleanupFuseCache(ctx, item)
 	case kindCoverSession:
 		result, err = s.cleanupCoverSession(item)
+	case kindDatabaseRows, kindDatabaseTables:
+		result, err = s.cleanupDatabaseGarbage(ctx, item)
 	case kindDatabase:
 		result, err = s.cleanupDatabase(ctx, item)
 	default:
@@ -131,6 +133,29 @@ func (s *Service) cleanupOne(ctx context.Context, item planItem) CleanupItemResu
 		result.Message = err.Error()
 	}
 	return result
+}
+
+func (s *Service) cleanupDatabaseGarbage(ctx context.Context, item planItem) (CleanupItemResult, error) {
+	result := CleanupItemResult{ID: item.ID, Name: item.Name}
+	if s.opts.DB == nil {
+		result.Status, result.Message = "skipped", "数据库未就绪"
+		return result, nil
+	}
+	count, err := s.opts.DB.CleanupGarbage(ctx, item.TargetPath)
+	if err != nil {
+		return result, err
+	}
+	if count == 0 {
+		result.Status, result.Message = "skipped", "扫描后残留已不存在"
+		return result, nil
+	}
+	result.Status = "cleaned"
+	if item.Kind == kindDatabaseTables {
+		result.Message = fmt.Sprintf("已移除 %d 张废弃表", count)
+	} else {
+		result.Message = fmt.Sprintf("已清理 %d 条无主记录", count)
+	}
+	return result, nil
 }
 
 func (s *Service) cleanupStrmPath(ctx context.Context, item planItem) (CleanupItemResult, error) {

@@ -19,20 +19,22 @@ const (
 )
 
 const (
-	kindStrmOrphan   = "strm_orphan"
-	kindStrmEmpty    = "strm_empty"
-	kindSystemFile   = "system_file"
-	kindScrapeIndex  = "scrape_index"
-	kindUploadTemp   = "upload_temp"
-	kindCoverExtract = "cover_extract_temp"
-	kindOfflineTemp  = "offline_temp"
-	kindBackupTemp   = "backup_temp"
-	kindExpiredLog   = "expired_log"
-	kindExpiredCache = "expired_cache"
-	kindMetadata     = "metadata_cache"
-	kindFuseCache    = "fuse_cache"
-	kindCoverSession = "cover_session"
-	kindDatabase     = "database"
+	kindStrmOrphan     = "strm_orphan"
+	kindStrmEmpty      = "strm_empty"
+	kindSystemFile     = "system_file"
+	kindScrapeIndex    = "scrape_index"
+	kindUploadTemp     = "upload_temp"
+	kindCoverExtract   = "cover_extract_temp"
+	kindOfflineTemp    = "offline_temp"
+	kindBackupTemp     = "backup_temp"
+	kindExpiredLog     = "expired_log"
+	kindExpiredCache   = "expired_cache"
+	kindMetadata       = "metadata_cache"
+	kindFuseCache      = "fuse_cache"
+	kindCoverSession   = "cover_session"
+	kindDatabaseRows   = "database_rows"
+	kindDatabaseTables = "database_tables"
+	kindDatabase       = "database"
 )
 
 const (

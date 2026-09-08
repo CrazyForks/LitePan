@@ -111,6 +111,26 @@ func (s *Service) Scan(ctx context.Context) (Report, error) {
 	items = append(items, s.scanCoverExtractSession()...)
 
 	if s.opts.DB != nil {
+		garbage, dbErr := s.opts.DB.ScanGarbage(ctx)
+		if dbErr != nil {
+			s.log.Warn("扫描数据库残留失败", "err", dbErr)
+		} else {
+			for _, entry := range garbage {
+				kind, risk, selected := kindDatabaseRows, RiskSafe, true
+				reason := fmt.Sprintf("对应主数据已不存在，共 %d 条记录", entry.Count)
+				if entry.Kind == "deprecated" {
+					kind, risk, selected = kindDatabaseTables, RiskReview, false
+					reason = fmt.Sprintf("当前版本已不再使用，共 %d 张表、%d 条记录", strings.Count(entry.Detail, "、")+1, entry.Count)
+				}
+				items = append(items, planItem{
+					Item: Item{
+						ID: itemID(kind, entry.Key), Category: CategoryDatabase, Name: entry.Name,
+						Path: entry.Detail, Reason: reason, DefaultSelected: selected, Risk: risk,
+					},
+					Kind: kind, TargetPath: entry.Key,
+				})
+			}
+		}
 		reclaimable, dbErr := s.opts.DB.ReclaimableBytes(ctx)
 		if dbErr != nil {
 			s.log.Warn("读取数据库可回收空间失败", "err", dbErr)
@@ -152,7 +172,7 @@ func buildReport(scanID string, plan scanPlan) Report {
 		{Key: CategoryTemp, Label: "临时文件", Description: "上传、离线下载及备份恢复遗留的本地临时数据"},
 		{Key: CategoryLogs, Label: "历史日志", Description: "保留今天，清理今天之前的按日日志"},
 		{Key: CategoryCache, Label: "缓存数据", Description: "元数据缓存和 FUSE 本地读缓存，清理后会按需重建"},
-		{Key: CategoryDatabase, Label: "数据库整理", Description: "通过 VACUUM 归还 SQLite 空闲页，默认不选择"},
+		{Key: CategoryDatabase, Label: "数据库整理", Description: "清理无主记录、已废弃表，并可压缩 SQLite 空闲页"},
 	}
 	byKey := make(map[string]*Group, len(defs))
 	for i := range defs {
