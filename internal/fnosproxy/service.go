@@ -63,6 +63,7 @@ type Service struct {
 	portUsedByEmby func(string) bool
 
 	servePlayback func(w http.ResponseWriter, r *http.Request, req playback.Request, intent playback.Intent) error
+	resolvePath   func(context.Context, int64, string, string) (string, error)
 
 	mu     sync.Mutex
 	server *http.Server
@@ -84,6 +85,7 @@ type Options struct {
 	StrmDir        string
 	Log            *slog.Logger
 	PortUsedByEmby func(string) bool
+	ResolvePath    func(context.Context, int64, string, string) (string, error)
 }
 
 type Config struct {
@@ -132,6 +134,7 @@ func New(opts Options) *Service {
 			}
 			return opts.Playback.ServeHTTP(w, r, req, intent)
 		},
+		resolvePath:  opts.ResolvePath,
 		byMS:         map[string]*cachedSource{},
 		byItem:       map[string]*cachedSource{},
 		cacheEntries: map[*cachedSource]struct{}{},
@@ -364,7 +367,7 @@ func (s *Service) configFromSettings() Config {
 
 func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 	escapedPath := r.URL.EscapedPath()
-	if proxybase.StrmPlayPathRE.MatchString(escapedPath) {
+	if proxybase.IsLitePanSTRMPath(escapedPath) {
 		s.serveSTRM(w, r)
 		return
 	}
@@ -417,45 +420,58 @@ func (s *Service) serveSTRM(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "STRM playback is unavailable", http.StatusNotImplemented)
 		return
 	}
-	m := proxybase.StrmPlayPathRE.FindStringSubmatch(r.URL.EscapedPath())
-	if len(m) < 5 {
+	ref, ok := proxybase.ParseLitePanSTRMReference(r.URL.EscapedPath())
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	accountID, err := strconv.ParseInt(m[1], 10, 64)
-	if err != nil || accountID <= 0 {
-		http.Error(w, "invalid account id", http.StatusBadRequest)
-		return
-	}
-	fileID, err := strm.DecodeFileKey(m[2])
-	if err != nil {
-		http.Error(w, "invalid file key", http.StatusBadRequest)
-		return
-	}
-	ok, err := s.strm.MatchToken(r.Context(), m[3])
+	ok, err := s.strm.MatchToken(r.Context(), ref.Token)
 	if err != nil || !ok {
 		http.Error(w, "permission denied", http.StatusForbidden)
 		return
 	}
-	signature := ""
-	if len(m) > 5 {
-		signature = m[5]
-	}
 	if s.strm.SignatureEnabled() {
-		if signature == "" {
+		if ref.Signature == "" {
 			http.Error(w, "permission denied", http.StatusForbidden)
 			return
 		}
-		unsignedPath := strings.TrimSuffix(r.URL.EscapedPath(), "/s/"+signature)
-		if !s.strm.VerifySignature(unsignedPath, signature) {
+		unsignedPath := strings.TrimSuffix(r.URL.EscapedPath(), "/s/"+ref.Signature)
+		if !s.strm.VerifySignature(unsignedPath, ref.Signature) {
 			http.Error(w, "permission denied", http.StatusForbidden)
 			return
 		}
 	}
-	name, _ := url.PathUnescape(m[4])
-	if err := s.servePlaybackHTTP(w, r, playback.Request{AccountID: accountID, FileID: fileID}, playback.Intent{FileName: name}); err != nil {
+	accountID, fileID, err := s.resolveSTRMReference(r.Context(), ref)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	if err := s.servePlaybackHTTP(w, r, playback.Request{AccountID: accountID, FileID: fileID}, playback.Intent{FileName: ref.FileName}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func (s *Service) resolveSTRMReference(ctx context.Context, ref proxybase.STRMReference) (int64, string, error) {
+	if !ref.PathBased {
+		return ref.AccountID, ref.FileID, nil
+	}
+	if s.resolvePath == nil {
+		return 0, "", domain.Errf(domain.CodeNotImplement)
+	}
+	fileID, err := s.resolvePath(ctx, ref.AccountID, ref.RootID, ref.RelativePath)
+	if err != nil {
+		return 0, "", err
+	}
+	return ref.AccountID, fileID, nil
+}
+
+func (s *Service) resolveLitePanSTRM(ctx context.Context, value string) (int64, string, bool, error) {
+	ref, ok := proxybase.ParseLitePanSTRMReference(value)
+	if !ok {
+		return 0, "", false, nil
+	}
+	accountID, fileID, err := s.resolveSTRMReference(ctx, ref)
+	return accountID, fileID, true, err
 }
 
 func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg Config, fullPath string) {
@@ -505,10 +521,15 @@ func (s *Service) serveLitePanPlayback(w http.ResponseWriter, r *http.Request, p
 	if !isLitePanSTRMURL(playURL) {
 		return false
 	}
-	accountID, fileID, ok := proxybase.ParseLitePanSTRMURL(playURL)
+	accountID, fileID, ok, err := s.resolveLitePanSTRM(r.Context(), playURL)
 	if !ok {
 		s.log.Warn("飞牛反代无法解析 LitePan STRM", "url", playURL)
 		http.Error(w, "invalid litepan strm url", http.StatusBadGateway)
+		return true
+	}
+	if err != nil {
+		s.log.Warn("飞牛反代解析路径型 LitePan STRM 失败", "url", playURL, "error", err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
 		return true
 	}
 	name := strmFileNameFromPlayURL(playURL)
@@ -717,15 +738,11 @@ func proxiedVideoPath(r *http.Request, itemID, mediaSourceID string) string {
 }
 
 func strmFileNameFromPlayURL(playURL string) string {
-	m := proxybase.StrmPlayPathRE.FindStringSubmatch(proxybase.LitePanPath(playURL))
-	if len(m) < 5 {
+	ref, ok := proxybase.ParseLitePanSTRMReference(playURL)
+	if !ok {
 		return ""
 	}
-	name, err := url.PathUnescape(m[4])
-	if err != nil {
-		return m[4]
-	}
-	return name
+	return ref.FileName
 }
 
 // withEmbyAPIPrefix 保证飞牛 API 走 /emby 前缀，避免 POST 落到 SPA HTML。
@@ -886,13 +903,13 @@ func (s *Service) prewarmPlayback(playURL, ua string) {
 	if s.playback == nil {
 		return
 	}
-	accountID, fileID, ok := proxybase.ParseLitePanSTRMURL(playURL)
-	if !ok {
-		return
-	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		accountID, fileID, ok, err := s.resolveLitePanSTRM(ctx, playURL)
+		if !ok || err != nil {
+			return
+		}
 		_, _ = s.playback.Resolve(ctx, accountID, fileID, ua, false, true)
 	}()
 }
@@ -1187,7 +1204,8 @@ func normalizeConfigName(raw string) string {
 }
 
 func isLitePanSTRMURL(value string) bool {
-	return strings.HasPrefix(strings.ToLower(proxybase.LitePanPath(value)), "/api/strm/play/")
+	pathValue := strings.ToLower(proxybase.LitePanPath(value))
+	return strings.HasPrefix(pathValue, "/api/strm/play/") || strings.HasPrefix(pathValue, "/api/strm/path/")
 }
 
 func extractItemID(fullPath string) string {

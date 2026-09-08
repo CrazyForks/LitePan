@@ -29,6 +29,29 @@ func TestUpdateRequestAcceptsNumericPort(t *testing.T) {
 	}
 }
 
+func TestServeLitePanPlaybackResolvesPathReference(t *testing.T) {
+	var got playback.Request
+	svc := &Service{
+		resolvePath: func(_ context.Context, accountID int64, rootID, relativePath string) (string, error) {
+			if accountID != 12 || rootID != "root-id" || relativePath != "电影/测试.mkv" {
+				t.Fatalf("路径参数不符: account=%d root=%q path=%q", accountID, rootID, relativePath)
+			}
+			return "file-id", nil
+		},
+		servePlayback: func(_ http.ResponseWriter, _ *http.Request, req playback.Request, _ playback.Intent) error {
+			got = req
+			return nil
+		},
+	}
+	playURL := strm.BuildPathPlayURL("http://litepan.test", 12, "root-id", "电影/测试.mkv", "测试.mkv", "token", false, nil)
+	if !svc.serveLitePanPlayback(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil), playURL) {
+		t.Fatal("路径型 STRM 未被 Emby 反代识别")
+	}
+	if got.AccountID != 12 || got.FileID != "file-id" {
+		t.Fatalf("播放参数=%#v", got)
+	}
+}
+
 func testEmbyProxyService(t *testing.T, embyURL string) *Service {
 	t.Helper()
 	ctx := context.Background()

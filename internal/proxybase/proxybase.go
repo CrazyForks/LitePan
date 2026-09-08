@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +16,22 @@ import (
 )
 
 // StrmPlayPathRE 匹配 LitePan STRM play URL（与 internal/strm 播放链接格式一致）。
-var StrmPlayPathRE = regexp.MustCompile(`(?i)^/api/strm/play/(\d+)/([^/]+)/t/([^/]+)/n/([^/?#\s]+)(?:/s/([^/?#\s]+))?$`)
+var StrmPlayPathRE = strm.PlayPathRE
+
+// StrmPathPlayPathRE 匹配延迟按路径解析的 LitePan STRM URL。
+var StrmPathPlayPathRE = strm.PathPlayPathRE
+
+type STRMReference = strm.PlayReference
+
+// ParseLitePanSTRMReference 同时解析文件 ID 与路径两种 STRM 地址。
+func ParseLitePanSTRMReference(value string) (STRMReference, bool) {
+	return strm.ParsePlayReference(value)
+}
+
+func IsLitePanSTRMPath(value string) bool {
+	pathValue := LitePanPath(value)
+	return StrmPlayPathRE.MatchString(pathValue) || StrmPathPlayPathRE.MatchString(pathValue)
+}
 
 // HopByHopHeaderNames 是反向代理转发时需剥离的 hop-by-hop 头。
 var HopByHopHeaderNames = map[string]struct{}{
@@ -30,20 +44,11 @@ const TestRequestTimeout = 20 * time.Second
 
 // ParseLitePanSTRMURL 从 STRM play URL 解析账号 ID 与网盘 file_id。
 func ParseLitePanSTRMURL(value string) (int64, string, bool) {
-	path := LitePanPath(value)
-	m := StrmPlayPathRE.FindStringSubmatch(path)
-	if len(m) < 3 {
+	ref, ok := ParseLitePanSTRMReference(value)
+	if !ok || ref.PathBased {
 		return 0, "", false
 	}
-	accountID, err := strconv.ParseInt(m[1], 10, 64)
-	if err != nil || accountID <= 0 {
-		return 0, "", false
-	}
-	fileID, err := strm.DecodeFileKey(m[2])
-	if err != nil || fileID == "" {
-		return 0, "", false
-	}
-	return accountID, fileID, true
+	return ref.AccountID, ref.FileID, true
 }
 
 // LitePanPath 从 STRM 播放地址中提取路径部分（去掉 host 与 query）。

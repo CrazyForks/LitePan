@@ -4,11 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 
 	"litepan/internal/domain"
@@ -16,15 +13,15 @@ import (
 
 const accountRepairSampleSize = 3
 
-var strmPlayURLPattern = regexp.MustCompile(`(?i)(?:https?://[^/]+)?/api/strm/play/(\d+)/([^/]+)/t/([^/]+)/n/([^/?#\s]+)(?:/s/([^/?#\s]+))?`)
-
 type parsedStrmPlayURL struct {
-	AccountID int64
-	FileKey   string
-	FileID    string
-	Token     string
-	FileName  string
-	Signature string
+	AccountID    int64
+	FileID       string
+	RootID       string
+	RelativePath string
+	Token        string
+	FileName     string
+	Signature    string
+	PathBased    bool
 }
 
 type AccountRepairPrecheckInput struct {
@@ -71,34 +68,22 @@ func repairMatchRequired(sampleTotal int) int {
 }
 
 func parseStrmPlayURL(line string) (parsedStrmPlayURL, bool) {
-	line = strings.TrimSpace(line)
-	m := strmPlayURLPattern.FindStringSubmatch(line)
-	if len(m) < 5 {
+	ref, ok := ParsePlayReference(line)
+	if !ok || ref.FileName == "" {
 		return parsedStrmPlayURL{}, false
 	}
-	accountID, err := strconv.ParseInt(m[1], 10, 64)
-	if err != nil || accountID <= 0 {
-		return parsedStrmPlayURL{}, false
+	return parsedStrmPlayURL{
+		AccountID: ref.AccountID, FileID: ref.FileID, RootID: ref.RootID,
+		RelativePath: ref.RelativePath, Token: ref.Token, FileName: ref.FileName,
+		Signature: ref.Signature, PathBased: ref.PathBased,
+	}, true
+}
+
+func resolveRepairSample(ctx context.Context, files accountRepairFiles, accountID int64, parentID string, sample parsedStrmPlayURL) (*domain.FileItem, error) {
+	if sample.PathBased {
+		return files.ResolvePath(ctx, accountID, parentID, sample.RelativePath)
 	}
-	fileID, err := DecodeFileKey(m[2])
-	if err != nil || fileID == "" {
-		return parsedStrmPlayURL{}, false
-	}
-	fileName, err := url.PathUnescape(m[4])
-	if err != nil || fileName == "" {
-		return parsedStrmPlayURL{}, false
-	}
-	out := parsedStrmPlayURL{
-		AccountID: accountID,
-		FileKey:   m[2],
-		FileID:    fileID,
-		Token:     m[3],
-		FileName:  fileName,
-	}
-	if len(m) > 5 {
-		out.Signature = m[5]
-	}
-	return out, true
+	return files.Info(ctx, accountID, sample.FileID)
 }
 
 func sampleLocalStrmFiles(root string, limit int) ([]string, error) {
@@ -157,7 +142,7 @@ func strmFileNameEqual(want, got string) bool {
 	return strings.EqualFold(strings.TrimSpace(want), strings.TrimSpace(got))
 }
 
-func matchRepairSamples(ctx context.Context, files accountRepairFiles, accountID int64, samples []parsedStrmPlayURL) (matched int, err error) {
+func matchRepairSamples(ctx context.Context, files accountRepairFiles, accountID int64, parentID string, samples []parsedStrmPlayURL) (matched int, err error) {
 	if files == nil || len(samples) == 0 {
 		return 0, nil
 	}
@@ -165,7 +150,7 @@ func matchRepairSamples(ctx context.Context, files accountRepairFiles, accountID
 	checked := 0
 	for _, sample := range samples {
 		checked++
-		item, infoErr := files.Info(ctx, accountID, sample.FileID)
+		item, infoErr := resolveRepairSample(ctx, files, accountID, parentID, sample)
 		if infoErr != nil {
 			if ae, ok := domain.AsAppError(infoErr); ok && ae.Code == domain.CodeNotImplement {
 				return 0, domain.Errorf(domain.CodeNotImplement, "当前网盘不支持按文件 ID 校验，无法自动关联")
@@ -186,6 +171,7 @@ func matchRepairSamples(ctx context.Context, files accountRepairFiles, accountID
 type accountRepairFiles interface {
 	List(ctx context.Context, accountID int64, parentID string, forceRefresh bool) ([]domain.FileItem, error)
 	Info(ctx context.Context, accountID int64, fileID string) (*domain.FileItem, error)
+	ResolvePath(ctx context.Context, accountID int64, rootID, relativePath string) (*domain.FileItem, error)
 }
 
 func PrecheckAccountRepair(ctx context.Context, files accountRepairFiles, strmDir string, in AccountRepairPrecheckInput) (AccountRepairPrecheckResult, error) {
@@ -219,7 +205,7 @@ func evaluateAccountRepairMatch(ctx context.Context, files accountRepairFiles, i
 	if len(candidates) == 0 {
 		return 0, false, "未能从抽样中找到指向旧账号的 STRM", nil
 	}
-	matched, err = matchRepairSamples(ctx, files, in.AccountID, candidates)
+	matched, err = matchRepairSamples(ctx, files, in.AccountID, in.ParentID, candidates)
 	if err != nil {
 		return matched, false, "", err
 	}
@@ -343,6 +329,9 @@ func RepairAccountReferences(ctx context.Context, files accountRepairFiles, strm
 			return nil
 		}
 		newURL := BuildPlayURL(baseURL, in.AccountID, parsed.FileID, parsed.FileName, token, signEnabled, secret)
+		if parsed.PathBased {
+			newURL = BuildPathPlayURL(baseURL, in.AccountID, in.ParentID, parsed.RelativePath, parsed.FileName, token, signEnabled, secret)
+		}
 		lines[0] = newURL
 		outText := strings.Join(lines, "\n")
 		if !strings.HasSuffix(outText, "\n") {

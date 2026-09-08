@@ -203,6 +203,10 @@ func NewRouter(d Deps) http.Handler {
 		r.Head("/strm/play/{account_id}/{file_key}/t/{token}/n/{filename}", h.strmPlay)
 		r.Get("/strm/play/{account_id}/{file_key}/t/{token}/n/{filename}/s/{signature}", h.strmPlay)
 		r.Head("/strm/play/{account_id}/{file_key}/t/{token}/n/{filename}/s/{signature}", h.strmPlay)
+		r.Get("/strm/path/{account_id}/{root_key}/{path_key}/t/{token}/n/{filename}", h.strmPathPlay)
+		r.Head("/strm/path/{account_id}/{root_key}/{path_key}/t/{token}/n/{filename}", h.strmPathPlay)
+		r.Get("/strm/path/{account_id}/{root_key}/{path_key}/t/{token}/n/{filename}/s/{signature}", h.strmPathPlay)
+		r.Head("/strm/path/{account_id}/{root_key}/{path_key}/t/{token}/n/{filename}/s/{signature}", h.strmPathPlay)
 		r.Route("/public", func(r chi.Router) {
 			r.Use(h.requirePublicOrAdmin)
 			r.Get("/accounts", h.publicAccounts)

@@ -57,6 +57,7 @@ type Service struct {
 	client   *http.Client
 
 	servePlayback func(http.ResponseWriter, *http.Request, playback.Request, playback.Intent) error
+	resolvePath   func(context.Context, int64, string, string) (string, error)
 
 	mu       sync.Mutex
 	runtimes map[string]*runtime
@@ -72,10 +73,11 @@ type runtime struct {
 }
 
 type Options struct {
-	Settings *settings.Service
-	Playback *playback.Service
-	Strm     *strm.Service
-	Log      *slog.Logger
+	Settings    *settings.Service
+	Playback    *playback.Service
+	Strm        *strm.Service
+	Log         *slog.Logger
+	ResolvePath func(context.Context, int64, string, string) (string, error)
 }
 
 type Config struct {
@@ -157,6 +159,7 @@ func New(opts Options) *Service {
 			}
 			return opts.Playback.ServeHTTP(w, r, req, intent)
 		},
+		resolvePath: opts.ResolvePath,
 	}
 }
 
@@ -725,7 +728,7 @@ func (s *Service) handleConfig(configID string, w http.ResponseWriter, r *http.R
 }
 
 func (s *Service) handleWithConfig(cfg Config, w http.ResponseWriter, r *http.Request) {
-	if proxybase.StrmPlayPathRE.MatchString(r.URL.EscapedPath()) {
+	if proxybase.IsLitePanSTRMPath(r.URL.EscapedPath()) {
 		s.serveSTRM(w, r)
 		return
 	}
@@ -754,45 +757,58 @@ func (s *Service) serveSTRM(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "STRM playback is unavailable", http.StatusNotImplemented)
 		return
 	}
-	m := proxybase.StrmPlayPathRE.FindStringSubmatch(r.URL.EscapedPath())
-	if len(m) < 5 {
+	ref, ok := proxybase.ParseLitePanSTRMReference(r.URL.EscapedPath())
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	accountID, err := strconv.ParseInt(m[1], 10, 64)
-	if err != nil || accountID <= 0 {
-		http.Error(w, "invalid account id", http.StatusBadRequest)
-		return
-	}
-	fileID, err := strm.DecodeFileKey(m[2])
-	if err != nil {
-		http.Error(w, "invalid file key", http.StatusBadRequest)
-		return
-	}
-	ok, err := s.strm.MatchToken(r.Context(), m[3])
+	ok, err := s.strm.MatchToken(r.Context(), ref.Token)
 	if err != nil || !ok {
 		http.Error(w, "permission denied", http.StatusForbidden)
 		return
 	}
-	signature := ""
-	if len(m) > 5 {
-		signature = m[5]
-	}
 	if s.strm.SignatureEnabled() {
-		if signature == "" {
+		if ref.Signature == "" {
 			http.Error(w, "permission denied", http.StatusForbidden)
 			return
 		}
-		unsignedPath := strings.TrimSuffix(r.URL.EscapedPath(), "/s/"+signature)
-		if !s.strm.VerifySignature(unsignedPath, signature) {
+		unsignedPath := strings.TrimSuffix(r.URL.EscapedPath(), "/s/"+ref.Signature)
+		if !s.strm.VerifySignature(unsignedPath, ref.Signature) {
 			http.Error(w, "permission denied", http.StatusForbidden)
 			return
 		}
 	}
-	name, _ := url.PathUnescape(m[4])
-	if err := s.playbackServe(w, r, playback.Request{AccountID: accountID, FileID: fileID}, playback.Intent{FileName: name}); err != nil {
+	accountID, fileID, err := s.resolveSTRMReference(r.Context(), ref)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	if err := s.playbackServe(w, r, playback.Request{AccountID: accountID, FileID: fileID}, playback.Intent{FileName: ref.FileName}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+func (s *Service) resolveSTRMReference(ctx context.Context, ref proxybase.STRMReference) (int64, string, error) {
+	if !ref.PathBased {
+		return ref.AccountID, ref.FileID, nil
+	}
+	if s.resolvePath == nil {
+		return 0, "", domain.Errf(domain.CodeNotImplement)
+	}
+	fileID, err := s.resolvePath(ctx, ref.AccountID, ref.RootID, ref.RelativePath)
+	if err != nil {
+		return 0, "", err
+	}
+	return ref.AccountID, fileID, nil
+}
+
+func (s *Service) resolveLitePanSTRM(ctx context.Context, value string) (int64, string, bool, error) {
+	ref, ok := proxybase.ParseLitePanSTRMReference(value)
+	if !ok {
+		return 0, "", false, nil
+	}
+	accountID, fileID, err := s.resolveSTRMReference(ctx, ref)
+	return accountID, fileID, true, err
 }
 
 func (s *Service) playbackServe(w http.ResponseWriter, r *http.Request, req playback.Request, intent playback.Intent) error {
@@ -803,9 +819,14 @@ func (s *Service) playbackServe(w http.ResponseWriter, r *http.Request, req play
 }
 
 func (s *Service) serveLitePanPlayback(w http.ResponseWriter, r *http.Request, litepanURL string) bool {
-	accountID, fileID, ok := proxybase.ParseLitePanSTRMURL(litepanURL)
+	accountID, fileID, ok, err := s.resolveLitePanSTRM(r.Context(), litepanURL)
 	if !ok {
 		return false
+	}
+	if err != nil {
+		s.log.Warn("Emby 反代解析路径型 LitePan STRM 失败", "account_id", accountID, "error", err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return true
 	}
 	if err := s.playbackServe(w, r, playback.Request{AccountID: accountID, FileID: fileID}, playback.Intent{}); err != nil {
 		if isExpectedClientDisconnect(r.Context(), err) {
@@ -925,12 +946,13 @@ func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg
 		return
 	}
 	if cachedURL := s.lookupMediaSource(cfg, itemID, mediaSourceID); cachedURL != "" {
-		accountID, fileID, parsed := proxybase.ParseLitePanSTRMURL(cachedURL)
+		ref, parsed := proxybase.ParseLitePanSTRMReference(cachedURL)
 		s.log.Debug("Emby 反代命中 PlaybackInfo 版本缓存",
 			"item_id", itemID,
 			"requested_media_source_id", mediaSourceID,
-			"account_id", accountID,
-			"file_id", fileID,
+			"account_id", ref.AccountID,
+			"file_id", ref.FileID,
+			"path_based", ref.PathBased,
 			"litepan_url_parsed", parsed,
 		)
 		if proxybase.MatchesClientKeywords(r, cfg.DirectSTRMClients) {
@@ -956,13 +978,14 @@ func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg
 			continue
 		}
 		if redirectURL := s.extractLitePanSTRM(mediaSource, r, cfg); redirectURL != "" {
-			accountID, fileID, parsed := proxybase.ParseLitePanSTRMURL(redirectURL)
+			ref, parsed := proxybase.ParseLitePanSTRMReference(redirectURL)
 			s.log.Debug("Emby 反代命中多版本媒体源",
 				"item_id", itemID,
 				"requested_media_source_id", mediaSourceID,
 				"matched_media_source_id", stringValue(mediaSource, "Id", "ID"),
-				"account_id", accountID,
-				"file_id", fileID,
+				"account_id", ref.AccountID,
+				"file_id", ref.FileID,
+				"path_based", ref.PathBased,
 				"litepan_url_parsed", parsed,
 			)
 			if proxybase.MatchesClientKeywords(r, cfg.DirectSTRMClients) {
@@ -976,12 +999,13 @@ func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg
 	}
 	itemPath := normalizeMediaURL(stringValue(item, "Path"), r, cfg)
 	if isLitePanSTRMURL(itemPath) {
-		accountID, fileID, parsed := proxybase.ParseLitePanSTRMURL(itemPath)
+		ref, parsed := proxybase.ParseLitePanSTRMReference(itemPath)
 		s.log.Debug("Emby 反代多版本未命中，回退影片公共路径",
 			"item_id", itemID,
 			"requested_media_source_id", mediaSourceID,
-			"account_id", accountID,
-			"file_id", fileID,
+			"account_id", ref.AccountID,
+			"file_id", ref.FileID,
+			"path_based", ref.PathBased,
 			"litepan_url_parsed", parsed,
 		)
 		if proxybase.MatchesClientKeywords(r, cfg.DirectSTRMClients) {
@@ -1038,13 +1062,14 @@ func (s *Service) modifyPlaybackInfo(w http.ResponseWriter, r *http.Request, cfg
 			)
 			continue
 		}
-		accountID, fileID, parsed := proxybase.ParseLitePanSTRMURL(litepanURL)
+		ref, parsed := proxybase.ParseLitePanSTRMReference(litepanURL)
 		s.log.Debug("Emby 反代 PlaybackInfo 版本映射",
 			"item_id", itemID,
 			"media_source_id", mediaSourceID,
 			"resolved_from", resolvedFrom,
-			"account_id", accountID,
-			"file_id", fileID,
+			"account_id", ref.AccountID,
+			"file_id", ref.FileID,
+			"path_based", ref.PathBased,
 			"litepan_url_parsed", parsed,
 		)
 		s.rememberMediaSource(cfg, itemID, mediaSourceID, litepanURL)
@@ -1220,8 +1245,8 @@ func (s *Service) inferLitePanMediaInfo(ctx context.Context, litepanURL, ua stri
 	if s.playback == nil {
 		return nil
 	}
-	accountID, fileID, ok := proxybase.ParseLitePanSTRMURL(litepanURL)
-	if !ok {
+	accountID, fileID, ok, err := s.resolveLitePanSTRM(ctx, litepanURL)
+	if !ok || err != nil {
 		return nil
 	}
 	res, err := s.playback.Resolve(ctx, accountID, fileID, ua, false, true)
@@ -1326,7 +1351,8 @@ func normalizeMediaURL(candidate string, r *http.Request, cfg Config) string {
 }
 
 func isLitePanSTRMURL(value string) bool {
-	return strings.HasPrefix(strings.ToLower(proxybase.LitePanPath(value)), "/api/strm/play/")
+	pathValue := strings.ToLower(proxybase.LitePanPath(value))
+	return strings.HasPrefix(pathValue, "/api/strm/play/") || strings.HasPrefix(pathValue, "/api/strm/path/")
 }
 
 func responseHeaders(src http.Header) http.Header {
