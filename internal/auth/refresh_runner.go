@@ -64,19 +64,10 @@ func (s *Service) refreshUnlocked(ctx context.Context, accountID int64, caller d
 	}
 
 	outcome, rerr := refresher.RefreshAuth(ctx, caller)
-	if outcome == driver.RefreshSuccess && rerr == nil {
-		if err := s.finishRefresh(ctx, accountID, drv); err != nil {
-			return driver.RefreshRetryable, err
-		}
-		if caller == driver.CallerPassive {
-			s.log.Info("账号被动认证刷新成功", "account_id", accountID)
-		}
-		return outcome, nil
+	outcome, rerr = s.completeRefresh(ctx, accountID, drv, caller, outcome, rerr)
+	if rerr == nil && caller == driver.CallerPassive {
+		s.log.Info("账号被动认证刷新成功", "account_id", accountID)
 	}
-	if rerr == nil {
-		rerr = domain.Errf(domain.CodeAuthExpired)
-	}
-	s.recordRefreshFailure(ctx, accountID, outcome, caller, rerr)
 	return outcome, rerr
 }
 

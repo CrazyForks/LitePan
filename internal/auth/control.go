@@ -104,13 +104,7 @@ func (s *Service) refreshInline(ctx context.Context, id int64, drv driver.Driver
 		return nil
 	}
 	outcome, err := refresh(ctx)
-	if outcome == driver.RefreshSuccess && err == nil {
-		return s.finishRefresh(ctx, id, drv)
-	}
-	if err == nil {
-		err = domain.Errf(domain.CodeAuthExpired)
-	}
-	s.recordRefreshFailure(ctx, id, outcome, driver.CallerPassive, err)
+	_, err = s.completeRefresh(ctx, id, drv, driver.CallerPassive, outcome, err)
 	return err
 }
 
@@ -141,6 +135,21 @@ func (s *Service) finishRefresh(ctx context.Context, id int64, drv driver.Driver
 	}
 	s.applyTokenSchedule(drv, st)
 	return s.markSuccess(ctx, id, st, true)
+}
+
+// completeRefresh 是所有刷新入口的唯一收尾：成功统一更新调度，失败统一记录冷却。
+func (s *Service) completeRefresh(ctx context.Context, id int64, drv driver.Driver, caller driver.RefreshCaller, outcome driver.RefreshOutcome, err error) (driver.RefreshOutcome, error) {
+	if outcome == driver.RefreshSuccess && err == nil {
+		if err := s.finishRefresh(ctx, id, drv); err != nil {
+			return driver.RefreshRetryable, err
+		}
+		return outcome, nil
+	}
+	if err == nil {
+		err = domain.Errf(domain.CodeAuthExpired)
+	}
+	s.recordRefreshFailure(ctx, id, outcome, caller, err)
+	return outcome, err
 }
 
 func (s *Service) recordRefreshFailure(ctx context.Context, id int64, outcome driver.RefreshOutcome, caller driver.RefreshCaller, err error) {
