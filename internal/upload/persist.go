@@ -64,14 +64,9 @@ func (m *Manager) restoreTasks() {
 			st.SpeedBytesPerSecond = 0
 			changed = true
 		}
-		if uploadNeedsLocalFile(st) {
-			if st.localPath == "" {
-				markMissingLocalFileFailed(st)
-				changed = true
-			} else if _, err := os.Stat(st.localPath); err != nil {
-				markMissingLocalFileFailed(st)
-				changed = true
-			}
+		if requiredLocalFileMissing(st) {
+			markMissingLocalFileFailed(st)
+			changed = true
 		}
 		st.runDone = make(chan struct{})
 		m.addTaskLocked(st)
@@ -100,17 +95,24 @@ func uploadNeedsLocalFile(st *taskState) bool {
 	if st == nil {
 		return false
 	}
-	switch st.Status {
-	case StatusSuccess, StatusSkipped:
+	if isCompletedUploadStatus(st.Status) {
 		return false
 	}
-	if st.SourceType != SourceTypeCrossTransfer {
-		return true
-	}
-	if st.Phase == PhaseUploading {
+	if !isCrossTransferDownload(st) {
 		return true
 	}
 	return len(st.resumeData) > 0 || st.UploadedBytes > 0
+}
+
+func requiredLocalFileMissing(st *taskState) bool {
+	if !uploadNeedsLocalFile(st) {
+		return false
+	}
+	if st.localPath == "" {
+		return true
+	}
+	_, err := os.Stat(st.localPath)
+	return err != nil
 }
 
 func recordFromState(st *taskState) *domain.UploadTaskRecord {
@@ -218,24 +220,11 @@ func stateFromRecord(row *domain.UploadTaskRecord) *taskState {
 	if st.conflictPolicy == "" {
 		st.conflictPolicy = "overwrite"
 	}
-	if st.SourceType == "" {
-		st.SourceType = SourceTypeManual
-	}
+	st.SourceType = taskSourceType(st.SourceType)
 	if st.CleanupLocalPath == "" {
 		st.CleanupLocalPath = st.localPath
 	}
-	if st.CleanupLocalMode == "" && st.localPath != "" {
-		switch st.SourceType {
-		case SourceTypeManual, SourceTypeCrossTransfer:
-			st.CleanupLocalMode = CleanupLocalFileOnSuccess
-		}
-	}
-	if st.Phase == "" {
-		if st.SourceType == SourceTypeCrossTransfer {
-			st.Phase = PhaseDownloading
-		} else {
-			st.Phase = PhaseUploading
-		}
-	}
+	st.CleanupLocalMode = taskCleanupMode(st.SourceType, st.localPath, st.CleanupLocalMode)
+	st.Phase = taskPhase(st.SourceType, st.Phase)
 	return st
 }

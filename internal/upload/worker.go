@@ -64,7 +64,7 @@ func (m *Manager) executeCrossTransferDownload(ctx context.Context, taskID strin
 		started = true
 		st.Status = StatusRunning
 		st.Phase = PhaseDownloading
-		st.Progress = progressForBytes(existingDownloaded, totalBytes)
+		st.Progress = calcProgress(existingDownloaded, totalBytes)
 		st.DownloadedBytes = existingDownloaded
 		st.UploadedBytes = 0
 		st.SpeedBytesPerSecond = 0
@@ -294,11 +294,7 @@ func (m *Manager) executeUpload(ctx context.Context, taskID string) {
 				m.patch(taskID, func(st *taskState) {
 					st.Status = StatusPaused
 					st.SpeedBytesPerSecond = 0
-					if st.SourceType == SourceTypeCrossTransfer {
-						st.Message = "目标盘上传已暂停"
-					} else {
-						st.Message = "上传已暂停"
-					}
+					st.Message = pausedMessage(st)
 				})
 				return
 			}
@@ -388,7 +384,7 @@ func (m *Manager) updateDownloadProgress(taskID string, downloaded, total int64,
 		m.mu.Unlock()
 		return
 	}
-	if st.Status == StatusSuccess || st.Status == StatusSkipped {
+	if isCompletedUploadStatus(st.Status) {
 		m.mu.Unlock()
 		return
 	}

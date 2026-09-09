@@ -295,6 +295,7 @@ const keyword = ref("");
 const settingsOpen = ref(false);
 const panelExpanded = ref(false);
 const selectedTaskIds = ref<Set<string>>(new Set());
+const selectionAnchorId = ref("");
 const uploadStateFilter = ref<StateKey>("active");
 const relayStateFilter = ref<RelayStateKey>("active");
 const offlineStateFilter = ref<StateKey>("active");
@@ -756,6 +757,7 @@ function onTaskListScroll() {
 watch(visibleRows, (rows) => {
   const visibleIds = new Set(rows.map((row) => row.id));
   selectedTaskIds.value = new Set([...selectedTaskIds.value].filter((id) => visibleIds.has(id)));
+  if (!visibleIds.has(selectionAnchorId.value)) selectionAnchorId.value = "";
   requestAnimationFrame(updateTaskListViewport);
 }, { immediate: true });
 
@@ -766,6 +768,7 @@ watch(taskPanelCategory, () => {
 
 watch(uploadStateFilter, () => {
   selectedTaskIds.value = new Set();
+  selectionAnchorId.value = "";
   taskListScrollTop.value = 0;
   if (taskListRef.value) taskListRef.value.scrollTop = 0;
   requestAnimationFrame(updateTaskListViewport);
@@ -795,7 +798,9 @@ function focusUploadTask(task: UploadTask) {
   currentBatchId.value = "";
   currentBatchName.value = "";
   currentFolderPath.value = "";
-  selectedTaskIds.value = new Set([`task:${task.task_id}`]);
+  const rowId = `task:${task.task_id}`;
+  selectedTaskIds.value = new Set([rowId]);
+  selectionAnchorId.value = rowId;
 }
 
 const selectedToggleTasks = computed(() =>
@@ -944,14 +949,27 @@ const detailExtra = computed(() => {
 });
 
 function handleRowClick(event: MouseEvent, rowId: string) {
+  if (event.shiftKey && selectionAnchorId.value) {
+    const anchorIndex = visibleRows.value.findIndex((row) => row.id === selectionAnchorId.value);
+    const rowIndex = visibleRows.value.findIndex((row) => row.id === rowId);
+    if (anchorIndex >= 0 && rowIndex >= 0) {
+      const [start, end] = anchorIndex <= rowIndex ? [anchorIndex, rowIndex] : [rowIndex, anchorIndex];
+      const next = event.metaKey || event.ctrlKey ? new Set(selectedTaskIds.value) : new Set<string>();
+      for (const row of visibleRows.value.slice(start, end + 1)) next.add(row.id);
+      selectedTaskIds.value = next;
+      return;
+    }
+  }
   if (event.metaKey || event.ctrlKey) {
     const next = new Set(selectedTaskIds.value);
     if (next.has(rowId)) next.delete(rowId);
     else next.add(rowId);
     selectedTaskIds.value = next;
+    selectionAnchorId.value = rowId;
     return;
   }
   selectedTaskIds.value = new Set([rowId]);
+  selectionAnchorId.value = rowId;
 }
 
 function openTaskFolder(row: PanelRow) {
@@ -960,6 +978,7 @@ function openTaskFolder(row: PanelRow) {
   if (!currentBatchName.value) currentBatchName.value = String(row.raw?.batch_name || row.name || "文件夹上传");
   currentFolderPath.value = row.folderPath || "";
   selectedTaskIds.value = new Set();
+  selectionAnchorId.value = "";
   keyword.value = "";
   requestAnimationFrame(() => {
     if (taskListRef.value) taskListRef.value.scrollTop = 0;
@@ -971,6 +990,7 @@ function leaveTaskFolder() {
   if (!currentBatchId.value) return;
   currentFolderPath.value = "";
   selectedTaskIds.value = new Set();
+  selectionAnchorId.value = "";
   currentBatchId.value = "";
   currentBatchName.value = "";
 }
@@ -978,6 +998,7 @@ function leaveTaskFolder() {
 function goTaskFolder(path: string) {
   currentFolderPath.value = path;
   selectedTaskIds.value = new Set();
+  selectionAnchorId.value = "";
   requestAnimationFrame(() => {
     if (taskListRef.value) taskListRef.value.scrollTop = 0;
     onTaskListScroll();
@@ -1009,9 +1030,11 @@ function statusPulseClass(row: PanelRow) {
 function toggleSelectAll() {
   if (allVisibleSelected.value) {
     selectedTaskIds.value = new Set();
+    selectionAnchorId.value = "";
     return;
   }
   selectedTaskIds.value = new Set(visibleRows.value.map((row) => row.id));
+  selectionAnchorId.value = visibleRows.value[0]?.id || "";
 }
 
 function canDeleteOfflineTask(task: any) {
@@ -1073,6 +1096,7 @@ async function handleSelectedDelete() {
     }
   }
   selectedTaskIds.value = new Set();
+  selectionAnchorId.value = "";
 }
 
 async function handleRowAction(row: PanelRow) {
