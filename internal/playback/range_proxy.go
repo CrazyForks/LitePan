@@ -2,6 +2,7 @@ package playback
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,10 @@ import (
 )
 
 const upstreamCopyChunk = 1024 * 1024
+
+// ErrInvalidRangeResponse 表示上游拒绝或错误处理了断点区间，调用方可清空
+// 本地断点后从头重试。
+var ErrInvalidRangeResponse = errors.New("上游 Range 响应无效")
 
 var copyBufPool = sync.Pool{
 	New: func() any {
@@ -236,7 +241,16 @@ func (s *Service) pipeUpstreamRange(ctx context.Context, w io.Writer, lh *linkHo
 		validFullResponse := resp.StatusCode == http.StatusOK && start == 0 && resp.ContentLength == want
 		if resp.StatusCode != http.StatusPartialContent && !validFullResponse {
 			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+				return domain.Wrap(domain.CodeDriverError, fmt.Errorf("%w：HTTP %d", ErrInvalidRangeResponse, resp.StatusCode))
+			}
 			return domain.Errorf(domain.CodeDriverError, "上游 Range 返回 %d", resp.StatusCode)
+		}
+		if resp.StatusCode == http.StatusPartialContent {
+			if got, ok := contentRangeStart(resp.Header.Get("Content-Range")); ok && got != start {
+				resp.Body.Close()
+				return domain.Wrap(domain.CodeDriverError, fmt.Errorf("%w：起点为 %d，期望 %d", ErrInvalidRangeResponse, got, start))
+			}
 		}
 		bufp := copyBufPool.Get().(*[]byte)
 		written, err := io.CopyBuffer(w, io.LimitReader(resp.Body, want), *bufp)
