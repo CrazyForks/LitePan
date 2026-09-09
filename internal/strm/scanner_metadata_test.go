@@ -135,18 +135,12 @@ func TestWalkBaseBranchEntryTreatsSkippedLocalSTRMAsSubtreeMedia(t *testing.T) {
 	deps := ScanDeps{Files: files}
 	scope := scanScope{parentID: "show", relDirs: []string{"电视剧"}, baseEntry: true}
 
-	var candidates []mediaCandidate
-	var metadataItems []metadataItem
-	dirHasMedia := make(map[string]bool)
-	subtreeHasMedia := make(map[string]bool)
-	skippedDirs := make(map[string]struct{})
+	harvest := newScanHarvest()
 
 	children, _, err := walkBaseBranchEntry(
 		context.Background(), task, deps, scope,
-		map[string]struct{}{"mkv": {}}, map[string]struct{}{"jpg": {}},
-		nil, nil, 0, 10<<20, true,
-		make(map[string]struct{}), skippedDirs, make(map[string]metadataDirectory), root,
-		&candidates, &metadataItems, dirHasMedia, subtreeHasMedia, nil,
+		scanRules{mediaExts: map[string]struct{}{"mkv": {}}, metadataExts: map[string]struct{}{"jpg": {}}, maxMetadataBytes: 10 << 20, syncMetadata: true, outputRelDir: "任务"},
+		make(map[string]struct{}), root, &harvest, nil,
 	)
 	if err != nil {
 		t.Fatalf("扫描基础分支: %v", err)
@@ -154,11 +148,11 @@ func TestWalkBaseBranchEntryTreatsSkippedLocalSTRMAsSubtreeMedia(t *testing.T) {
 	if len(children) != 0 {
 		t.Fatalf("本地已有STRM的子树不应重新扫描，children=%d", len(children))
 	}
-	if _, ok := skippedDirs[dirKey([]string{"电视剧", "Season 1"})]; !ok {
+	if _, ok := harvest.state.skippedDirs[dirKey([]string{"电视剧", "Season 1"})]; !ok {
 		t.Fatal("本地已有STRM的子树应记录为跳过目录")
 	}
 
-	got := filterMetadataItems(metadataItems, dirHasMedia, subtreeHasMedia, true)
+	got := filterMetadataItems(harvest.metadataItems, harvest.dirHasMedia, harvest.subtreeHasMedia, true)
 	if len(got) != 1 || got[0].relPath != filepath.Join("任务", "电视剧", "poster.jpg") {
 		t.Fatalf("开启父目录元数据后应保留海报，结果=%v", metadataPaths(got))
 	}
@@ -183,18 +177,12 @@ func TestWalkBaseBranchEntrySkipsBranchProbeWithoutRepository(t *testing.T) {
 	deps := ScanDeps{Files: files}
 	scope := scanScope{parentID: "show", relDirs: []string{"电视剧"}, baseEntry: true}
 
-	var candidates []mediaCandidate
-	var metadataItems []metadataItem
-	dirHasMedia := make(map[string]bool)
-	subtreeHasMedia := make(map[string]bool)
-	skippedDirs := make(map[string]struct{})
+	harvest := newScanHarvest()
 
 	children, _, err := walkBaseBranchEntry(
 		context.Background(), task, deps, scope,
-		map[string]struct{}{"mkv": {}}, nil,
-		nil, nil, 0, 0, false,
-		make(map[string]struct{}), skippedDirs, make(map[string]metadataDirectory), t.TempDir(),
-		&candidates, &metadataItems, dirHasMedia, subtreeHasMedia, nil,
+		scanRules{mediaExts: map[string]struct{}{"mkv": {}}, outputRelDir: "任务"},
+		make(map[string]struct{}), t.TempDir(), &harvest, nil,
 	)
 	if err != nil {
 		t.Fatalf("扫描基础分支: %v", err)

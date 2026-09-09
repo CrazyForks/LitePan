@@ -45,9 +45,7 @@ func scanEnhancedTask(
 	task *domain.StrmTask,
 	deps ScanDeps,
 	root string,
-	exts, metaExts map[string]struct{},
-	excludeDirs, excludeFiles []string,
-	minMediaBytes, metaMaxBytes int64,
+	rules scanRules,
 	failures *FailureCollector,
 ) (ScanResult, error) {
 	var result ScanResult
@@ -115,18 +113,11 @@ func scanEnhancedTask(
 		}
 	}
 
-	outputFolder := TaskRelDir(task.GroupDir, task.OutputFolder)
-	var candidates []mediaCandidate
-	var metadataItems []metadataItem
-	dirHasMedia := make(map[string]bool)
-	subtreeHasMedia := make(map[string]bool)
-	state := &branchScanState{
-		cleanupBlockedReason: pathConflict,
-		skippedDirs:          make(map[string]struct{}),
-		metadataDirs:         make(map[string]metadataDirectory),
-		cleanupScopes:        []cleanupScope{{recursive: true}},
-		remoteChildren:       nil, // 清单不含空目录，禁用目录级清理避免误删
-	}
+	harvest := newScanHarvest()
+	state := harvest.state
+	state.cleanupBlockedReason = pathConflict
+	state.cleanupScopes = []cleanupScope{{recursive: true}}
+	state.remoteChildren = nil // 清单不含空目录，禁用目录级清理避免误删
 	if len(unresolved) > 0 {
 		totalFiles := 0
 		for _, detail := range unresolved {
@@ -143,7 +134,7 @@ func scanEnhancedTask(
 		if _, missing := unresolved[pid]; missing {
 			continue
 		}
-		if matchesKeywordRules(e.Name, excludeFiles) {
+		if matchesKeywordRules(e.Name, rules.excludeFiles) {
 			continue
 		}
 		relDirs, ok := relDirsOf(dirPaths[pid], e.Name, rootSegs)
@@ -151,29 +142,23 @@ func scanEnhancedTask(
 			continue // 远端路径不在任务根范围内，忽略
 		}
 		recordMetadataDirectory(state.metadataDirs, e.ParentID, relDirs)
-		classified := classifyScanFile(e.FileID, e.Name, outputFolder, e.Size, relDirs, exts, metaExts, minMediaBytes, metaMaxBytes, task.SyncMetadata)
+		classified := rules.classify(e.FileID, e.Name, e.Size, relDirs)
 		if classified.hasMedia {
-			candidates = append(candidates, classified.media)
-			dirHasMedia[dirKey(relDirs)] = true
-			markSubtreeMedia(subtreeHasMedia, relDirs)
+			harvest.candidates = append(harvest.candidates, classified.media)
+			harvest.dirHasMedia[dirKey(relDirs)] = true
+			markSubtreeMedia(harvest.subtreeHasMedia, relDirs)
 			continue
 		}
 		if classified.hasMetadata {
-			metadataItems = append(metadataItems, classified.metadata)
+			harvest.metadataItems = append(harvest.metadataItems, classified.metadata)
 		}
 	}
 
 	log.Info("strm enhanced scan", "task_id", task.ID, "task_name", task.Name,
 		"account_id", task.AccountID, "remote_files", len(entries),
-		"candidates", len(candidates), "mode", "full-list")
+		"candidates", len(harvest.candidates), "mode", "full-list")
 
-	return finalizeScan(ctx, task, deps, scanHarvest{
-		candidates:      candidates,
-		metadataItems:   metadataItems,
-		state:           state,
-		dirHasMedia:     dirHasMedia,
-		subtreeHasMedia: subtreeHasMedia,
-	}, false, exts, metaExts, minMediaBytes, metaMaxBytes, root, failures)
+	return finalizeScan(ctx, task, deps, harvest, false, rules, root, failures)
 }
 
 // pruneDirCache 清理“任务根范围内、本次清单未出现”的 pid→路径 记录：

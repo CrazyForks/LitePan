@@ -80,6 +80,17 @@ type cleanupScope struct {
 	recursive bool
 }
 
+type scanRules struct {
+	mediaExts        map[string]struct{}
+	metadataExts     map[string]struct{}
+	excludeDirs      []string
+	excludeFiles     []string
+	minMediaBytes    int64
+	maxMetadataBytes int64
+	syncMetadata     bool
+	outputRelDir     string
+}
+
 type branchScanState struct {
 	skippedDirs          map[string]struct{}
 	cleanupScopes        []cleanupScope
@@ -101,21 +112,7 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 	if log == nil {
 		log = slog.Default()
 	}
-	exts := parseExtensions(task.Extensions)
-	if len(exts) == 0 {
-		exts = parseExtensions(deps.Settings.DefaultExtensions)
-	}
-	if len(exts) == 0 {
-		exts = parseExtensions(defaultExtensions)
-	}
-	metaExts := parseExtensions(deps.Settings.MetadataExtensions)
-	minMediaBytes := int64(deps.Settings.MinFileSizeMB) * 1024 * 1024
-	metaMaxBytes := int64(deps.Settings.MetadataMaxSizeMB) * 1024 * 1024
-	if deps.Settings.MetadataMaxSizeMB <= 0 {
-		metaMaxBytes = 0
-	}
-	excludeDirs := parseKeywordRules(task.ExcludeDirKeywords)
-	excludeFiles := parseKeywordRules(task.ExcludeFileKeywords)
+	rules := newScanRules(task, deps.Settings)
 
 	root := strings.TrimSpace(deps.StrmDir)
 	if root == "" {
@@ -126,8 +123,7 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 		return result, err
 	}
 	if enhanced {
-		return scanEnhancedTask(ctx, task, deps, root, exts, metaExts, excludeDirs, excludeFiles,
-			minMediaBytes, metaMaxBytes, failures)
+		return scanEnhancedTask(ctx, task, deps, root, rules, failures)
 	}
 	useBranch := useBranchScan(runMode, task)
 	var allBranches []*domain.StrmBranch
@@ -150,23 +146,14 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 		branchParentIDs = make(map[string]struct{})
 	}
 
-	var candidates []mediaCandidate
-	var metadataItems []metadataItem
-	dirHasMedia := make(map[string]bool)
-	subtreeHasMedia := make(map[string]bool)
-
-	state := &branchScanState{
-		skippedDirs:    make(map[string]struct{}),
-		remoteChildren: make(map[string]map[string]struct{}),
-		metadataDirs:   make(map[string]metadataDirectory),
-	}
+	harvest := newScanHarvest()
+	state := harvest.state
 
 	var monitorScopes, childScopes []scanScope
 	for _, scope := range scopes {
 		if scope.baseEntry {
-			children, remoteNames, err := walkBaseBranchEntry(ctx, task, deps, scope, exts, metaExts, excludeDirs, excludeFiles,
-				minMediaBytes, metaMaxBytes, task.SyncMetadata,
-				branchParentIDs, state.skippedDirs, state.metadataDirs, root, &candidates, &metadataItems, dirHasMedia, subtreeHasMedia, log)
+			children, remoteNames, err := walkBaseBranchEntry(ctx, task, deps, scope, rules,
+				branchParentIDs, root, &harvest, log)
 			if err != nil {
 				return result, err
 			}
@@ -193,28 +180,47 @@ func ScanTask(ctx context.Context, task *domain.StrmTask, deps ScanDeps, runMode
 			continue
 		}
 		state.cleanupScopes = append(state.cleanupScopes, cleanupScope{relDirs: scope.relDirs, recursive: scope.recursive})
-		if err := walkScope(ctx, task, deps, scope, exts, metaExts, excludeDirs, excludeFiles,
-			minMediaBytes, metaMaxBytes, task.SyncMetadata,
-			state.remoteChildren, state.metadataDirs, state.skippedDirs, &candidates, &metadataItems, dirHasMedia, subtreeHasMedia); err != nil {
+		if err := walkScope(ctx, task, deps, scope, rules, &harvest); err != nil {
 			return result, err
 		}
 	}
 	for _, scope := range childScopes {
 		state.cleanupScopes = append(state.cleanupScopes, cleanupScope{relDirs: scope.relDirs, recursive: true})
-		if err := walkScope(ctx, task, deps, scope, exts, metaExts, excludeDirs, excludeFiles,
-			minMediaBytes, metaMaxBytes, task.SyncMetadata,
-			state.remoteChildren, state.metadataDirs, state.skippedDirs, &candidates, &metadataItems, dirHasMedia, subtreeHasMedia); err != nil {
+		if err := walkScope(ctx, task, deps, scope, rules, &harvest); err != nil {
 			return result, err
 		}
 	}
 
-	return finalizeScan(ctx, task, deps, scanHarvest{
-		candidates:      candidates,
-		metadataItems:   metadataItems,
-		state:           state,
-		dirHasMedia:     dirHasMedia,
-		subtreeHasMedia: subtreeHasMedia,
-	}, useBranch, exts, metaExts, minMediaBytes, metaMaxBytes, root, failures)
+	return finalizeScan(ctx, task, deps, harvest, useBranch, rules, root, failures)
+}
+
+func newScanRules(task *domain.StrmTask, settings ScanSettings) scanRules {
+	mediaExts := parseExtensions(task.Extensions)
+	if len(mediaExts) == 0 {
+		mediaExts = parseExtensions(settings.DefaultExtensions)
+	}
+	if len(mediaExts) == 0 {
+		mediaExts = parseExtensions(defaultExtensions)
+	}
+	maxMetadataBytes := int64(settings.MetadataMaxSizeMB) * 1024 * 1024
+	if settings.MetadataMaxSizeMB <= 0 {
+		maxMetadataBytes = 0
+	}
+	return scanRules{
+		mediaExts:        mediaExts,
+		metadataExts:     parseExtensions(settings.MetadataExtensions),
+		excludeDirs:      parseKeywordRules(task.ExcludeDirKeywords),
+		excludeFiles:     parseKeywordRules(task.ExcludeFileKeywords),
+		minMediaBytes:    int64(settings.MinFileSizeMB) * 1024 * 1024,
+		maxMetadataBytes: maxMetadataBytes,
+		syncMetadata:     task.SyncMetadata,
+		outputRelDir:     TaskRelDir(task.GroupDir, task.OutputFolder),
+	}
+}
+
+func (r scanRules) classify(fileID, name string, size int64, relDirs []string) classifiedScanFile {
+	return classifyScanFile(fileID, name, r.outputRelDir, size, relDirs,
+		r.mediaExts, r.metadataExts, r.minMediaBytes, r.maxMetadataBytes, r.syncMetadata)
 }
 
 type scanHarvest struct {
@@ -225,55 +231,51 @@ type scanHarvest struct {
 	subtreeHasMedia map[string]bool
 }
 
-// finalizeScan 处理已收集到的候选：冲突选择 → 生成 STRM → 元数据同步 → 清理。
-// 普通递归扫描与增强清单模式共用，保证两种模式行为一致。
-func finalizeScan(
-	ctx context.Context,
-	task *domain.StrmTask,
-	deps ScanDeps,
-	harvest scanHarvest,
-	useBranch bool,
-	exts, metaExts map[string]struct{},
-	minMediaBytes, metaMaxBytes int64,
-	root string,
-	failures *FailureCollector,
-) (ScanResult, error) {
-	var result ScanResult
-	log := deps.Log
-	if log == nil {
-		log = slog.Default()
+func newScanHarvest() scanHarvest {
+	return scanHarvest{
+		state: &branchScanState{
+			skippedDirs:    make(map[string]struct{}),
+			remoteChildren: make(map[string]map[string]struct{}),
+			metadataDirs:   make(map[string]metadataDirectory),
+		},
+		dirHasMedia:     make(map[string]bool),
+		subtreeHasMedia: make(map[string]bool),
 	}
-	taskRelDir := TaskRelDir(task.GroupDir, task.OutputFolder)
-	state := harvest.state
-	candidates := harvest.candidates
-	metadataItems := harvest.metadataItems
-	dirHasMedia := harvest.dirHasMedia
-	subtreeHasMedia := harvest.subtreeHasMedia
+}
 
-	selected, _ := selectConflictWinners(candidates, deps.Settings.ConflictPolicy)
-	metadataItems = alignMetadataItems(taskRelDir, selected, metadataItems, deps.Settings.ISOFilenameEnabled)
-	seen := make(map[string]struct{})
+type scanFinalizer struct {
+	ctx      context.Context
+	task     *domain.StrmTask
+	deps     ScanDeps
+	rules    scanRules
+	root     string
+	failures *FailureCollector
+	log      *slog.Logger
+}
 
+func (f scanFinalizer) writeStrm(selected []mediaCandidate) (ScanResult, map[string]struct{}) {
+	var result ScanResult
+	seen := make(map[string]struct{}, len(selected))
 	for _, item := range selected {
 		result.ScannedCount++
-		relPath := LocalRelPath(taskRelDir, item.relDirs, item.fileName, deps.Settings.ISOFilenameEnabled)
-		if addOversizedPathFailure(failures, ScanFailureStrm, relPath, false) {
+		relPath := LocalRelPath(f.rules.outputRelDir, item.relDirs, item.fileName, f.deps.Settings.ISOFilenameEnabled)
+		if addOversizedPathFailure(f.failures, ScanFailureStrm, relPath, false) {
 			continue
 		}
 		seen[filepath.ToSlash(relPath)] = struct{}{}
-		if _, err := MigrateLegacyISOStrmFile(root, taskRelDir, item.relDirs, item.fileName, item.fileID, deps.Settings.ISOFilenameEnabled); err != nil {
-			failures.Add(ScanFailureStrm, filepath.ToSlash(relPath), err.Error())
+		if _, err := MigrateLegacyISOStrmFile(f.root, f.rules.outputRelDir, item.relDirs, item.fileName, item.fileID, f.deps.Settings.ISOFilenameEnabled); err != nil {
+			f.failures.Add(ScanFailureStrm, filepath.ToSlash(relPath), err.Error())
 			continue
 		}
-		if task.ScanMode == domain.StrmScanModeIncrementalMissing {
-			if _, err := os.Stat(filepath.Join(root, relPath)); err == nil {
+		if f.task.ScanMode == domain.StrmScanModeIncrementalMissing {
+			if _, err := os.Stat(filepath.Join(f.root, relPath)); err == nil {
 				continue
 			}
 		}
-		url := BuildPlayURL(deps.BaseURL, task.AccountID, item.fileID, item.fileName, deps.Token, deps.SignEnabled, deps.Secret)
-		created, updated, err := writeStrmFile(root, relPath, url, task.ScanMode)
+		url := BuildPlayURL(f.deps.BaseURL, f.task.AccountID, item.fileID, item.fileName, f.deps.Token, f.deps.SignEnabled, f.deps.Secret)
+		created, updated, err := writeStrmFile(f.root, relPath, url, f.task.ScanMode)
 		if err != nil {
-			failures.Add(ScanFailureStrm, filepath.ToSlash(relPath), err.Error())
+			f.failures.Add(ScanFailureStrm, filepath.ToSlash(relPath), err.Error())
 			continue
 		}
 		if created {
@@ -282,67 +284,104 @@ func finalizeScan(
 			result.UpdatedCount++
 		}
 	}
+	return result, seen
+}
+
+func (f scanFinalizer) protectReason(cleanupEnabled bool, scopes []cleanupScope, harvest scanHarvest, seen map[string]struct{}) (string, error) {
+	if !cleanupEnabled {
+		return "", nil
+	}
+	if reason := strings.TrimSpace(harvest.state.cleanupBlockedReason); reason != "" {
+		return reason, nil
+	}
+	if f.deps.ManualCleanupConfirm {
+		return "", nil
+	}
+	impact, err := collectCleanupImpact(f.root, f.rules.outputRelDir, scopes, harvest.state.skippedDirs, seen, harvest.state.remoteChildren)
+	if err != nil {
+		return "", err
+	}
+	return cleanupProtectReason(impact), nil
+}
+
+func (f scanFinalizer) syncAndCleanup(result *ScanResult, harvest scanHarvest, cleanupEnabled bool, scopes []cleanupScope, seen map[string]struct{}) error {
+	state := harvest.state
+	if f.task.SyncMetadata && len(state.metadataDirs) > 0 {
+		syncResult, err := syncMetadata(f.ctx, metadataSyncRequest{
+			AccountID:    f.task.AccountID,
+			Root:         f.root,
+			OutputFolder: f.rules.outputRelDir,
+			Mode:         f.deps.Settings.MetadataSyncMode,
+			Extensions:   f.rules.metadataExts,
+			MaxSizeBytes: f.rules.maxMetadataBytes,
+			RemoteItems:  filterMetadataItems(harvest.metadataItems, harvest.dirHasMedia, harvest.subtreeHasMedia, f.deps.Settings.MetadataParentEnabled),
+			Directories:  filterMetadataDirectories(state.metadataDirs, harvest.dirHasMedia, harvest.subtreeHasMedia, f.deps.Settings.MetadataParentEnabled),
+			Files:        f.deps.Files,
+			Playback:     f.deps.Playback,
+			Failures:     f.failures,
+			OnProgress:   f.deps.OnProgress,
+		})
+		if err != nil {
+			return err
+		}
+		result.GeneratedCount += syncResult.Downloaded
+		result.RemovedCount += syncResult.Deleted
+	}
+	if !cleanupEnabled {
+		return nil
+	}
+	removed, err := cleanupScopedStaleFiles(f.root, f.rules.outputRelDir, seen, scopes, state.skippedDirs, f.failures)
+	if err != nil {
+		return err
+	}
+	dirsRemoved, err := cleanupMissingRemoteChildDirs(f.root, f.rules.outputRelDir, state.remoteChildren, f.failures, f.log)
+	if err != nil {
+		return err
+	}
+	result.RemovedCount += removed + dirsRemoved
+	deleteMissingMonitorBranches(f.ctx, f.deps, state.pendingBranchDeletes, f.log)
+	return nil
+}
+
+// finalizeScan 处理已收集到的候选：冲突选择 → 生成 STRM → 元数据同步 → 清理。
+// 普通递归扫描与增强清单模式共用，保证两种模式行为一致。
+func finalizeScan(
+	ctx context.Context,
+	task *domain.StrmTask,
+	deps ScanDeps,
+	harvest scanHarvest,
+	useBranch bool,
+	rules scanRules,
+	root string,
+	failures *FailureCollector,
+) (ScanResult, error) {
+	log := deps.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	state := harvest.state
+	finalizer := scanFinalizer{ctx: ctx, task: task, deps: deps, rules: rules, root: root, failures: failures, log: log}
+	selected, _ := selectConflictWinners(harvest.candidates, deps.Settings.ConflictPolicy)
+	harvest.metadataItems = alignMetadataItems(rules.outputRelDir, selected, harvest.metadataItems, deps.Settings.ISOFilenameEnabled)
+	result, seen := finalizer.writeStrm(selected)
 
 	cleanupEnabled := task.ScanMode == domain.StrmScanModeIncrementalUpdate || task.ScanMode == domain.StrmScanModeFullSync
 	cleanupScopes := effectiveCleanupScopes(useBranch, state.cleanupScopes)
-	cleanupSkipped := state.skippedDirs
 	// 安全保护：仅定时自动扫描时按实际清理规模判定。
 	// 待删 STRM 或待删顶层目录达到阈值时保护（防止大批量误清空后重建耗时）；
 	// 小规模清理不保护（误删几十个可快速恢复）。手动执行视为用户确认，直接放行。
 	// 触发时本次所有删除动作（过期 strm/旁路/目录级/元数据）停止，生成与更新照常。
-	protectReason := ""
-	if cleanupEnabled {
-		protectReason = strings.TrimSpace(state.cleanupBlockedReason)
-	}
-	if protectReason == "" && cleanupEnabled && !deps.ManualCleanupConfirm {
-		impact, countErr := collectCleanupImpact(root, taskRelDir, cleanupScopes, cleanupSkipped, seen, state.remoteChildren)
-		if countErr != nil {
-			return result, countErr
-		}
-		protectReason = cleanupProtectReason(impact)
+	protectReason, err := finalizer.protectReason(cleanupEnabled, cleanupScopes, harvest, seen)
+	if err != nil {
+		return result, err
 	}
 
 	if protectReason != "" {
 		result.Protected = true
 		result.ProtectReason = protectReason
 		log.Warn("strm 扫描安全保护阻止清理", "task_id", task.ID, "task_name", task.Name, "reason", protectReason)
-	} else {
-		if task.SyncMetadata && len(state.metadataDirs) > 0 {
-			filteredMetadata := filterMetadataItems(metadataItems, dirHasMedia, subtreeHasMedia, deps.Settings.MetadataParentEnabled)
-			metadataDirs := filterMetadataDirectories(state.metadataDirs, dirHasMedia, subtreeHasMedia, deps.Settings.MetadataParentEnabled)
-			syncResult, err := syncMetadata(ctx, metadataSyncRequest{
-				AccountID:    task.AccountID,
-				Root:         root,
-				OutputFolder: taskRelDir,
-				Mode:         deps.Settings.MetadataSyncMode,
-				Extensions:   metaExts,
-				MaxSizeBytes: metaMaxBytes,
-				RemoteItems:  filteredMetadata,
-				Directories:  metadataDirs,
-				Files:        deps.Files,
-				Playback:     deps.Playback,
-				Failures:     failures,
-				OnProgress:   deps.OnProgress,
-			})
-			if err != nil {
-				return result, err
-			}
-			result.GeneratedCount += syncResult.Downloaded
-			result.RemovedCount += syncResult.Deleted
-		}
-
-		if cleanupEnabled {
-			removed, err := cleanupScopedStaleFiles(root, taskRelDir, seen, cleanupScopes, cleanupSkipped, failures)
-			if err != nil {
-				return result, err
-			}
-			n, err := cleanupMissingRemoteChildDirs(root, taskRelDir, state.remoteChildren, failures, log)
-			if err != nil {
-				return result, err
-			}
-			result.RemovedCount += removed + n
-			deleteMissingMonitorBranches(ctx, deps, state.pendingBranchDeletes, log)
-		}
+	} else if err := finalizer.syncAndCleanup(&result, harvest, cleanupEnabled, cleanupScopes, seen); err != nil {
+		return result, err
 	}
 
 	log.Debug("strm scan finished",
@@ -546,19 +585,13 @@ func walkBaseBranchEntry(
 	task *domain.StrmTask,
 	deps ScanDeps,
 	scope scanScope,
-	exts, metaExts map[string]struct{},
-	excludeDirs, excludeFiles []string,
-	minMediaBytes, metaMaxBytes int64,
-	syncMetadata bool,
+	rules scanRules,
 	branchParentIDs map[string]struct{},
-	skippedDirs map[string]struct{},
-	metadataDirs map[string]metadataDirectory,
 	strmRoot string,
-	candidates *[]mediaCandidate,
-	metadataItems *[]metadataItem,
-	dirHasMedia, subtreeHasMedia map[string]bool,
+	harvest *scanHarvest,
 	log *slog.Logger,
 ) ([]scanScope, map[string]struct{}, error) {
+	state := harvest.state
 	relDirs := append([]string{}, scope.relDirs...)
 	reportScanProgress(deps.OnProgress, ScanPhaseScan, 0, 0, dirProgressLabel(relDirs))
 	items, skip, err := listDirWithNotFoundRetry(ctx, task, deps, scope.parentID, relDirs)
@@ -566,13 +599,13 @@ func walkBaseBranchEntry(
 		return nil, nil, err
 	}
 	if skip {
-		skippedDirs[dirKey(relDirs)] = struct{}{}
+		state.skippedDirs[dirKey(relDirs)] = struct{}{}
 		return nil, nil, nil
 	}
-	recordMetadataDirectory(metadataDirs, scope.parentID, relDirs)
+	recordMetadataDirectory(state.metadataDirs, scope.parentID, relDirs)
 
 	currentKey := dirKey(relDirs)
-	outputFolder := TaskRelDir(task.GroupDir, task.OutputFolder)
+	outputFolder := rules.outputRelDir
 	localStrmChildren := localChildDirsWithStrm(strmRoot, outputFolder, relDirs)
 	localHasMedia := false
 	var dirMeta []metadataItem
@@ -584,7 +617,7 @@ func walkBaseBranchEntry(
 		name := item.Name
 		if item.IsDir {
 			remoteChildNames[SafeName(name)] = struct{}{}
-			if matchesKeywordRules(name, excludeDirs) {
+			if matchesKeywordRules(name, rules.excludeDirs) {
 				continue
 			}
 			childID := item.ID
@@ -593,8 +626,8 @@ func walkBaseBranchEntry(
 			}
 			childRel := append(append([]string{}, relDirs...), name)
 			if _, ok := localStrmChildren[SafeName(name)]; ok {
-				skippedDirs[dirKey(childRel)] = struct{}{}
-				markSubtreeMedia(subtreeHasMedia, childRel)
+				state.skippedDirs[dirKey(childRel)] = struct{}{}
+				markSubtreeMedia(harvest.subtreeHasMedia, childRel)
 				continue
 			}
 			childRemote := joinRemotePath(scope.remotePath, name)
@@ -604,7 +637,7 @@ func walkBaseBranchEntry(
 				recursive:  true,
 				remotePath: childRemote,
 			}
-			if deps.Branches != nil && shouldAutoAddTemporaryBranch(ctx, deps, task, childID, exts) {
+			if deps.Branches != nil && shouldAutoAddTemporaryBranch(ctx, deps, task, childID, rules.mediaExts) {
 				relativePath := strings.Join(childRel, "/")
 				expiresAt := time.Now().Add(30 * 24 * time.Hour)
 				branch := &domain.StrmBranch{
@@ -630,12 +663,12 @@ func walkBaseBranchEntry(
 			childScopes = append(childScopes, childScope)
 			continue
 		}
-		if matchesKeywordRules(name, excludeFiles) {
+		if matchesKeywordRules(name, rules.excludeFiles) {
 			continue
 		}
-		classified := classifyScanFile(item.ID, name, outputFolder, item.Size, relDirs, exts, metaExts, minMediaBytes, metaMaxBytes, syncMetadata)
+		classified := rules.classify(item.ID, name, item.Size, relDirs)
 		if classified.hasMedia {
-			*candidates = append(*candidates, classified.media)
+			harvest.candidates = append(harvest.candidates, classified.media)
 			if deps.OnProgress != nil {
 				reportScanProgress(deps.OnProgress, ScanPhaseScan, 0, 1, dirProgressLabel(relDirs))
 			}
@@ -647,11 +680,11 @@ func walkBaseBranchEntry(
 		}
 	}
 	if localHasMedia {
-		dirHasMedia[currentKey] = true
-		markSubtreeMedia(subtreeHasMedia, relDirs)
+		harvest.dirHasMedia[currentKey] = true
+		markSubtreeMedia(harvest.subtreeHasMedia, relDirs)
 	}
 	if len(dirMeta) > 0 {
-		*metadataItems = append(*metadataItems, dirMeta...)
+		harvest.metadataItems = append(harvest.metadataItems, dirMeta...)
 	}
 	if deps.OnProgress != nil {
 		reportScanProgress(deps.OnProgress, ScanPhaseScan, 1, 0, dirProgressLabel(relDirs))
@@ -672,17 +705,10 @@ func walkScope(
 	task *domain.StrmTask,
 	deps ScanDeps,
 	scope scanScope,
-	exts, metaExts map[string]struct{},
-	excludeDirs, excludeFiles []string,
-	minMediaBytes, metaMaxBytes int64,
-	syncMetadata bool,
-	remoteChildren map[string]map[string]struct{},
-	metadataDirs map[string]metadataDirectory,
-	skippedDirs map[string]struct{},
-	candidates *[]mediaCandidate,
-	metadataItems *[]metadataItem,
-	dirHasMedia, subtreeHasMedia map[string]bool,
+	rules scanRules,
+	harvest *scanHarvest,
 ) error {
+	state := harvest.state
 	type node struct {
 		parentID string
 		relDirs  []string
@@ -700,13 +726,12 @@ func walkScope(
 			return err
 		}
 		if skip {
-			skippedDirs[dirKey(n.relDirs)] = struct{}{}
+			state.skippedDirs[dirKey(n.relDirs)] = struct{}{}
 			continue
 		}
-		recordMetadataDirectory(metadataDirs, n.parentID, n.relDirs)
+		recordMetadataDirectory(state.metadataDirs, n.parentID, n.relDirs)
 		childNames := make(map[string]struct{})
 		dirKey := dirKey(n.relDirs)
-		outputFolder := TaskRelDir(task.GroupDir, task.OutputFolder)
 		localHasMedia := false
 		var dirMeta []metadataItem
 		for i := range items {
@@ -714,7 +739,7 @@ func walkScope(
 			name := item.Name
 			if item.IsDir {
 				childNames[SafeName(name)] = struct{}{}
-				if matchesKeywordRules(name, excludeDirs) {
+				if matchesKeywordRules(name, rules.excludeDirs) {
 					continue
 				}
 				if scope.recursive {
@@ -723,12 +748,12 @@ func walkScope(
 				}
 				continue
 			}
-			if matchesKeywordRules(name, excludeFiles) {
+			if matchesKeywordRules(name, rules.excludeFiles) {
 				continue
 			}
-			classified := classifyScanFile(item.ID, name, outputFolder, item.Size, n.relDirs, exts, metaExts, minMediaBytes, metaMaxBytes, syncMetadata)
+			classified := rules.classify(item.ID, name, item.Size, n.relDirs)
 			if classified.hasMedia {
-				*candidates = append(*candidates, classified.media)
+				harvest.candidates = append(harvest.candidates, classified.media)
 				if deps.OnProgress != nil {
 					reportScanProgress(deps.OnProgress, ScanPhaseScan, 0, 1, dirProgressLabel(n.relDirs))
 				}
@@ -739,13 +764,13 @@ func walkScope(
 				dirMeta = append(dirMeta, classified.metadata)
 			}
 		}
-		recordRemoteChildren(remoteChildren, n.relDirs, childNames)
+		recordRemoteChildren(state.remoteChildren, n.relDirs, childNames)
 		if localHasMedia {
-			dirHasMedia[dirKey] = true
-			markSubtreeMedia(subtreeHasMedia, n.relDirs)
+			harvest.dirHasMedia[dirKey] = true
+			markSubtreeMedia(harvest.subtreeHasMedia, n.relDirs)
 		}
 		if len(dirMeta) > 0 {
-			*metadataItems = append(*metadataItems, dirMeta...)
+			harvest.metadataItems = append(harvest.metadataItems, dirMeta...)
 		}
 		if deps.OnProgress != nil {
 			reportScanProgress(deps.OnProgress, ScanPhaseScan, 1, 0, dirProgressLabel(n.relDirs))

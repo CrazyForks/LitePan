@@ -44,6 +44,7 @@ type currentDirWork struct {
 	outputFolder    string
 	root            string
 	scanCfg         ScanSettings
+	rules           scanRules
 	selected        []mediaCandidate
 	metadataItems   []metadataItem
 	remoteDirNames  map[string]struct{}
@@ -83,8 +84,8 @@ func (s *Service) CheckCurrentDirectoryStatus(ctx context.Context, accountID int
 			Root:         work.root,
 			OutputFolder: work.outputFolder,
 			Mode:         work.scanCfg.MetadataSyncMode,
-			Extensions:   parseExtensions(work.scanCfg.MetadataExtensions),
-			MaxSizeBytes: metadataMaxBytes(work.scanCfg.MetadataMaxSizeMB),
+			Extensions:   work.rules.metadataExts,
+			MaxSizeBytes: work.rules.maxMetadataBytes,
 			RemoteItems:  filtered,
 			Directories: map[string]metadataDirectory{
 				dirKey(work.relDirs): {parentID: work.parentID, relDirs: work.relDirs},
@@ -182,8 +183,8 @@ func (s *Service) GenerateCurrentDirectory(ctx context.Context, accountID int64,
 			Root:         work.root,
 			OutputFolder: work.outputFolder,
 			Mode:         work.scanCfg.MetadataSyncMode,
-			Extensions:   parseExtensions(work.scanCfg.MetadataExtensions),
-			MaxSizeBytes: metadataMaxBytes(work.scanCfg.MetadataMaxSizeMB),
+			Extensions:   work.rules.metadataExts,
+			MaxSizeBytes: work.rules.maxMetadataBytes,
 			RemoteItems:  filtered,
 			Directories: map[string]metadataDirectory{
 				dirKey(work.relDirs): {parentID: work.parentID, relDirs: work.relDirs},
@@ -219,58 +220,9 @@ func (s *Service) prepareCurrentDirectoryWork(ctx context.Context, accountID int
 		outputFolder = task.Name
 	}
 	scanCfg := s.scanSettings()
-	exts := parseExtensions(task.Extensions)
-	if len(exts) == 0 {
-		exts = parseExtensions(scanCfg.DefaultExtensions)
-	}
-	if len(exts) == 0 {
-		exts = parseExtensions(defaultExtensions)
-	}
-	metaExts := parseExtensions(scanCfg.MetadataExtensions)
-	minMediaBytes := int64(scanCfg.MinFileSizeMB) * 1024 * 1024
-	metaMaxBytes := int64(scanCfg.MetadataMaxSizeMB) * 1024 * 1024
-	if scanCfg.MetadataMaxSizeMB <= 0 {
-		metaMaxBytes = 0
-	}
-
-	var candidates []mediaCandidate
-	var metadataItems []metadataItem
-	remoteDirNames := make(map[string]struct{})
-
-	for _, item := range items {
-		name := strings.TrimSpace(item.Name)
-		if name == "" {
-			continue
-		}
-		if item.IsDir {
-			remoteDirNames[SafeName(name)] = struct{}{}
-			continue
-		}
-		ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
-		if _, ok := exts[ext]; ok {
-			if minMediaBytes > 0 && item.Size < minMediaBytes {
-				continue
-			}
-			if strings.TrimSpace(item.ID) == "" {
-				continue
-			}
-			candidates = append(candidates, mediaCandidate{
-				fileID: item.ID, fileName: name, size: item.Size, relDirs: append([]string{}, relDirs...),
-			})
-			continue
-		}
-		if task.SyncMetadata && len(metaExts) > 0 {
-			if _, ok := metaExts[ext]; ok {
-				if metaMaxBytes > 0 && item.Size > metaMaxBytes {
-					continue
-				}
-				if strings.TrimSpace(item.ID) == "" {
-					continue
-				}
-				metadataItems = append(metadataItems, newMetadataItem(item.ID, name, outputFolder, relDirs))
-			}
-		}
-	}
+	rules := newScanRules(task, scanCfg)
+	rules.outputRelDir = outputFolder
+	candidates, metadataItems, remoteDirNames := classifyCurrentDirectoryEntries(items, relDirs, rules)
 
 	selected, skippedConflict := selectConflictWinners(candidates, scanCfg.ConflictPolicy)
 	metadataItems = alignMetadataItems(outputFolder, selected, metadataItems, scanCfg.ISOFilenameEnabled)
@@ -282,6 +234,7 @@ func (s *Service) prepareCurrentDirectoryWork(ctx context.Context, accountID int
 		outputFolder:    outputFolder,
 		root:            s.strmDir,
 		scanCfg:         scanCfg,
+		rules:           rules,
 		selected:        selected,
 		metadataItems:   metadataItems,
 		remoteDirNames:  remoteDirNames,
@@ -289,11 +242,30 @@ func (s *Service) prepareCurrentDirectoryWork(ctx context.Context, accountID int
 	}, nil
 }
 
-func metadataMaxBytes(maxMB int) int64 {
-	if maxMB <= 0 {
-		return 0
+func classifyCurrentDirectoryEntries(items []CurrentDirectoryEntry, relDirs []string, rules scanRules) ([]mediaCandidate, []metadataItem, map[string]struct{}) {
+	var candidates []mediaCandidate
+	var metadataItems []metadataItem
+	remoteDirNames := make(map[string]struct{})
+	for _, item := range items {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		if item.IsDir {
+			remoteDirNames[SafeName(name)] = struct{}{}
+			continue
+		}
+		if strings.TrimSpace(item.ID) == "" || matchesKeywordRules(name, rules.excludeFiles) {
+			continue
+		}
+		classified := rules.classify(item.ID, name, item.Size, relDirs)
+		if classified.hasMedia {
+			candidates = append(candidates, classified.media)
+		} else if classified.hasMetadata {
+			metadataItems = append(metadataItems, classified.metadata)
+		}
 	}
-	return int64(maxMB) * 1024 * 1024
+	return candidates, metadataItems, remoteDirNames
 }
 
 func strmFilePending(root, relPath, url, scanMode string) bool {
