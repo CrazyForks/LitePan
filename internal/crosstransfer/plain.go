@@ -81,12 +81,11 @@ func (s *Service) EnqueuePlain(ctx context.Context, in EnqueuePlainInput) (*Enqu
 				continue
 			}
 		}
-		if _, createErr := s.uploads.Create(ctx, upload.CreateParams{
+		if createErr := s.enqueueRelay(ctx, upload.CreateParams{
 			AccountID:         in.TargetAccountID,
 			AccountName:       in.TargetAccountName,
 			DriverType:        in.TargetDriverType,
 			FileName:          f.name,
-			SourceType:        upload.SourceTypeCrossTransfer,
 			SourceAccountID:   in.SourceAccountID,
 			SourceAccountName: in.SourceAccountName,
 			SourceDriverType:  in.SourceDriverType,
@@ -97,12 +96,12 @@ func (s *Service) EnqueuePlain(ctx context.Context, in EnqueuePlainInput) (*Enqu
 			TargetDisplayPath: in.TargetDisplayPath,
 			TotalBytes:        f.size,
 			ConflictPolicy:    conflict,
-			Phase:             upload.PhaseDownloading,
 		}); createErr != nil {
 			res.Failed++
 			res.recordFailure(f, createErr)
 			continue
 		}
+		rememberTargetName(nameCache, folderID, f.name)
 		res.Enqueued++
 	}
 
@@ -114,6 +113,12 @@ func (s *Service) EnqueuePlain(ctx context.Context, in EnqueuePlainInput) (*Enqu
 		res.Message = fmt.Sprintf("%d 个文件入队失败，首个错误：%s", res.Failed, res.FailedMessage)
 	}
 	return res, nil
+}
+
+func rememberTargetName(cache map[string]map[string]struct{}, folderID, name string) {
+	if names := cache[folderID]; names != nil {
+		names[name] = struct{}{}
+	}
 }
 
 func (r *EnqueuePlainResult) recordFailure(f plainScanFile, err error) {
