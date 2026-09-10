@@ -10,11 +10,12 @@ import (
 
 func (s *Service) originalLinkHolder(accountID int64, fileID string, res Resolved) *linkHolder {
 	return &linkHolder{
-		svc:         s,
-		link:        res.Link,
-		accountID:   accountID,
-		fileID:      fileID,
-		refreshLeft: 2,
+		svc:            s,
+		link:           res.Link,
+		accountID:      accountID,
+		fileID:         fileID,
+		refreshLeft:    2,
+		waitRangeLimit: true,
 	}
 }
 
@@ -82,7 +83,7 @@ func (s *Service) CopyOriginalFull(ctx context.Context, w io.Writer, accountID i
 }
 
 func (s *Service) doFullRequest(ctx context.Context, accountID int64, link domain.DownloadInfo) (*http.Response, error) {
-	release, err := s.rangeLimits.acquire(ctx, accountID, link.Concurrency)
+	release, err := s.rangeLimits.acquireBlocking(ctx, accountID, link.Concurrency)
 	if err != nil {
 		return nil, err
 	}

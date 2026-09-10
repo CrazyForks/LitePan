@@ -37,6 +37,7 @@ type linkHolder struct {
 	ua             string
 	playback       bool
 	skipRangeLimit bool
+	waitRangeLimit bool
 	refreshLeft    int
 }
 
@@ -211,7 +212,7 @@ func writeAll(w io.Writer, data []byte) error {
 func (s *Service) pipeUpstreamRange(ctx context.Context, w io.Writer, lh *linkHolder, start, end int64) error {
 	link := lh.snapshot()
 	for try := 0; try < 2; try++ {
-		resp, err := s.doRangeRequest(ctx, lh.accountID, link, start, end, lh.skipRangeLimit)
+		resp, err := s.doRangeRequest(ctx, lh.accountID, link, start, end, lh.skipRangeLimit, lh.waitRangeLimit)
 		if err != nil {
 			if try == 0 && ctx.Err() == nil {
 				newLink, refreshed, rerr := lh.refreshAfterFailure(ctx, link)
@@ -311,7 +312,7 @@ func (g *growBuffer) Write(p []byte) (int, error) {
 func (g *growBuffer) Bytes() []byte { return g.b }
 
 func (s *Service) probeSizeViaRange0(ctx context.Context, lh *linkHolder) (int64, error) {
-	resp, err := s.doRangeRequest(ctx, lh.accountID, lh.snapshot(), 0, 0, lh.skipRangeLimit)
+	resp, err := s.doRangeRequest(ctx, lh.accountID, lh.snapshot(), 0, 0, lh.skipRangeLimit, lh.waitRangeLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -342,11 +343,15 @@ func parseContentRangeTotal(v string) (int64, error) {
 	return n, nil
 }
 
-func (s *Service) doRangeRequest(ctx context.Context, accountID int64, link domain.DownloadInfo, start, end int64, skipLimit bool) (*http.Response, error) {
+func (s *Service) doRangeRequest(ctx context.Context, accountID int64, link domain.DownloadInfo, start, end int64, skipLimit, waitLimit bool) (*http.Response, error) {
 	var release func()
 	if !skipLimit {
 		var err error
-		release, err = s.rangeLimits.acquire(ctx, accountID, link.Concurrency)
+		if waitLimit {
+			release, err = s.rangeLimits.acquireBlocking(ctx, accountID, link.Concurrency)
+		} else {
+			release, err = s.rangeLimits.acquire(ctx, accountID, link.Concurrency)
+		}
 		if err != nil {
 			return nil, err
 		}

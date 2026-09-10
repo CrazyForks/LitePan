@@ -22,6 +22,15 @@ type accountRangeLimiter struct {
 }
 
 func (l *accountRangeLimiter) acquire(ctx context.Context, accountID int64, limit int) (func(), error) {
+	return l.acquireWithTimeout(ctx, accountID, limit, acquireTimeout)
+}
+
+// acquireBlocking 用于可持久化的后台传输：名额占满时等待，直到取得名额或任务被取消。
+func (l *accountRangeLimiter) acquireBlocking(ctx context.Context, accountID int64, limit int) (func(), error) {
+	return l.acquireWithTimeout(ctx, accountID, limit, 0)
+}
+
+func (l *accountRangeLimiter) acquireWithTimeout(ctx context.Context, accountID int64, limit int, timeout time.Duration) (func(), error) {
 	if accountID <= 0 || limit <= 0 {
 		return func() {}, nil
 	}
@@ -40,17 +49,28 @@ func (l *accountRangeLimiter) acquire(ctx context.Context, accountID int64, limi
 	}
 	l.mu.Unlock()
 
-	timer := time.NewTimer(acquireTimeout)
+	if timeout <= 0 {
+		select {
+		case sem <- struct{}{}:
+			return rangeLimitRelease(sem), nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
 	case sem <- struct{}{}:
-		var once sync.Once
-		return func() {
-			once.Do(func() { <-sem })
-		}, nil
+		return rangeLimitRelease(sem), nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-timer.C:
 		return nil, domain.Errorf(domain.CodeDriverError, "同账号并发拉流名额占满，等待超时")
 	}
+}
+
+func rangeLimitRelease(sem chan struct{}) func() {
+	var once sync.Once
+	return func() { once.Do(func() { <-sem }) }
 }

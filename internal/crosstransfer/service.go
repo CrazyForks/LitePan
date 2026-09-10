@@ -839,7 +839,7 @@ func (s *Service) fallbackTransferResult(ctx context.Context, in executeFileInpu
 
 func (s *Service) enqueueRelayTask(ctx context.Context, in executeFileInput) error {
 	f := in.file
-	return s.enqueueRelay(ctx, upload.CreateParams{
+	_, err := s.enqueueRelay(ctx, upload.CreateParams{
 		AccountID:         in.targetAccountID,
 		AccountName:       in.targetAccountName,
 		DriverType:        in.targetDriverType,
@@ -855,19 +855,19 @@ func (s *Service) enqueueRelayTask(ctx context.Context, in executeFileInput) err
 		TotalBytes:        f.Size,
 		ConflictPolicy:    in.conflict,
 	})
+	return err
 }
 
-func (s *Service) enqueueRelay(ctx context.Context, params upload.CreateParams) error {
+func (s *Service) enqueueRelay(ctx context.Context, params upload.CreateParams) (*upload.Task, error) {
 	if s.uploads == nil {
-		return domain.Errorf(domain.CodeInternal, "上传服务未就绪")
+		return nil, domain.Errorf(domain.CodeInternal, "上传服务未就绪")
 	}
 	if strings.TrimSpace(params.SourceFileID) == "" {
-		return domain.Errorf(domain.CodeValidation, "源文件缺少 file_id，无法执行兜底传输")
+		return nil, domain.Errorf(domain.CodeValidation, "源文件缺少 file_id，无法执行兜底传输")
 	}
 	params.SourceType = upload.SourceTypeCrossTransfer
 	params.Phase = upload.PhaseDownloading
-	_, err := s.uploads.Create(ctx, params)
-	return err
+	return s.uploads.Create(ctx, params)
 }
 
 func normalizeConflictPolicy(policy string) string {

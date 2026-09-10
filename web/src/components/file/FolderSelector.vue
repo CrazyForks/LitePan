@@ -625,8 +625,17 @@ watch(filterKeyword, (value) => {
   emit("update:searchValue", value);
 });
 
+const initialLocationKey = computed(() => JSON.stringify({
+  accountId: props.accountId,
+  path: props.initialPath,
+  breadcrumb: props.initialBreadcrumb.map((item) => [String(item.id || ""), item.name]),
+  anchor: props.rootAnchor
+    ? [String(props.rootAnchor.parentId || ""), props.rootAnchor.path, props.rootAnchor.label || ""]
+    : null,
+}));
+
 watch(
-  () => [props.accountId, props.initialPath, props.initialBreadcrumb, props.rootAnchor] as const,
+  initialLocationKey,
   () => {
     void resetAndLoad();
   },

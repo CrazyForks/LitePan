@@ -2,12 +2,11 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { accountsApi } from "@/api/accounts";
 import type { Account } from "@/api/types";
-import { enqueueCrossTransferPlain, type CrossTransferPlainEnqueueResult } from "@/api/crossTransfer";
+import { enqueueCrossTransferPlainStream, type CrossTransferPlainEnqueueResult } from "@/api/crossTransfer";
 import type { FolderSelection } from "@/components/file/FolderSelector.vue";
 import { getApiErrorMessage } from "@/api/client";
 import { toast } from "@/composables/useToast";
 import FolderPickerModal from "@/components/file/FolderPickerModal.vue";
-import BusySpinner from "@/components/base/BusySpinner.vue";
 import "@/styles/cross-transfer.css";
 
 /**
@@ -39,7 +38,28 @@ const src = ref<{ accId: number; accName: string; accDriverType: string; sources
 const dst = ref<DstSel | null>(null);
 const conflict = ref<Conflict>("skip");
 const running = ref(false);
-const phaseText = ref("");
+const result = ref<CrossTransferPlainEnqueueResult | null>(null);
+const enqueueProgress = ref({ stage: "", directories: 0, files: 0, total: 0, processed: 0, enqueued: 0, skipped: 0, failed: 0 });
+const enqueuePercent = computed(() => enqueueProgress.value.total > 0
+  ? Math.min(100, Math.round((enqueueProgress.value.processed * 100) / enqueueProgress.value.total))
+  : 0);
+const plainMetrics = computed(() => {
+  if (result.value) {
+    return {
+      files: result.value.enqueued + result.value.skipped + result.value.failed,
+      enqueued: result.value.enqueued,
+      skipped: result.value.skipped,
+      failed: result.value.failed,
+    };
+  }
+  return {
+    files: enqueueProgress.value.total || enqueueProgress.value.files,
+    enqueued: enqueueProgress.value.enqueued,
+    skipped: enqueueProgress.value.skipped,
+    failed: enqueueProgress.value.failed,
+  };
+});
+const tasksHref = "/?taskPanel=relay";
 
 const pickerOpen = ref(false);
 const pickerMode = ref<"src" | "dst">("src");
@@ -183,9 +203,11 @@ const canStart = computed(() => {
 async function startTransfer() {
   if (!canStart.value || !src.value || !dst.value) return;
   running.value = true;
-  phaseText.value = "正在枚举源目录并创建任务…";
+  result.value = null;
+  enqueueProgress.value = { stage: "scan", directories: 0, files: 0, total: 0, processed: 0, enqueued: 0, skipped: 0, failed: 0 };
   try {
-    const res: CrossTransferPlainEnqueueResult = await enqueueCrossTransferPlain({
+    let res: CrossTransferPlainEnqueueResult | null = null;
+    for await (const message of enqueueCrossTransferPlainStream({
       source_account_id: src.value.accId,
       source_account_name: src.value.accName,
       source_driver_type: src.value.accDriverType,
@@ -200,7 +222,17 @@ async function startTransfer() {
         ancestor_ids: item.ancestorIds,
       })),
       conflict: conflict.value,
-    });
+    })) {
+      if (message.event === "progress") {
+        Object.assign(enqueueProgress.value, message);
+      } else if (message.event === "end") {
+        res = message.result as CrossTransferPlainEnqueueResult;
+      } else if (message.event === "error") {
+        throw new Error(String(message.message || "创建跨盘普传任务失败"));
+      }
+    }
+    if (!res) throw new Error("创建任务未返回结果");
+    result.value = res;
     const parts = [
       res.enqueued > 0 ? `已入队 ${res.enqueued} 个任务` : "",
       res.skipped > 0 ? `跳过 ${res.skipped} 个同名` : "",
@@ -220,7 +252,6 @@ async function startTransfer() {
     toast.error(getApiErrorMessage(e, "创建跨盘普传任务失败"));
   } finally {
     running.value = false;
-    phaseText.value = "";
   }
 }
 </script>
@@ -297,15 +328,33 @@ async function startTransfer() {
 
     <!-- 底部操作：状态 + 设置齿轮 + 开始按钮 -->
     <div class="ct-plain-footer">
-      <div class="ft-left">
-        <span v-if="running" class="ft-running">
-          <BusySpinner :size="16" color="var(--brand)" />
-          {{ phaseText }}
-        </span>
-        <span v-else-if="srcCount" class="ft-ready">
-          <i class="fas fa-circle-check"></i> 已选 {{ srcCount }} 个源目录，共传输其中全部文件
-        </span>
-        <span v-else class="ft-ready muted"><i class="fas fa-circle-info"></i> 先选择源目录与目标目录</span>
+      <div class="plain-status-group">
+        <div class="plain-stats">
+          <span class="plain-stat"><b>{{ plainMetrics.files }}</b><small>文件</small></span>
+          <i></i>
+          <span class="plain-stat"><b class="ok">{{ plainMetrics.enqueued }}</b><small>加入</small></span>
+          <i></i>
+          <span class="plain-stat"><b>{{ plainMetrics.skipped }}</b><small>跳过</small></span>
+          <i></i>
+          <span class="plain-stat"><b class="fail">{{ plainMetrics.failed }}</b><small>失败</small></span>
+        </div>
+        <div v-if="running || result" class="plain-progress">
+          <template v-if="running">
+            <div class="plain-progress-main">
+              <div class="plain-progress-track" :class="{ 'is-loading': enqueueProgress.stage === 'scan' }">
+                <i :style="enqueueProgress.stage === 'enqueue' ? { width: `${enqueuePercent}%` } : undefined"></i>
+              </div>
+              <strong v-if="enqueueProgress.stage === 'enqueue'">{{ enqueuePercent }}%</strong>
+            </div>
+            <span v-if="enqueueProgress.stage === 'enqueue'">已处理 {{ enqueueProgress.processed }}/{{ enqueueProgress.total }}</span>
+            <span v-else>已扫描 {{ enqueueProgress.directories }} 个目录 · 发现 {{ enqueueProgress.files }} 个文件</span>
+          </template>
+          <template v-else>
+            <a class="plain-task-link" :href="tasksHref" target="_blank" rel="noopener">
+              查看传输任务 <i class="fas fa-arrow-up-right-from-square"></i>
+            </a>
+          </template>
+        </div>
       </div>
       <div class="footer-island">
         <div ref="settingsMenuRef" class="ct-settings-menu">
@@ -420,8 +469,27 @@ async function startTransfer() {
   box-shadow: var(--shadow-soft);
   padding: 10px 14px;
 }
-.ft-left { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-regular); }
-.ft-ready i { color: var(--success); }
-.ft-ready.muted i { color: var(--text-secondary); }
-.ft-running { display: flex; align-items: center; gap: 8px; color: var(--text-regular); }
+.plain-status-group { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: flex-start; gap: 14px; }
+.plain-stats { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.plain-stats > i { width: 2px; height: 2px; border-radius: 50%; background: var(--border2); }
+.plain-stat { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+.plain-stat b { color: var(--text-main); font-size: 22px; line-height: 1; font-variant-numeric: tabular-nums; }
+.plain-stat b.ok { color: var(--success); }
+.plain-stat b.fail { color: var(--danger); }
+.plain-stat small { color: var(--text-secondary); font-size: 11px; }
+.plain-progress { flex: 1 1 320px; min-width: 240px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+.plain-progress-main { flex: 1 1 auto; min-width: 180px; display: flex; align-items: center; gap: 8px; }
+.plain-progress-main strong { width: 34px; color: var(--brand); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+.plain-progress-track { flex: 1 1 auto; min-width: 140px; height: 3px; overflow: hidden; border-radius: var(--radius-pill); background: var(--bg); }
+.plain-progress-track > i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--brand), var(--brand-end)); transition: width .2s ease; }
+.plain-progress-track.is-loading > i { width: 35%; animation: plain-progress-loading 1.1s ease-in-out infinite; }
+.plain-task-link { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--brand) 20%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--brand) 6%, transparent); color: var(--brand); text-decoration: none; transition: background .15s, border-color .15s; }
+.plain-task-link:hover { border-color: color-mix(in srgb, var(--brand) 36%, transparent); background: color-mix(in srgb, var(--brand) 10%, transparent); }
+.plain-task-link i { font-size: 10px; }
+@keyframes plain-progress-loading { from { transform: translateX(-110%); } to { transform: translateX(310%); } }
+
+@media (max-width: 720px) {
+  .plain-status-group { flex-wrap: wrap; gap: 8px 12px; }
+  .plain-progress { flex-basis: 100%; min-width: 0; overflow-x: auto; }
+}
 </style>

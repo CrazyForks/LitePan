@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -261,4 +262,25 @@ func (h *Handler) crossTransferPlainEnqueue(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeOK(w, result)
+}
+
+func (h *Handler) crossTransferPlainEnqueueStream(w http.ResponseWriter, r *http.Request) {
+	if !ensureServiceReady(w, h.crossTransfer != nil) {
+		return
+	}
+	var req crossTransferPlainEnqueueReq
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, err)
+		return
+	}
+	ctx := context.WithoutCancel(r.Context())
+	h.streamCrossTransferNDJSON(w, r, func(emit func(crosstransfer.StreamEvent) error) error {
+		return h.crossTransfer.EnqueuePlainStream(ctx, crosstransfer.EnqueuePlainInput{
+			SourceAccountID: req.SourceAccountID, SourceAccountName: req.SourceAccountName,
+			SourceDriverType: req.SourceDriverType, TargetAccountID: req.TargetAccountID,
+			TargetAccountName: req.TargetAccountName, TargetDriverType: req.TargetDriverType,
+			TargetParentID: req.TargetParentID, TargetDisplayPath: req.TargetDisplayPath,
+			Sources: toScanRoots(req.Sources), Conflict: req.Conflict,
+		}, emit)
+	})
 }
