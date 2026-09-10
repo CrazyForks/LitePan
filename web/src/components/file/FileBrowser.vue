@@ -1263,6 +1263,9 @@ homeFooterStatus.onOpenTaskPanel(openTaskPanel);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-card);
   overflow: hidden;
+  /* clip 与 hidden 裁剪效果一致，但不创建滚动容器，
+     否则内部的收藏夹 sticky 定位会失效；不支持的旧浏览器回退 hidden（退化为现状）。 */
+  overflow: clip;
 }
 .browser__content {
   display: grid;
@@ -1307,6 +1310,23 @@ homeFooterStatus.onOpenTaskPanel(openTaskPanel);
 }
 .browser__main {
   min-width: 0;
+}
+
+/* 桌面端长列表：收藏夹侧栏粘性停靠，拖拽/滚动浏览时目标始终可见。
+   窄屏（<768px）收藏夹退化为顶部横栏，不做粘性，保持原行为。 */
+@media (min-width: 769px) {
+  .browser__content--with-favorites .browser__favorites-slot {
+    /* clip 不创建滚动容器，sticky 才能相对视口生效；裁剪表现与 hidden 一致。 */
+    overflow: clip;
+  }
+
+  .browser__content--with-favorites .browser__favorites-panel.is-open {
+    position: sticky;
+    top: calc(var(--header-height) + 12px);
+    height: auto;
+    max-height: calc(100vh - var(--header-height) - 24px);
+    overflow-y: auto;
+  }
 }
 .favorite-name-modal {
   display: flex;
