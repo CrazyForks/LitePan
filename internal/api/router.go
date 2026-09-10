@@ -262,6 +262,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Get("/dev/state", h.getDevState)
 				r.Post("/dev/unlock", h.unlockDevMode)
 				r.Get("/accounts", h.listAccounts)
+				r.Get("/overview", h.dashboardOverview)
 				r.Post("/accounts", h.createAccount)
 				r.Get("/accounts/{id}", h.getAccount)
 				r.Put("/accounts/{id}", h.updateAccount)

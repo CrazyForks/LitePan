@@ -1,20 +1,18 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref } from "vue";
-import { accountsApi } from "@/api/accounts";
 import { clearCache, fetchCacheStats, type CacheStats } from "@/api/cache";
 import {
-  fetchCacheRetentionStats,
-  fetchCacheRetentionTasks,
   type CacheRetentionStats,
   type CacheRetentionTask,
 } from "@/api/cacheRetention";
 import { getApiErrorMessage } from "@/api/client";
-import { fetchFuseMounts, type FuseMount } from "@/api/fuse";
-import { logsApi, type LogStats } from "@/api/logs";
-import { fetchMediaOrganizeTasks, type MediaOrganizeTask } from "@/api/mediaOrganize";
-import { fetchNotifications, fetchUnreadCount, type NotificationItem } from "@/api/notifications";
+import { fetchDashboardOverview, type DashboardOverview } from "@/api/dashboard";
+import type { FuseMount } from "@/api/fuse";
+import type { LogStats } from "@/api/logs";
+import type { MediaOrganizeTask } from "@/api/mediaOrganize";
+import type { NotificationItem } from "@/api/notifications";
 import type { Account } from "@/api/types";
-import { fetchStrmTasks, type StrmTask } from "@/api/strm";
+import type { StrmTask } from "@/api/strm";
 import SectionTabBar from "@/components/admin/SectionTabBar.vue";
 import AppCardActionButton from "@/components/base/AppCardActionButton.vue";
 // 日志面板非默认 tab，按需加载,减小仪表盘首包。
@@ -27,7 +25,7 @@ import "@/styles/admin-shared.css";
 
 const OVERVIEW_TAB = "overview";
 const LOGS_TAB = "logs";
-const OVERVIEW_REVEAL_DEADLINE_MS = 1000;
+const OVERVIEW_CACHE_KEY = "litepan:dashboard:overview:v1";
 const VALID_TABS = [OVERVIEW_TAB, LOGS_TAB] as const;
 
 const tabs = [
@@ -56,6 +54,46 @@ const loadError = ref("");
 const hasLoadedOverview = ref(false);
 let overviewLoadSequence = 0;
 useAdminPageLoading("dashboard", computed(() => activeTab.value === OVERVIEW_TAB && loading.value));
+
+function applyOverview(data: DashboardOverview) {
+  accounts.value = data.accounts ?? [];
+  cacheStats.value = data.cache_stats ?? null;
+  cacheRetentionTasks.value = data.cache_retention_tasks ?? [];
+  cacheRetentionStats.value = data.cache_retention_stats ?? null;
+  fuseMounts.value = data.fuse_mounts ?? [];
+  strmTasks.value = data.strm_tasks ?? [];
+  organizeTasks.value = data.organize_tasks ?? [];
+  notifications.value = data.notifications ?? [];
+  unreadCount.value = Number(data.unread_count || 0);
+  logStats.value = data.log_stats ?? null;
+}
+
+function restoreOverview() {
+  try {
+    const raw = sessionStorage.getItem(OVERVIEW_CACHE_KEY);
+    if (!raw) return false;
+    const data = JSON.parse(raw) as DashboardOverview;
+    if (!Array.isArray(data.accounts)) return false;
+    applyOverview(data);
+    return true;
+  } catch {
+    sessionStorage.removeItem(OVERVIEW_CACHE_KEY);
+    return false;
+  }
+}
+
+function saveOverview(data: DashboardOverview) {
+  try {
+    sessionStorage.setItem(OVERVIEW_CACHE_KEY, JSON.stringify(data));
+  } catch {
+    // 会话缓存不可用时不影响后台使用。
+  }
+}
+
+if (restoreOverview()) {
+  hasLoadedOverview.value = true;
+  loading.value = false;
+}
 
 const accountCount = computed(() => accounts.value.length);
 const activeAccountCount = computed(() => accounts.value.filter((account) => account.is_active).length);
@@ -175,84 +213,25 @@ const organizeTaskDetail = computed(() => {
 async function loadOverview() {
   const firstLoad = !hasLoadedOverview.value;
   const sequence = ++overviewLoadSequence;
-  const errors: unknown[] = [];
   loading.value = firstLoad;
   refreshing.value = !firstLoad;
   loadError.value = "";
-  const requests = [
-    loadOverviewPart(sequence, accountsApi.list(), (value) => {
-      accounts.value = value;
-    }, errors),
-    loadOverviewPart(sequence, fetchStrmTasks(), (value) => {
-      strmTasks.value = value;
-    }, errors),
-    loadOverviewPart(sequence, fetchCacheRetentionTasks(), (value) => {
-      cacheRetentionTasks.value = value.items ?? [];
-    }, errors),
-    loadOverviewPart(sequence, fetchCacheRetentionStats(), (value) => {
-      cacheRetentionStats.value = value;
-    }, errors),
-    loadOverviewPart(sequence, fetchFuseMounts(), (value) => {
-      fuseMounts.value = value;
-    }, errors),
-    loadOverviewPart(sequence, fetchMediaOrganizeTasks(), (value) => {
-      organizeTasks.value = value;
-    }, errors),
-    loadOverviewPart(sequence, fetchCacheStats(), (value) => {
-      cacheStats.value = value;
-    }, errors),
-    loadOverviewPart(sequence, fetchNotifications({ limit: 1, offset: 0 }), (value) => {
-      notifications.value = value.items ?? [];
-    }, errors),
-    loadOverviewPart(sequence, fetchUnreadCount(), (value) => {
-      unreadCount.value = value.count ?? 0;
-    }, errors),
-    loadOverviewPart(sequence, logsApi().stats(), (value) => {
-      logStats.value = value;
-    }, errors),
-  ];
-  const settled = Promise.allSettled(requests);
-
-  await revealOverviewWhenReady(settled);
-  if (sequence === overviewLoadSequence) {
-    hasLoadedOverview.value = true;
-    loading.value = false;
-    refreshing.value = false;
-  }
-
-  void settled.then(() => {
-    if (sequence !== overviewLoadSequence || errors.length === 0) return;
-    loadError.value = getApiErrorMessage(errors[0], "部分运行概况加载失败，已保留可用数据");
-  });
-}
-
-async function loadOverviewPart<T>(
-  sequence: number,
-  request: Promise<T>,
-  assign: (value: T) => void,
-  errors: unknown[],
-) {
   try {
-    const value = await request;
-    if (sequence === overviewLoadSequence) assign(value);
+    const data = await fetchDashboardOverview();
+    if (sequence !== overviewLoadSequence) return;
+    applyOverview(data);
+    saveOverview(data);
+    hasLoadedOverview.value = true;
   } catch (error) {
-    if (sequence === overviewLoadSequence) errors.push(error);
+    if (sequence === overviewLoadSequence) {
+      loadError.value = getApiErrorMessage(error, "运行概况加载失败，已保留上次数据");
+    }
+  } finally {
+    if (sequence === overviewLoadSequence) {
+      loading.value = false;
+      refreshing.value = false;
+    }
   }
-}
-
-function revealOverviewWhenReady(requests: Promise<unknown>) {
-  return new Promise<void>((resolve) => {
-    let resolved = false;
-    let timer: number | undefined;
-    const finish = () => {
-      if (resolved) return;
-      resolved = true;
-      if (timer !== undefined) window.clearTimeout(timer);
-      resolve();
-    };
-    timer = window.setTimeout(finish, OVERVIEW_REVEAL_DEADLINE_MS);
-    void requests.finally(finish);
-  });
 }
 
 async function clearDashboardCache() {
