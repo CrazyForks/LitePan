@@ -4,13 +4,37 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"litepan/internal/mediaorganize/tmdb"
+	"litepan/internal/settings"
 )
+
+type scrapeSettingsRepo struct{ values map[string]string }
+
+func (r *scrapeSettingsRepo) Get(_ context.Context, key string) (string, bool, error) {
+	value, ok := r.values[key]
+	return value, ok, nil
+}
+func (r *scrapeSettingsRepo) Set(_ context.Context, key, value string) error {
+	r.values[key] = value
+	return nil
+}
+func (r *scrapeSettingsRepo) All(context.Context) (map[string]string, error) { return r.values, nil }
+
+func newScrapeSettings(t *testing.T, values map[string]string) *settings.Service {
+	t.Helper()
+	service, err := settings.New(context.Background(), &scrapeSettingsRepo{values: values})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service
+}
 
 func TestGroupWorks_TVSeasonsCollapse(t *testing.T) {
 	root := t.TempDir()
@@ -259,6 +283,95 @@ func TestWriteMatchedPropagatesTVExtrasError(t *testing.T) {
 	}
 }
 
+func TestWriteMatchedWithoutEpisodeInfoSkipsEpisodeFiles(t *testing.T) {
+	root := t.TempDir()
+	show := filepath.Join(root, "三体 (2023)")
+	season := filepath.Join(show, "Season 01")
+	mustMkdir(t, season)
+	strmPath := filepath.Join(season, "三体.S01E01.strm")
+	mustWrite(t, strmPath, "x")
+	works, err := scanWorks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{settings: newScrapeSettings(t, map[string]string{
+		settings.KeyStrmScrapeEpisodeInfo: "false",
+	})}
+	client := tmdb.NewClient(tmdb.Options{})
+	if err := svc.writeMatched(context.Background(), client, works[0], tmdbInfo{
+		TMDBID: "123", Title: "三体", MediaType: MediaTypeTV,
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	if !fileExists(filepath.Join(show, "tvshow.nfo")) {
+		t.Fatal("作品 NFO 应正常生成")
+	}
+	for _, path := range []string{strings.TrimSuffix(strmPath, ".strm") + ".nfo", strings.TrimSuffix(strmPath, ".strm") + "-thumb.jpg", filepath.Join(season, "season.nfo")} {
+		if fileExists(path) {
+			t.Fatalf("未开启分集信息时不应生成 %s", path)
+		}
+	}
+}
+
+func TestWriteMatchedAddsFanartAndActors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/3/movie/1":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":1,"title":"测试电影","overview":"简介","poster_path":"/poster.jpg","backdrop_path":"/backdrop.jpg","credits":{"cast":[{"name":"演员甲","character":"角色甲","profile_path":"/actor.jpg","order":0}]}}`))
+		case "/3/movie/1/images":
+			_, _ = w.Write([]byte(`{"logos":[{"file_path":"/en.png","iso_639_1":"en"},{"file_path":"/zh.png","iso_639_1":"zh"}]}`))
+		case "/t/p/w500/poster.jpg", "/t/p/w500/backdrop.jpg", "/t/p/w500/zh.png":
+			_, _ = w.Write([]byte("image"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	movie := filepath.Join(root, "测试电影 (2026)")
+	mustMkdir(t, movie)
+	mustWrite(t, filepath.Join(movie, "测试电影.strm"), "x")
+	mustWrite(t, filepath.Join(movie, "测试电影.nfo"), "<?xml version=\"1.0\"?><movie><title>自定义标题</title><custom>保留</custom></movie>\n")
+	mustWrite(t, filepath.Join(movie, "poster.jpg"), "existing poster")
+	works, err := scanWorks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{settings: newScrapeSettings(t, map[string]string{
+		settings.KeyStrmScrapeFanart:    "true",
+		settings.KeyStrmScrapeActors:    "true",
+		settings.KeyStrmScrapeClearLogo: "true",
+		settings.KeyMOTmdbLanguage:      "zh-CN",
+	})}
+	if !workNeedsScrape(works[0], MediaTypeMovie, svc.GetSettings()) {
+		t.Fatal("已有基础 NFO 和海报时，缺少启用的扩展内容仍应进入补缺")
+	}
+	client := tmdb.NewClient(tmdb.Options{APIKey: "test", APIBaseHost: server.URL, ImageBaseHost: server.URL})
+	if err := svc.writeMatched(context.Background(), client, works[0], tmdbInfo{
+		TMDBID: "1", Title: "测试电影", PosterPath: "/poster.jpg", MediaType: MediaTypeMovie,
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	if !fileExists(filepath.Join(movie, "fanart.jpg")) {
+		t.Fatal("应生成详情页背景图")
+	}
+	if !fileExists(filepath.Join(movie, "clearlogo.png")) {
+		t.Fatal("应按搜索语言优先生成 clearlogo.png")
+	}
+	nfo, err := os.ReadFile(filepath.Join(movie, "测试电影.nfo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(nfo)
+	for _, expected := range []string{"<custom>保留</custom>", "<actor>", "<name>演员甲</name>", "<role>角色甲</role>", server.URL + "/t/p/w185/actor.jpg"} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("NFO 缺少 %q：%s", expected, text)
+		}
+	}
+}
+
 func TestStatusMissWhenOnlyNFO(t *testing.T) {
 	root := t.TempDir()
 	show := filepath.Join(root, "现在就出发 (2023)")
@@ -357,7 +470,7 @@ func TestRootReadySkipsEvenIfEpisodeIncomplete(t *testing.T) {
 	if item.TVState != TVStateEnded {
 		t.Fatalf("tv_state=%s want ended", item.TVState)
 	}
-	if workNeedsScrape(works[0], MediaTypeTV) {
+	if workNeedsScrape(works[0], MediaTypeTV, Settings{}) {
 		t.Fatal("no pending + root ready should skip")
 	}
 }
@@ -375,7 +488,7 @@ func TestPendingForcesScrapeAndUpdatingState(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = writePendingState(works[0], scrapeState{Status: PendingUpdating, EpLocal: 1, EpTMDB: 40})
-	if !workNeedsScrape(works[0], MediaTypeTV) {
+	if !workNeedsScrape(works[0], MediaTypeTV, Settings{EpisodeInfo: true}) {
 		t.Fatal("pending must scrape")
 	}
 	item := buildItem(1, root, works[0])
@@ -416,7 +529,7 @@ func TestMarkNormalClearsPending(t *testing.T) {
 	if item.Status != ItemStatusOK || item.TVState != TVStateEnded {
 		t.Fatalf("status=%s tv_state=%s", item.Status, item.TVState)
 	}
-	if workNeedsScrape(works[0], MediaTypeTV) {
+	if workNeedsScrape(works[0], MediaTypeTV, Settings{}) {
 		t.Fatal("after mark normal should skip")
 	}
 }
@@ -434,7 +547,7 @@ func TestManualCompleteSkipsUnmatchedWork(t *testing.T) {
 	if err := writeManualComplete(g, MediaTypeTV); err != nil {
 		t.Fatal(err)
 	}
-	if workNeedsScrape(g, MediaTypeTV) {
+	if workNeedsScrape(g, MediaTypeTV, Settings{}) {
 		t.Fatal("手动完成的未匹配作品不应再次进入自动刮削")
 	}
 	item := buildItem(1, root, g)

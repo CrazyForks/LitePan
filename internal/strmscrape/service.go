@@ -295,7 +295,7 @@ func (s *Service) applyRematch(ctx context.Context, req RematchRequest, root str
 		info.Year = req.Year
 	}
 	info.Doubt = false // 用户手动选定，不再存疑
-	_, err = s.writeMatchedOpts(scrapeCtx, client, g, info, overwrite, true)
+	_, err = s.writeMatchedOpts(scrapeCtx, client, g, info, overwrite, s.GetSettings().EpisodeInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -463,7 +463,8 @@ func (s *Service) run(ctx context.Context, req RunRequest) error {
 	defer func() {
 		s.notifyScrapeFailures(task, failures)
 	}()
-	mode := normalizeWriteMode(s.GetSettings().WriteMode)
+	cfg := s.GetSettings()
+	mode := normalizeWriteMode(cfg.WriteMode)
 	if strings.TrimSpace(req.WriteMode) != "" {
 		mode = normalizeWriteMode(req.WriteMode)
 	}
@@ -506,7 +507,7 @@ func (s *Service) run(ctx context.Context, req RunRequest) error {
 		p.Error = ""
 	})
 
-	interval := time.Duration(s.GetSettings().TmdbRequestIntervalMS) * time.Millisecond
+	interval := time.Duration(cfg.TmdbRequestIntervalMS) * time.Millisecond
 	if interval < 200*time.Millisecond {
 		interval = 300 * time.Millisecond
 	}
@@ -516,8 +517,11 @@ func (s *Service) run(ctx context.Context, req RunRequest) error {
 			return err
 		}
 		displayName := workDisplayName(g)
+		if !cfg.EpisodeInfo {
+			clearEpisodePendingIfDisabled(g)
+		}
 		item := buildItem(req.StrmTaskID, root, g)
-		need := mode == WriteModeOverwrite || workNeedsScrape(g, item.MediaType)
+		need := mode == WriteModeOverwrite || workNeedsScrape(g, item.MediaType, cfg)
 		if !need {
 			s.setProgress(func(p *Progress) {
 				p.Done = i + 1

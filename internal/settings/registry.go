@@ -60,6 +60,10 @@ const (
 	KeyQuarkTVClientListMode       = "quark_tv_client_list_mode"
 	KeyQuarkTVProxyClients         = "quark_tv_proxy_clients"
 	KeyStrmScrapeWriteMode         = "strm_scrape_write_mode"
+	KeyStrmScrapeEpisodeInfo       = "strm_scrape_episode_info"
+	KeyStrmScrapeFanart            = "strm_scrape_fanart"
+	KeyStrmScrapeActors            = "strm_scrape_actors"
+	KeyStrmScrapeClearLogo         = "strm_scrape_clearlogo"
 	KeyStrmScrapeScopes            = "strm_scrape_scopes"
 
 	KeyMOProxyEnabled          = "mo_proxy_enabled"
@@ -202,6 +206,10 @@ func defaultSpecs() []Spec {
 			{Value: "bidirectional", Label: "本地与云端互补"},
 		}),
 		stringSpec(KeyStrmScrapeWriteMode, "strm", "STRM 刮削写入策略", "missing_only=仅补缺；overwrite=覆盖已有 nfo/海报。", "missing_only"),
+		boolSpec(KeyStrmScrapeEpisodeInfo, "strm", "刮削分集信息", "生成季/集 NFO、季海报和分集预览图。", "true"),
+		boolSpec(KeyStrmScrapeFanart, "strm", "刮削详情页背景图", "为电影和剧集生成 fanart.jpg。", "false"),
+		boolSpec(KeyStrmScrapeActors, "strm", "刮削演员信息", "将主要演员、角色和头像地址写入作品 NFO。", "false"),
+		boolSpec(KeyStrmScrapeClearLogo, "strm", "刮削影片 Logo", "按搜索语言优先生成 clearlogo.png。", "false"),
 		{Key: KeyStrmScrapeScopes, Type: TypeString, Default: "{}", Hidden: true},
 		boolSpec(KeyMOProxyEnabled, "media_organize", "启用代理", "TMDB 请求经代理出站。", "false"),
 		stringSpec(KeyMOProxyURL, "media_organize", "代理地址", "HTTP/HTTPS 代理地址，例如 http://127.0.0.1:7890。", ""),

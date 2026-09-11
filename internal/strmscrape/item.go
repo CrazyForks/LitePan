@@ -156,14 +156,25 @@ func resolveWorkMediaType(g workGroup) string {
 }
 
 // workNeedsScrape：有 pending 必刮；无 pending 则仅当根未齐时刮。
-func workNeedsScrape(g workGroup, mediaType string) bool {
+func workNeedsScrape(g workGroup, mediaType string, cfg Settings) bool {
 	if _, ok := readManualComplete(g); ok {
 		return false
 	}
-	if hasPendingMarker(g) {
+	if pending, ok := readPendingState(g); ok {
+		if pending.Status == PendingRunning || pending.Status == PendingDoubt || cfg.EpisodeInfo {
+			return true
+		}
+	}
+	if !workHasNFO(g, mediaType) || !workHasPoster(g, mediaType) {
 		return true
 	}
-	return !workHasNFO(g, mediaType) || !workHasPoster(g, mediaType)
+	if cfg.Fanart && !workHasFanart(g) {
+		return true
+	}
+	if cfg.ClearLogo && !workHasClearLogo(g) {
+		return true
+	}
+	return cfg.Actors && !workHasActors(g, mediaType)
 }
 
 func countTVEpisodeProgress(g workGroup) (total, scraped int) {

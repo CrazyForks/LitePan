@@ -59,6 +59,16 @@ func clearPendingMarker(g workGroup) {
 	_ = os.Remove(pendingMarkerPath(g))
 }
 
+func clearEpisodePendingIfDisabled(g workGroup) {
+	pending, ok := readPendingState(g)
+	if !ok {
+		return
+	}
+	if pending.Status == PendingUpdating || pending.Status == PendingIncomplete {
+		clearPendingMarker(g)
+	}
+}
+
 func writeManualComplete(g workGroup, mediaType string) error {
 	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
 	if mediaType != MediaTypeTV && mediaType != MediaTypeMovie {
