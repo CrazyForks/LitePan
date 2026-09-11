@@ -17,6 +17,10 @@ func buildItem(taskID int64, root string, g workGroup) Item {
 	hasNFO := workHasNFO(g, mediaType)
 	hasPoster := workHasPoster(g, mediaType)
 	pending, hasPending := readPendingState(g)
+	if hasPending && isTerminalState(pending.Status) {
+		// done/ended 不代表待刮削（done 只承载可选资源结论，ended 是用户设为完结）。
+		hasPending = false
+	}
 	_, manualComplete := readManualComplete(g)
 	if manualComplete {
 		hasPending = false
@@ -155,26 +159,32 @@ func resolveWorkMediaType(g workGroup) string {
 	return inferMediaType(g)
 }
 
-// workNeedsScrape：有 pending 必刮；无 pending 则仅当根未齐时刮。
+// workNeedsScrape：手动完成/设为完结必不刮；有 pending 必刮；无 pending 则根未齐或可选资源未齐时刮。
 func workNeedsScrape(g workGroup, mediaType string, cfg Settings) bool {
 	if _, ok := readManualComplete(g); ok {
 		return false
 	}
-	if pending, ok := readPendingState(g); ok {
-		if pending.Status == PendingRunning || pending.Status == PendingDoubt || cfg.EpisodeInfo {
+	st, hasState := readPendingState(g)
+	if hasState && st.Status == PendingEnded {
+		// 用户「设为完结」：不再自动刮削，需手动重新刮削。
+		return false
+	}
+	if hasState && !isTerminalState(st.Status) {
+		if st.Status == PendingRunning || st.Status == PendingDoubt || cfg.EpisodeInfo {
 			return true
 		}
 	}
 	if !workHasNFO(g, mediaType) || !workHasPoster(g, mediaType) {
 		return true
 	}
-	if cfg.Fanart && !workHasFanart(g) {
+	// 可选资源：本地缺失、且已被记为「TMDB 确实没有」时不再重复请求。
+	if cfg.Fanart && !workHasFanart(g) && !st.NoBackdrop {
 		return true
 	}
-	if cfg.ClearLogo && !workHasClearLogo(g) {
+	if cfg.ClearLogo && !workHasClearLogo(g) && !st.NoLogo {
 		return true
 	}
-	return cfg.Actors && !workHasActors(g, mediaType)
+	return cfg.Actors && !workHasActors(g, mediaType) && !st.NoActors
 }
 
 func countTVEpisodeProgress(g workGroup) (total, scraped int) {

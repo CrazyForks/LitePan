@@ -58,6 +58,23 @@ type episodeNFO struct {
 
 var nfoRootCloseRe = regexp.MustCompile(`(?i)</(?:movie|tvshow)\s*>`)
 
+// nfoLooksStandard：文件存在且内容含 movie/tvshow 根节点，才算可用的作品 NFO。
+// 压制组随片发布的 MediaInfo 文本等 .nfo 不算，否则会被误判为“已有元数据”。
+func nfoLooksStandard(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	lower := strings.ToLower(string(data))
+	return strings.Contains(lower, "<movie") || strings.Contains(lower, "<tvshow")
+}
+
+// nfoWriteNeeded：目标 NFO 不存在或不是标准 NFO（如压制组发布的 MediaInfo 文本）时都要重写；
+// 这类文件对 Kodi/Emby 无用，直接覆盖为标准 NFO。
+func nfoWriteNeeded(overwrite bool, nfo string) bool {
+	return overwrite || !nfoLooksStandard(nfo)
+}
+
 // workMetaPaths 返回电影或剧集的兼容元数据路径。
 func workMetaPaths(g workGroup, mediaType string) (nfoPath, posterPath string) {
 	if mediaType == MediaTypeTV && g.flatFile == "" {
@@ -86,7 +103,7 @@ func primaryStrmStem(g workGroup) string {
 
 func workHasNFO(g workGroup, mediaType string) bool {
 	for _, p := range workNFOCandidates(g, mediaType) {
-		if fileExists(p) {
+		if nfoLooksStandard(p) {
 			return true
 		}
 	}
@@ -95,7 +112,7 @@ func workHasNFO(g workGroup, mediaType string) bool {
 
 func workHasActors(g workGroup, mediaType string) bool {
 	for _, path := range workNFOCandidates(g, mediaType) {
-		if nfoHasActors(path) {
+		if nfoLooksStandard(path) && nfoHasActors(path) {
 			return true
 		}
 	}

@@ -215,7 +215,9 @@ func (s *Service) writeMatchedOpts(ctx context.Context, client *tmdb.Client, g w
 	needTVExtras := withTVExtras && mediaType == MediaTypeTV && g.flatFile == "" && strings.TrimSpace(info.TMDBID) != ""
 	nfo, poster := workMetaPaths(g, mediaType)
 	actors := buildNFOActors(client, info.Actors)
-	if overwrite || !fileExists(nfo) {
+	actorSkipped := false
+	// 目标 NFO 不存在或不是标准 NFO（如压制组信息文件）都重写；后者直接覆盖。
+	if nfoWriteNeeded(overwrite, nfo) {
 		if mediaType == MediaTypeTV {
 			if err := writeTVShowNFO(nfo, info.Title, info.TMDBID, info.Plot, info.Year, actors...); err != nil {
 				return 0, err
@@ -224,8 +226,12 @@ func (s *Service) writeMatchedOpts(ctx context.Context, client *tmdb.Client, g w
 			return 0, err
 		}
 	} else if cfg.Actors {
+		// 补写演员是可选项：NFO 结构异常时只警告跳过，不能中断整部作品（否则海报/背景图/Logo 也写不成）。
 		if err := appendNFOActors(nfo, actors); err != nil {
-			return 0, fmt.Errorf("补写演员信息：%w", err)
+			actorSkipped = true
+			if s.log != nil {
+				s.log.Warn("STRM 刮削补写演员信息失败，已跳过", "nfo", nfo, "err", err)
+			}
 		}
 	}
 	if (overwrite || !fileExists(poster)) && strings.TrimSpace(info.PosterPath) != "" {
@@ -262,6 +268,8 @@ func (s *Service) writeMatchedOpts(ctx context.Context, client *tmdb.Client, g w
 	} else if withTVExtras || !needTVExtras {
 		finalizeAfterScrape(g, mediaType, epTMDB, info.Doubt)
 	}
+	// 记录本次 TMDB 是否根本没有可选资源，避免下一轮再次为同一部作品发请求。
+	syncOptionalAssetState(g, cfg, info, actorSkipped)
 	clearManualComplete(g)
 	return epTMDB, nil
 }
