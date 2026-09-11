@@ -376,6 +376,11 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "飞牛反代未启用", http.StatusNotFound)
 		return
 	}
+	// WebSocket 等升级请求需走 101 隧道，普通转发会剥掉 Upgrade 头导致握手失败。
+	if proxybase.IsUpgradeRequest(r) {
+		s.proxyUpgrade(w, r, cfg)
+		return
+	}
 	fullPath := strings.TrimPrefix(r.URL.Path, "/")
 	if isStreamRequest(fullPath, r.URL.RawQuery) {
 		s.redirectSTRMStream(w, r, cfg, fullPath)
@@ -395,6 +400,30 @@ func (s *Service) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.proxyRequest(w, r, cfg, fullPath)
+}
+
+// proxyUpgrade 把 WebSocket 等升级请求隧道到上游飞牛影视（101 后双向转发）。
+func (s *Service) proxyUpgrade(w http.ResponseWriter, r *http.Request, cfg Config) {
+	target, err := targetURL(cfg, strings.TrimPrefix(r.URL.Path, "/"), r.URL.RawQuery)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	parsed, err := url.Parse(target)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	var transport http.RoundTripper
+	if s.client != nil {
+		transport = s.client.Transport
+	}
+	proxy := proxybase.NewUpgradeProxy(parsed, transport, s.log)
+	if proxy == nil {
+		http.Error(w, "升级目标无效", http.StatusBadGateway)
+		return
+	}
+	proxy.ServeHTTP(w, r)
 }
 
 func isStreamRequest(fullPath, rawQuery string) bool {

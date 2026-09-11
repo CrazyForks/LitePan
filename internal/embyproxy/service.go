@@ -744,6 +744,12 @@ func (s *Service) handleWithConfig(cfg Config, w http.ResponseWriter, r *http.Re
 		http.Error(w, "Emby proxy is not enabled", http.StatusNotFound)
 		return
 	}
+	// WebSocket 等升级请求（Emby for Kodi「Next Gen」的实时通道）必须走 101 隧道：
+	// 普通转发会剥掉 Upgrade 头且只单向回写响应体，握手必然失败。
+	if proxybase.IsUpgradeRequest(r) {
+		s.proxyUpgrade(w, r, cfg)
+		return
+	}
 	fullPath := strings.TrimPrefix(r.URL.Path, "/")
 	if videoStreamPathRE.MatchString(fullPath) {
 		s.redirectSTRMStream(w, r, cfg, fullPath)
@@ -758,6 +764,30 @@ func (s *Service) handleWithConfig(cfg Config, w http.ResponseWriter, r *http.Re
 		return
 	}
 	s.proxyRequest(w, r, cfg, fullPath)
+}
+
+// proxyUpgrade 把 WebSocket 等升级请求隧道到上游 Emby（101 后双向转发）。
+func (s *Service) proxyUpgrade(w http.ResponseWriter, r *http.Request, cfg Config) {
+	target, err := targetURL(cfg, strings.TrimPrefix(r.URL.Path, "/"), r.URL.RawQuery)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	parsed, err := url.Parse(target)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	var transport http.RoundTripper
+	if s.client != nil {
+		transport = s.client.Transport
+	}
+	proxy := proxybase.NewUpgradeProxy(parsed, transport, s.log)
+	if proxy == nil {
+		http.Error(w, "升级目标无效", http.StatusBadGateway)
+		return
+	}
+	proxy.ServeHTTP(w, r)
 }
 
 func (s *Service) serveSTRM(w http.ResponseWriter, r *http.Request) {
