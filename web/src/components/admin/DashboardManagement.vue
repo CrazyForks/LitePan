@@ -23,7 +23,6 @@ import { toast } from "@/composables/useToast";
 import { formatRelativeTimeAgo, formatSize } from "@/utils/format";
 import "@/styles/admin-shared.css";
 import SvgIcon from "@/components/icons/SvgIcon.vue";
-import IconChip from "@/components/base/IconChip.vue";
 
 const OVERVIEW_TAB = "overview";
 const LOGS_TAB = "logs";
@@ -138,6 +137,20 @@ const systemStatus = computed(() => {
   if (inactiveAccountCount.value > 0) return { label: "部分账号未启用", tone: "warn", icon: "circle-info" };
   return { label: "运行正常", tone: "ok", icon: "check" };
 });
+const ovOnlineRate = computed(() =>
+  accountCount.value > 0 ? Math.round((activeAccountCount.value / accountCount.value) * 100) : 100,
+);
+const ovRingOffset = computed(() => Math.round(327 * (1 - ovOnlineRate.value / 100)));
+const ovStatusIcon = computed(() => (systemStatus.value.tone === "ok" ? "check" : "triangle-exclamation"));
+const fusePercent = computed(() =>
+  totalFuseCount.value > 0 ? Math.round((mountedFuseCount.value / totalFuseCount.value) * 100) : 0,
+);
+const fuseSubline = computed(() => {
+  if (totalFuseCount.value === 0) return "尚未创建挂载点";
+  const missing = totalFuseCount.value - mountedFuseCount.value;
+  return missing === 0 ? "全部已挂载" : `${missing} 个未挂载`;
+});
+
 const systemStatusText = computed(() => {
   if (authErrorAccountCount.value > 0) {
     return `${authErrorAccountCount.value} 个账号认证已失效，需要重新授权`;
@@ -407,91 +420,80 @@ onMounted(() => {
     <SectionTabBar :model-value="activeTab" :tabs="tabs" @update:model-value="setActiveTab" />
 
     <div v-if="activeTab === OVERVIEW_TAB && !loading" class="dashboard-overview">
-      <section
-        class="dashboard-hero"
-        :class="[`dashboard-hero--${systemStatus.tone}`, { 'dashboard-hero--actionable': canJumpToErrorLogs }]"
-        :role="canJumpToErrorLogs ? 'button' : undefined"
-        :tabindex="canJumpToErrorLogs ? 0 : undefined"
-        :aria-label="canJumpToErrorLogs ? '查看错误日志' : undefined"
-        @click="openErrorLogs"
-        @keydown.enter.prevent="openErrorLogs"
-        @keydown.space.prevent="openErrorLogs"
-      >
-        <div class="dashboard-hero__main">
-          <div class="dashboard-hero__icon">
-            <SvgIcon :name="systemStatus.icon" size="1em" />
+      <section class="ov-board" aria-label="运行概况" :class="`ov-board--${systemStatus.tone}`">
+        <div class="ov-ring">
+          <svg class="ov-ring__svg" viewBox="0 0 120 120" aria-hidden="true">
+            <circle class="ov-ring__track" cx="60" cy="60" r="52" />
+            <circle class="ov-ring__arc" :stroke-dashoffset="ovRingOffset" cx="60" cy="60" r="52" />
+          </svg>
+          <div class="ov-ring__center">
+            <SvgIcon :name="ovStatusIcon" :size="24" />
+            <div class="ov-ring__pct">{{ ovOnlineRate }}%</div>
+            <div class="ov-ring__of">账号在线</div>
           </div>
-          <div class="dashboard-hero__copy">
-            <p class="dashboard-eyebrow">控制台</p>
-            <h2>{{ systemStatus.label }}</h2>
-            <p class="dashboard-hero__detail">{{ systemStatusText }}</p>
+          <div class="ov-ring__cap">健康度 · 实时</div>
+        </div>
+
+        <div class="ov-body">
+          <div class="ov-status">
+            <span class="ov-pulse" />
+            <h2 class="ov-status__title">{{ systemStatus.label }}</h2>
+            <span class="ov-status__detail">{{ systemStatusText }}</span>
+          </div>
+
+          <div v-if="loadError" class="dashboard-warning">
+            <SvgIcon name="circle-info" size="1em" />
+            <span>{{ loadError }}</span>
+            <button type="button" :disabled="refreshing" @click="loadOverview">
+              {{ refreshing ? "刷新中..." : "重试" }}
+            </button>
+          </div>
+
+          <div class="ov-rows">
+            <div class="ov-row ov-row--fuse">
+              <span class="ov-row__ico"><SvgIcon name="plug" :size="15" /></span>
+              <div class="ov-row__main">
+                <span class="ov-row__name">FUSE 挂载点</span>
+                <span class="ov-row__sub">{{ fuseSubline }}</span>
+              </div>
+              <div class="ov-row__right">
+                <span class="ov-row__bar"><i :style="{ width: fusePercent + '%' }" /></span>
+                <span class="ov-row__num">{{ mountedFuseCount }}<small>/ {{ totalFuseCount }}</small></span>
+              </div>
+            </div>
+
+            <div class="ov-row ov-row--cache">
+              <span class="ov-row__ico"><SvgIcon name="hand-database" :size="15" /></span>
+              <div class="ov-row__main">
+                <span class="ov-row__name">缓存空间</span>
+                <span class="ov-row__sub">{{ cacheSizeLabel }}</span>
+              </div>
+              <div class="ov-row__right">
+                <AppCardActionButton
+                  icon-class="trash-can"
+                  label="清理"
+                  variant="danger"
+                  :disabled="clearingCache"
+                  @click="clearDashboardCache"
+                />
+              </div>
+            </div>
+
+            <div class="ov-row ov-row--errors" :class="{ 'is-warn': recentErrorCount > 0 }">
+              <span class="ov-row__ico"><SvgIcon :name="recentErrorCount > 0 ? 'triangle-exclamation' : 'check'" :size="15" /></span>
+              <div class="ov-row__main">
+                <span class="ov-row__name">待确认错误</span>
+                <span class="ov-row__sub">近 24 小时运行日志</span>
+              </div>
+              <div class="ov-row__right">
+                <span class="ov-row__num">{{ recentErrorCount }}<small>条</small></span>
+                <button v-if="canJumpToErrorLogs" type="button" class="ov-row__act" @click="openErrorLogs">
+                  查看详情
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="dashboard-hero__metrics" aria-label="运行概况指标">
-          <div class="hero-metric">
-            <strong>{{ accountCount }}</strong>
-            <span>接入</span>
-          </div>
-          <div class="hero-metric is-green">
-            <strong>{{ activeAccountCount }}</strong>
-            <span>在线</span>
-          </div>
-          <div class="hero-metric">
-            <strong>{{ enabledTaskCount }}</strong>
-            <span>运行任务</span>
-          </div>
-          <div class="hero-metric" :class="{ 'is-warn': recentErrorCount > 0 }">
-            <strong>{{ recentErrorCount }}</strong>
-            <span>待确认错误</span>
-          </div>
-        </div>
-      </section>
-
-      <div v-if="loadError" class="dashboard-warning">
-        <SvgIcon name="circle-info" size="1em" />
-        <span>{{ loadError }}</span>
-        <button type="button" :disabled="refreshing" @click="loadOverview">
-          {{ refreshing ? "刷新中..." : "重试" }}
-        </button>
-      </div>
-
-      <section class="overview-cards" aria-label="运行概况卡片">
-        <article class="overview-card">
-          <IconChip icon="hand-link" tone="blue" />
-          <div class="overview-card__main">
-            <strong>{{ mountedFuseCount }}/{{ totalFuseCount }}</strong>
-            <span>FUSE 挂载点</span>
-          </div>
-        </article>
-        <article class="overview-card">
-          <IconChip icon="hand-list" tone="green" />
-          <div class="overview-card__main">
-            <strong>{{ totalTaskCount }}</strong>
-            <span>任务总数</span>
-          </div>
-        </article>
-        <article class="overview-card overview-card--cache">
-          <IconChip icon="hand-database" tone="amber" />
-          <div class="overview-card__main">
-            <strong>{{ cacheSizeLabel }}</strong>
-            <span>缓存空间</span>
-          </div>
-          <AppCardActionButton
-            class="overview-card__action-layout"
-            icon-class="trash-can"
-            label="清理"
-            variant="danger"
-            :disabled="clearingCache"
-            @click="clearDashboardCache"
-          />
-        </article>
-        <article class="overview-card">
-          <IconChip icon="hand-bell" tone="purple" />
-          <div class="overview-card__main">
-            <strong>{{ unreadCount }}</strong>
-            <span>未读通知</span>
-          </div>
-        </article>
       </section>
 
       <section class="dashboard-layout">
@@ -634,19 +636,14 @@ onMounted(() => {
   </div>
 </template>
 
-<style scoped>
-.dashboard-page {
+<style scoped>.dashboard-page {
   padding-bottom: 24px;
 }
-
 .dashboard-overview {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
-
-.dashboard-hero,
-.overview-card,
 .dashboard-panel {
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg);
@@ -654,74 +651,14 @@ onMounted(() => {
   box-shadow: var(--shadow-soft);
 }
 
-.dashboard-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 20px;
-  padding: 18px 22px;
-  background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--brand) 4%, var(--surface)));
-}
 
-.dashboard-hero--actionable {
-  cursor: pointer;
-  transition:
-    transform 0.16s ease,
-    box-shadow 0.16s ease,
-    border-color 0.16s ease;
-}
 
-.dashboard-hero--actionable:hover,
-.dashboard-hero--actionable:focus-visible {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-medium);
-  border-color: color-mix(in srgb, var(--warning) 24%, var(--border-soft));
-  outline: none;
-}
 
-.dashboard-hero--warn {
-  background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--warning) 7%, var(--surface)));
-}
 
-.dashboard-hero--danger {
-  background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--danger) 8%, var(--surface)));
-}
 
-.dashboard-hero__main {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-width: 0;
-}
 
-.dashboard-hero__icon {
-  width: 42px;
-  height: 42px;
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  border-radius: var(--radius-md);
-  border: 1px solid color-mix(in srgb, var(--success) 22%, var(--border));
-  background: color-mix(in srgb, var(--success) 8%, var(--surface));
-  color: var(--success);
-  font-size: 16px;
-}
 
-.dashboard-hero--warn .dashboard-hero__icon {
-  border-color: color-mix(in srgb, var(--warning) 28%, var(--border));
-  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
-  color: var(--warning);
-}
 
-.dashboard-hero--danger .dashboard-hero__icon {
-  border-color: color-mix(in srgb, var(--danger) 28%, var(--border));
-  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
-  color: var(--danger);
-}
-
-.dashboard-hero__copy {
-  min-width: 0;
-}
 
 .dashboard-eyebrow {
   margin: 0 0 3px;
@@ -729,60 +666,18 @@ onMounted(() => {
   font-size: 12px;
   font-weight: 700;
 }
-
-.dashboard-hero h2,
 .dashboard-panel h3 {
   margin: 0;
   color: var(--text);
 }
 
-.dashboard-hero h2 {
-  font-size: 17px;
-  line-height: 1.3;
-}
 
-.dashboard-hero p {
-  margin: 0;
-}
 
-.dashboard-hero__detail {
-  margin-top: 4px;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.6;
-}
 
-.dashboard-hero__metrics {
-  display: grid;
-  grid-template-columns: repeat(4, 86px);
-  gap: 8px;
-}
 
-.hero-metric {
-  min-width: 74px;
-  padding-left: 12px;
-  border-left: 1px solid var(--border);
-}
 
-.hero-metric strong {
-  display: block;
-  color: var(--text);
-  font-size: 20px;
-  line-height: 1.15;
-}
 
-.hero-metric span {
-  color: var(--text-muted);
-  font-size: 12px;
-}
 
-.hero-metric.is-green strong {
-  color: var(--success);
-}
-
-.hero-metric.is-warn strong {
-  color: var(--warning);
-}
 
 .dashboard-warning {
   display: flex;
@@ -795,14 +690,11 @@ onMounted(() => {
   color: var(--text);
   font-size: 13px;
 }
-
 .dashboard-warning span {
   flex: 1;
   min-width: 0;
 }
-
-.dashboard-warning button,
-.dashboard-link-button {
+.dashboard-warning button, .dashboard-link-button {
   border: 0;
   background: transparent;
   color: var(--brand);
@@ -810,66 +702,24 @@ onMounted(() => {
   font-weight: 700;
   cursor: pointer;
 }
-
-.dashboard-warning button:disabled,
-.dashboard-link-button:disabled {
+.dashboard-warning button:disabled, .dashboard-link-button:disabled {
   cursor: not-allowed;
   opacity: 0.6;
 }
 
-.overview-cards {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.overview-card {
-  min-height: 96px;
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  align-items: center;
-  gap: 13px;
-  padding: 18px 20px;
-  background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--brand) 3%, var(--surface)));
-}
-
-.overview-card--cache {
-  grid-template-columns: 44px minmax(0, 1fr) auto;
-}
 
 
 
 
-
-.overview-card__main strong {
-  display: block;
-  color: var(--text);
-  font-size: 24px;
-  line-height: 1.05;
-  margin-bottom: 7px;
-}
-
-.overview-card__main span {
-  display: block;
-  color: var(--text-muted);
-  font-size: 13px;
-  line-height: 1.3;
-}
-
-.overview-card__action-layout {
-  justify-self: end;
-}
 
 .dashboard-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.55fr);
   gap: 16px;
 }
-
 .dashboard-panel {
   padding: 20px;
 }
-
 .dashboard-panel__head {
   display: flex;
   align-items: center;
@@ -877,49 +727,38 @@ onMounted(() => {
   gap: 12px;
   margin-bottom: 14px;
 }
-
 .dashboard-panel__head h3 {
   display: flex;
   align-items: center;
   font-size: 15px;
   font-weight: 800;
 }
-
 .dashboard-panel__head h3::before {
   display: none;
 }
-
 .dashboard-panel__head p {
   margin: 4px 0 0;
   color: var(--text-muted);
   font-size: 12px;
 }
-
 .dashboard-link-button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 30px;
 }
-
 .is-spinning {
   animation: spin 0.9s linear infinite;
 }
-
-.account-list,
-.dashboard-side,
-.task-list,
-.notice-list {
+.account-list, .dashboard-side, .task-list, .notice-list {
   display: grid;
   gap: 10px;
 }
-
 .account-list {
   max-height: 532px;
   overflow-x: hidden;
   overflow-y: auto;
 }
-
 .account-row {
   display: grid;
   grid-template-columns: 46px minmax(0, 1fr) auto auto;
@@ -937,7 +776,6 @@ onMounted(() => {
     ),
     var(--surface);
 }
-
 .account-row:nth-child(2n) {
   background:
     linear-gradient(
@@ -948,11 +786,9 @@ onMounted(() => {
     ),
     var(--surface);
 }
-
 .account-row.is-disabled {
   opacity: 0.86;
 }
-
 .account-row.is-auth-error {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 24%, transparent);
   background:
@@ -964,11 +800,9 @@ onMounted(() => {
     ),
     var(--surface);
 }
-
 .account-row.is-cooldown {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 22%, transparent);
 }
-
 .account-logo {
   width: 42px;
   height: 42px;
@@ -977,7 +811,6 @@ onMounted(() => {
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--surface) 55%, transparent);
 }
-
 .account-logo--text {
   display: grid;
   place-items: center;
@@ -985,11 +818,9 @@ onMounted(() => {
   color: #fff;
   font-weight: 800;
 }
-
 .account-row__main {
   min-width: 0;
 }
-
 .account-row__main strong {
   display: flex;
   align-items: center;
@@ -998,7 +829,6 @@ onMounted(() => {
   color: var(--text);
   font-size: 14px;
 }
-
 .account-row__main small {
   display: block;
   margin-top: 2px;
@@ -1008,7 +838,6 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .default-tag {
   height: 20px;
   display: inline-flex;
@@ -1021,9 +850,7 @@ onMounted(() => {
   font-size: 11px;
   font-weight: 800;
 }
-
-.method-tag,
-.status-tag {
+.method-tag, .status-tag {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1031,32 +858,25 @@ onMounted(() => {
   font-weight: 700;
   white-space: nowrap;
 }
-
 .method-tag {
   color: var(--text-muted);
 }
-
 .method-tag i, .method-tag .lp-svg-icon {
   color: var(--account-color);
   font-size: 11px;
 }
-
 .status-tag {
   color: var(--success);
 }
-
 .status-tag.is-disabled {
   color: var(--warning);
 }
-
 .status-tag.is-cooldown {
   color: var(--warning);
 }
-
 .status-tag.is-auth-error {
   color: var(--danger);
 }
-
 .panel-empty {
   display: grid;
   place-items: center;
@@ -1066,7 +886,6 @@ onMounted(() => {
   color: var(--text-muted);
   font-size: 13px;
 }
-
 .task-row {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
@@ -1075,11 +894,9 @@ onMounted(() => {
   padding: 12px 0;
   border-bottom: 1px solid var(--border-soft);
 }
-
 .task-row:last-child {
   border-bottom: 0;
 }
-
 .task-row__icon {
   width: 42px;
   height: 42px;
@@ -1089,39 +906,31 @@ onMounted(() => {
   background: color-mix(in srgb, var(--brand) 8%, var(--surface));
   color: var(--brand);
 }
-
 .task-row__icon--purple {
   background: color-mix(in srgb, #8b5cf6 12%, var(--surface));
   color: #8b5cf6;
 }
-
 .task-row__icon--amber {
   background: color-mix(in srgb, var(--warning) 10%, var(--surface));
   color: var(--warning);
 }
-
 .task-row__main {
   min-width: 0;
 }
-
 .task-row__title {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
-
 .task-row__title strong {
   color: var(--text);
   font-size: 14px;
 }
-
-.task-row__title span,
-.task-row small {
+.task-row__title span, .task-row small {
   color: var(--text-muted);
   font-size: 12px;
 }
-
 .task-progress {
   height: 4px;
   margin: 8px 0 6px;
@@ -1129,41 +938,34 @@ onMounted(() => {
   border-radius: var(--radius-pill);
   background: var(--border-soft);
 }
-
 .task-progress span {
   display: block;
   height: 100%;
   border-radius: inherit;
   background: var(--brand-gradient-h);
 }
-
 .log-snapshot {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-bottom: 12px;
 }
-
 .log-snapshot > div {
   padding: 14px;
   border-radius: var(--radius-md);
   background: var(--surface-sunken);
 }
-
 .log-snapshot strong {
   display: block;
   color: var(--text);
   font-size: 22px;
   line-height: 1.1;
 }
-
 .log-snapshot span {
   color: var(--text-muted);
   font-size: 12px;
 }
-
-.notice-row,
-.notice-good {
+.notice-row, .notice-good {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1172,9 +974,7 @@ onMounted(() => {
   border-radius: var(--radius-md);
   background: var(--surface-sunken);
 }
-
-.notice-row > i, .notice-row > .lp-svg-icon,
-.notice-good > i, .notice-good > .lp-svg-icon {
+.notice-row > i, .notice-row > .lp-svg-icon, .notice-good > i, .notice-good > .lp-svg-icon {
   width: 34px;
   height: 34px;
   display: grid;
@@ -1184,43 +984,34 @@ onMounted(() => {
   background: color-mix(in srgb, var(--brand) 10%, var(--surface));
   color: var(--brand);
 }
-
 .notice-row.is-warn > i {
   background: color-mix(in srgb, var(--warning) 10%, var(--surface));
   color: var(--warning);
 }
-
 .notice-row.is-error > i {
   background: color-mix(in srgb, var(--danger) 10%, var(--surface));
   color: var(--danger);
 }
-
-.notice-row strong,
-.notice-good strong {
+.notice-row strong, .notice-good strong {
   display: block;
   color: var(--text);
   font-size: 13px;
   line-height: 1.4;
 }
-
-.notice-row small,
-.notice-good small {
+.notice-row small, .notice-good small {
   display: block;
   margin-top: 3px;
   color: var(--text-muted);
   font-size: 12px;
 }
-
 .notice-good {
   background: color-mix(in srgb, var(--success) 10%, var(--surface));
   border-color: color-mix(in srgb, var(--success) 22%, var(--border));
 }
-
 .notice-good > i, .notice-good > .lp-svg-icon {
   background: var(--surface);
   color: var(--success);
 }
-
 @media (max-width: 1180px) {
   .overview-cards,
   .dashboard-hero__metrics {
@@ -1231,7 +1022,6 @@ onMounted(() => {
     grid-template-columns: 1fr;
   }
 }
-
 @media (max-width: 760px) {
   .dashboard-hero,
   .dashboard-layout {
@@ -1274,4 +1064,149 @@ onMounted(() => {
     justify-self: start;
   }
 }
+/* ===== 运行概况：左环 + 右侧三行数据（合并原状态栏与四卡片） ===== */.ov-board {
+  --tone: var(--success);
+  --tone-soft: color-mix(in srgb, var(--tone) 9%, var(--surface));
+  display: grid;
+  grid-template-columns: 218px minmax(0, 1fr);
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
+.ov-board--ok { --tone: var(--success); }
+.ov-board--warn { --tone: var(--warning); }
+.ov-board--danger { --tone: var(--danger); }
+.ov-ring {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 16px;
+  background: radial-gradient(circle at 50% 42%, var(--tone-soft), var(--surface) 74%);
+  border-right: 1px solid var(--border-soft);
+  transition: background 0.3s;
+}
+.ov-ring__svg { width: 128px; height: 128px; transform: rotate(-90deg); }
+.ov-ring__track { fill: none; stroke: var(--border-soft); stroke-width: 9; }
+.ov-ring__arc {
+  fill: none;
+  stroke: var(--tone);
+  stroke-width: 9;
+  stroke-linecap: round;
+  stroke-dasharray: 327;
+  transition: stroke-dashoffset 0.8s cubic-bezier(0.22, 1, 0.36, 1), stroke 0.3s;
+}
+.ov-ring__center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -58%);
+  text-align: center;
+  pointer-events: none;
+  color: var(--tone);
+}
+.ov-ring__pct {
+  margin-top: 4px;
+  font-size: 19px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: var(--text);
+}
+.ov-ring__of { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.ov-ring__cap { font-size: 11.5px; color: var(--text-muted); font-weight: 600; }
+.ov-body { padding: 18px 22px 16px; min-width: 0; }
+.ov-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.ov-status__title { margin: 0; font-size: 17px; }
+.ov-status__detail { font-size: 12px; color: var(--text-muted); margin-left: auto; text-align: right; }
+.ov-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tone);
+  flex: 0 0 auto;
+  animation: ovPulse 2.2s ease-out infinite;
+}
+@keyframes ovPulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--tone) 40%, transparent); }
+  70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.ov-rows { padding-top: 2px; }
+.ov-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 2px;
+  border-bottom: 1px solid var(--border-soft);
+  transition: background 0.15s;
+}
+.ov-row:last-child { border-bottom: 0; }
+.ov-row:hover { background: color-mix(in srgb, var(--border-soft) 45%, transparent); }
+.ov-row__ico {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  color: #0284c7;
+  background: color-mix(in srgb, #0284c7 12%, var(--surface));
+}
+.ov-row--cache .ov-row__ico { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, var(--surface)); }
+.ov-row--errors .ov-row__ico { color: var(--success); background: color-mix(in srgb, var(--success) 14%, var(--surface)); }
+.ov-row--errors.is-warn .ov-row__ico { color: var(--danger); background: color-mix(in srgb, var(--danger) 13%, var(--surface)); }
+.ov-row__main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ov-row__name { font-size: 13px; color: var(--text-regular); }
+.ov-row__sub { font-size: 11.5px; color: var(--text-muted); }
+.ov-row__right { display: flex; align-items: center; gap: 14px; }
+.ov-row__bar {
+  width: 86px;
+  height: 5px;
+  border-radius: 99px;
+  background: var(--border-soft);
+  overflow: hidden;
+}
+.ov-row__bar i { display: block; height: 100%; border-radius: 99px; background: #0284c7; transition: width 0.5s; }
+.ov-row__num {
+  min-width: 74px;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 4px;
+  font-size: 19px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.3px;
+}
+.ov-row__num small { font-size: 11px; font-weight: 600; color: var(--text-muted); }
+.ov-row--errors.is-warn .ov-row__num { color: var(--danger); }
+.ov-row__act {
+  border: 1px solid var(--border);
+  background: var(--surface-sunken);
+  color: var(--text-regular);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font: 600 11.5px var(--font);
+  cursor: pointer;
+}
+.ov-row__act:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+@media (max-width: 900px) {
+  .ov-board { grid-template-columns: minmax(0, 1fr); }
+  .ov-ring { border-right: 0; border-bottom: 1px solid var(--border-soft); }
+  .ov-status { flex-wrap: wrap; }
+  .ov-status__detail { margin-left: 0; width: 100%; text-align: left; }
+  .ov-row__bar { display: none; }
+}
+
 </style>

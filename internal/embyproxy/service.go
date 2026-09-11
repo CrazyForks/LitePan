@@ -584,6 +584,8 @@ func (s *Service) Sync(ctx context.Context) error {
 		}
 	}
 	var firstErr error
+	// 一次 Sync 可能拉起多个反代，收齐后只记一条日志，避免开机日志被刷屏。
+	listening := make([]string, 0, len(configs))
 	for _, cfg := range configs {
 		port, _ := strconv.Atoi(cfg.Port)
 		if !enabled || port == 0 {
@@ -593,9 +595,16 @@ func (s *Service) Sync(ctx context.Context) error {
 			rt.err = ""
 			continue
 		}
-		if err := s.startRuntimeLocked(cfg, port); err != nil && firstErr == nil {
-			firstErr = err
+		if err := s.startRuntimeLocked(cfg, port); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
+		listening = append(listening, fmt.Sprintf("%s(:%d)", cfg.Name, port))
+	}
+	if len(listening) > 0 {
+		s.log.Info("Emby 反代已监听", "count", len(listening), "instances", strings.Join(listening, ", "))
 	}
 	return firstErr
 }
@@ -636,7 +645,6 @@ func (s *Service) startRuntimeLocked(cfg Config, port int) error {
 	}
 	rt.server = srv
 	go func(id, name string, active *runtime) {
-		s.log.Info("Emby 反代已监听", "name", name, "addr", srv.Addr)
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.mu.Lock()
 			if s.runtimes[id] == active {

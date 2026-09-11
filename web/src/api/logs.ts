@@ -42,11 +42,12 @@ export interface LogQuery {
   offset?: number;
 }
 
+// 级别筛选档位：key 对应统计接口 by_level 的键，用于显示各档数量。
 export const LOG_LEVELS = [
-  { value: "", label: "所有级别" },
-  { value: 20, label: "ℹ️ INFO" },
-  { value: 30, label: "⚠️ WARNING" },
-  { value: 40, label: "❌ ERROR" },
+  { value: "", label: "全部", key: "" },
+  { value: 20, label: "信息", key: "INFO" },
+  { value: 30, label: "警告", key: "WARNING" },
+  { value: 40, label: "错误", key: "ERROR" },
 ] as const;
 
 export const LOG_MODULE_GROUPS = [
