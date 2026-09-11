@@ -89,6 +89,11 @@ const (
 	KeyAIOrganizeModel         = "ai_organize_model"
 	KeyMOClassificationEnabled = "mo_classification_enabled"
 	KeyMOClassificationConfig  = "mo_classification_config"
+	// 界面偏好：信息条（仪表带）在各页的开合状态，随备份一起导入导出。
+	KeyUIBandHiddenStrm     = "ui_band_hidden_strm"
+	KeyUIBandHiddenCache    = "ui_band_hidden_cache"
+	KeyUIBandHiddenOrganize = "ui_band_hidden_organize"
+	KeyUIBandHiddenFuse     = "ui_band_hidden_fuse"
 )
 
 // Type 决定后台表单控件与校验方式。
@@ -120,6 +125,8 @@ type Spec struct {
 	Options     []Option // 仅 TypeSelect
 	Sensitive   bool
 	Hidden      bool
+	// SilentLog 表示这类设置改动不写「系统设置已更新」日志（界面偏好等低价值噪音）。
+	SilentLog bool
 	// normalize 对字符串值做规范化/兜底（如 OAuth 地址校验），nil 表示不处理。
 	normalize func(string) string
 }
@@ -211,6 +218,11 @@ func defaultSpecs() []Spec {
 		boolSpec(KeyStrmScrapeActors, "strm", "刮削演员信息", "将主要演员、角色和头像地址写入作品 NFO。", "false"),
 		boolSpec(KeyStrmScrapeClearLogo, "strm", "刮削影片 Logo", "按搜索语言优先生成 clearlogo.png。", "false"),
 		{Key: KeyStrmScrapeScopes, Type: TypeString, Default: "{}", Hidden: true},
+		// 界面偏好：信息条开合（后台不展示，仅持久化 + 随备份还原）
+		{Key: KeyUIBandHiddenStrm, Type: TypeBool, Default: "false", Hidden: true, SilentLog: true},
+		{Key: KeyUIBandHiddenCache, Type: TypeBool, Default: "false", Hidden: true, SilentLog: true},
+		{Key: KeyUIBandHiddenOrganize, Type: TypeBool, Default: "false", Hidden: true, SilentLog: true},
+		{Key: KeyUIBandHiddenFuse, Type: TypeBool, Default: "false", Hidden: true, SilentLog: true},
 		boolSpec(KeyMOProxyEnabled, "media_organize", "启用代理", "TMDB 请求经代理出站。", "false"),
 		stringSpec(KeyMOProxyURL, "media_organize", "代理地址", "HTTP/HTTPS 代理地址，例如 http://127.0.0.1:7890。", ""),
 		stringSpec(KeyMOProxyUsername, "media_organize", "代理用户名", "代理认证用户名，无认证可留空。", ""),

@@ -1179,13 +1179,6 @@ onUnmounted(() => {
 .tb-save-btn:hover { background: #1c232c; }
 .tb-save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* 卡片开关（保持原样） */
-.check-toggle { width: 28px; height: 28px; border-radius: 50%; border: 0; padding: 0; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; background: var(--border); color: var(--text-muted); transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease; }
-.check-toggle svg { width: 14px; height: 14px; }
-.check-toggle:hover { background: var(--surface-hover); }
-.check-toggle.on { background: var(--success); color: #fff; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.16); }
-.check-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
-
 @media (max-width: 900px) {
   /* 小屏：弹窗交给页面纵向滚动，横向永不溢出 */
   .cover-shell { max-height: none; overflow-x: hidden; overflow-y: visible; }

@@ -700,7 +700,6 @@
   color: #dfe6ef;
 }
 
-:root[data-theme="dark"] .file-meta,
 :root[data-theme="dark"] .source-cell,
 :root[data-theme="dark"] .tail-cell,
 :root[data-theme="dark"] .status-bar {

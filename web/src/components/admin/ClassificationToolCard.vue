@@ -565,11 +565,6 @@ async function saveSettings() {
 </template>
 
 <style scoped>
-.check-toggle { width: 28px; height: 28px; border-radius: 50%; border: 0; padding: 0; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; background: var(--border); color: var(--text-muted); transition: background .18s ease, color .18s ease, box-shadow .18s ease; }
-.check-toggle svg { width: 14px; height: 14px; }
-.check-toggle:hover { background: var(--surface-hover); }
-.check-toggle.on { background: var(--success); color: #fff; box-shadow: 0 0 0 4px rgba(16, 185, 129, .16); }
-.check-toggle:disabled { opacity: .5; cursor: not-allowed; }
 .classification-template-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
 .classification-template-tab { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; align-items: center; padding: 10px 8px 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-muted); cursor: pointer; transition: 0.15s; font-family: inherit; }
 .classification-template-tab strong { font-size: 13px; font-weight: 600; }

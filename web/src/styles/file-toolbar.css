@@ -183,20 +183,8 @@
   transition: transform 0.2s ease;
 }
 
-.file-toolbar__menu-arrow--muted {
-  color: var(--text-regular);
-}
-
 .file-toolbar__menu-arrow.open {
   transform: rotate(180deg);
-}
-
-.file-toolbar__batch {
-  display: flex;
-  gap: 10px;
-  margin-left: 20px;
-  padding-left: 20px;
-  border-left: 1px solid var(--border);
 }
 
 .file-toolbar .performance-panel {
@@ -382,12 +370,6 @@
   .file-toolbar .transfer-status-chip {
     margin-right: auto;
     max-width: min(220px, 52vw);
-  }
-
-  .file-toolbar__batch {
-    margin-left: 0;
-    padding-left: 0;
-    border-left: none;
   }
 
   .file-toolbar .performance-panel.expanded {

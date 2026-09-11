@@ -30,6 +30,8 @@ export interface StrmTask {
   removed_count: number;
   last_scan?: string;
   last_scan_status?: string;
+  /** 后端计算的下一次自动扫描时间；缺省表示不参与自动调度（手动或未启用）。 */
+  next_run_at?: string;
   automation_managed?: boolean;
   is_scanning?: boolean;
   scan_phase?:

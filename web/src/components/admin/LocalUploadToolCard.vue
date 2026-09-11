@@ -221,43 +221,4 @@ async function removeMapping() {
 </template>
 
 <style scoped>
-.check-toggle {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 0;
-  padding: 0;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  background: var(--border);
-  color: var(--text-muted);
-  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
-}
-
-.check-toggle svg {
-  width: 14px;
-  height: 14px;
-}
-
-.check-toggle:hover {
-  background: var(--surface-hover);
-}
-
-.check-toggle.on {
-  background: var(--success);
-  color: #fff;
-  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.16);
-}
-
-.check-toggle.on:hover {
-  background: color-mix(in srgb, var(--success) 88%, #000);
-}
-
-.check-toggle:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 </style>

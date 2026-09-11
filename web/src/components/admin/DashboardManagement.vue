@@ -142,9 +142,6 @@ const ovOnlineRate = computed(() =>
 );
 const ovRingOffset = computed(() => Math.round(327 * (1 - ovOnlineRate.value / 100)));
 const ovStatusIcon = computed(() => (systemStatus.value.tone === "ok" ? "check" : "triangle-exclamation"));
-const fusePercent = computed(() =>
-  totalFuseCount.value > 0 ? Math.round((mountedFuseCount.value / totalFuseCount.value) * 100) : 0,
-);
 const fuseSubline = computed(() => {
   if (totalFuseCount.value === 0) return "尚未创建挂载点";
   const missing = totalFuseCount.value - mountedFuseCount.value;
@@ -457,7 +454,6 @@ onMounted(() => {
                 <span class="ov-row__sub">{{ fuseSubline }}</span>
               </div>
               <div class="ov-row__right">
-                <span class="ov-row__bar"><i :style="{ width: fusePercent + '%' }" /></span>
                 <span class="ov-row__num">{{ mountedFuseCount }}<small>/ {{ totalFuseCount }}</small></span>
               </div>
             </div>
@@ -1170,14 +1166,6 @@ onMounted(() => {
 .ov-row__name { font-size: 13px; color: var(--text-regular); }
 .ov-row__sub { font-size: 11.5px; color: var(--text-muted); }
 .ov-row__right { display: flex; align-items: center; gap: 14px; }
-.ov-row__bar {
-  width: 86px;
-  height: 5px;
-  border-radius: 99px;
-  background: var(--border-soft);
-  overflow: hidden;
-}
-.ov-row__bar i { display: block; height: 100%; border-radius: 99px; background: #0284c7; transition: width 0.5s; }
 .ov-row__num {
   min-width: 74px;
   display: flex;
@@ -1206,7 +1194,6 @@ onMounted(() => {
   .ov-ring { border-right: 0; border-bottom: 1px solid var(--border-soft); }
   .ov-status { flex-wrap: wrap; }
   .ov-status__detail { margin-left: 0; width: 100%; text-align: left; }
-  .ov-row__bar { display: none; }
 }
 
 </style>

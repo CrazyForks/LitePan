@@ -43,15 +43,12 @@ import AdminRunStatusCell from "@/components/admin/AdminRunStatusCell.vue";
 import AdminTableActionBtn from "@/components/admin/AdminTableActionBtn.vue";
 import AdminRowActions from "@/components/admin/AdminRowActions.vue";
 import type { AdminRunStatusVariant } from "@/components/admin/adminRunStatus";
-import AdminStatsGrid from "@/components/admin/AdminStatsGrid.vue";
 import FormField from "@/components/base/FormField.vue";
 import AppButton from "@/components/base/AppButton.vue";
-import AppIconButton from "@/components/base/AppIconButton.vue";
 import AppInput from "@/components/base/AppInput.vue";
 import AppModal from "@/components/base/AppModal.vue";
 import BusySpinner from "@/components/base/BusySpinner.vue";
 import AppSelect from "@/components/base/AppSelect.vue";
-import StatCard from "@/components/base/StatCard.vue";
 import SettingsHelpTooltip from "@/components/admin/SettingsHelpTooltip.vue";
 import FolderPickerModal from "@/components/file/FolderPickerModal.vue";
 import { useAccountPathLabel } from "@/composables/useAccountPathLabel";
@@ -76,19 +73,13 @@ import {
 import { confirm } from "@/composables/useConfirm";
 import { toast } from "@/composables/useToast";
 import { useAccountsStore } from "@/stores/accounts";
+import { formatRelativeTimeAgo } from "@/utils/format";
 import "@/styles/admin-shared.css";
 import "@/styles/admin-table.css";
 import SvgIcon from "@/components/icons/SvgIcon.vue";
 
 const accountsStore = useAccountsStore();
 const { accounts } = storeToRefs(accountsStore);
-
-withDefaults(
-  defineProps<{
-    hideStats?: boolean;
-  }>(),
-  { hideStats: false },
-);
 
 const boolOptions = [
   { value: "true", label: "开启" },
@@ -308,6 +299,68 @@ const errorTaskCount = computed(
   () => tasks.value.filter((t) => (t.last_run_result?.failed || 0) > 0).length,
 );
 const taskCount = computed(() => tasks.value.length);
+
+// 仪表带用的产出汇总：各任务「最近一次」运行结果相加，不是历史累计。
+const organizedCount = computed(() =>
+  tasks.value.reduce(
+    (sum, t) => sum + Number(t.last_run_result?.renamed || 0) + Number(t.last_run_result?.moved || 0),
+    0,
+  ),
+);
+const skippedCount = computed(() =>
+  tasks.value.reduce((sum, t) => sum + Number(t.last_run_result?.skipped || 0), 0),
+);
+const lastRunLabel = computed(() => {
+  let latest = "";
+  for (const task of tasks.value) {
+    const value = task.last_run_at || "";
+    if (value && value > latest) latest = value;
+  }
+  return latest ? formatRelativeTimeAgo(latest, "尚未执行") : "尚未执行";
+});
+// 成功率只统计执行过的任务：最近一轮无失败计成功，有失败计失败。
+const organizeSuccessRate = computed<number | null>(() => {
+  let ok = 0;
+  let bad = 0;
+  for (const task of tasks.value) {
+    if (!task.last_run_at) continue;
+    if (Number(task.last_run_result?.failed || 0) > 0) bad += 1;
+    else ok += 1;
+  }
+  if (ok + bad === 0) return null;
+  return (ok / (ok + bad)) * 100;
+});
+
+// 任务统计上报给页面顶部的仪表带（目录整理页用仪表带替代了原来的三张统计卡）。
+const emit = defineEmits<{
+  stats: [
+    {
+      total: number;
+      running: number;
+      error: number;
+      organized: number;
+      skipped: number;
+      lastRunLabel: string;
+      successRate: number | null;
+    },
+  ];
+}>();
+
+watch(
+  tasks,
+  () => {
+    emit("stats", {
+      total: taskCount.value,
+      running: runningCount.value,
+      error: errorTaskCount.value,
+      organized: organizedCount.value,
+      skipped: skippedCount.value,
+      lastRunLabel: lastRunLabel.value,
+      successRate: organizeSuccessRate.value,
+    });
+  },
+  { immediate: true },
+);
 
 function accountName(id: number): string {
   return accounts.value.find((a) => a.id === id)?.name ?? `#${id}`;
@@ -903,22 +956,6 @@ defineExpose({
 
 <template>
   <div class="organize-panel">
-    <AdminStatsGrid v-if="!hideStats">
-      <StatCard icon="hand-list" :value="tasks.length" label="任务数量" tone="blue" />
-      <StatCard icon="hand-play" :value="runningCount" label="执行中" tone="purple">
-        <template #actions>
-          <AppIconButton
-            label="刷新"
-            variant="secondary"
-            size="xs"
-            :disabled="refreshing"
-            title="刷新任务列表"
-            @click="() => loadTasks()"
-          />
-        </template>
-      </StatCard>
-    </AdminStatsGrid>
-
     <AdminEmptyState
       v-if="listReady && !refreshing && !tasks.length"
       icon="hand-folder"

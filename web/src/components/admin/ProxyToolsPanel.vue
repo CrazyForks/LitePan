@@ -544,35 +544,4 @@ onMounted(async () => {
 .proxy-enhancement-cards {
   display: contents;
 }
-
-.check-toggle {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 0;
-  padding: 0;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  background: var(--border);
-  color: var(--text-muted);
-}
-
-.check-toggle svg {
-  width: 14px;
-  height: 14px;
-}
-
-.check-toggle.on {
-  background: var(--success);
-  color: #fff;
-  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.16);
-}
-
-.check-toggle:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 </style>

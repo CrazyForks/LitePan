@@ -43,13 +43,6 @@
   --shadow-pop: 0 8px 24px rgba(15, 23, 42, 0.16);
   --shadow-brand: 0 2px 4px rgba(76, 116, 223, 0.3);
 
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 15px;
-  --space-5: 20px;
-  --space-6: 24px;
-
   --font-sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC",
     "Microsoft YaHei", sans-serif;
   --font-size: 14px;
