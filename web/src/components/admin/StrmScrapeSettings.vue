@@ -17,7 +17,7 @@ import SettingsCard from "@/components/admin/SettingsCard.vue";
 import SettingsHelpTooltip from "@/components/admin/SettingsHelpTooltip.vue";
 import SettingsRow from "@/components/admin/SettingsRow.vue";
 import TmdbHostsHelpTip from "@/components/admin/TmdbHostsHelpTip.vue";
-import { useSettingsForm, bindSettingsPanelExpose } from "@/composables/useSettingsForm";
+import { useSettingsForm, bindSettingsPanelExpose, useSettingsSave } from "@/composables/useSettingsForm";
 import { useSettingsLoad } from "@/composables/useSettingsLoad";
 import { toast } from "@/composables/useToast";
 
@@ -35,7 +35,7 @@ const writeModeOptions = [
 ];
 
 const { loading, loaded, runLoad } = useSettingsLoad();
-const saving = ref(false);
+const { saving, runSave } = useSettingsSave();
 const tmdbTesting = ref(false);
 
 const {
@@ -89,9 +89,7 @@ async function loadSettings(opts?: { silent?: boolean }) {
 }
 
 async function saveSettings() {
-  if (saving.value) return;
-  saving.value = true;
-  try {
+  await runSave(async () => {
     const data = await saveStrmScrapeSettings({
       ...settings,
       tmdb_request_interval_ms: Number(settings.tmdb_request_interval_ms),
@@ -103,12 +101,7 @@ async function saveSettings() {
       proxy_password: "",
     });
     snapshotBaseline();
-    toast.success("刮削设置已保存");
-  } catch (e) {
-    toast.error(getApiErrorMessage(e, "保存失败"));
-  } finally {
-    saving.value = false;
-  }
+  }, { successMessage: "刮削设置已保存" });
 }
 
 async function testTmdb() {

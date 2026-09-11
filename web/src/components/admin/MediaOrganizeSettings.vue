@@ -15,7 +15,7 @@ import SettingsCard from "@/components/admin/SettingsCard.vue";
 import SettingsHelpTooltip from "@/components/admin/SettingsHelpTooltip.vue";
 import SettingsRow from "@/components/admin/SettingsRow.vue";
 import TmdbHostsHelpTip from "@/components/admin/TmdbHostsHelpTip.vue";
-import { useSettingsForm, bindSettingsPanelExpose } from "@/composables/useSettingsForm";
+import { useSettingsForm, bindSettingsPanelExpose, useSettingsSave } from "@/composables/useSettingsForm";
 import { useSettingsLoad } from "@/composables/useSettingsLoad";
 import { toast } from "@/composables/useToast";
 import "@/styles/admin-shared.css";
@@ -42,7 +42,7 @@ const conflictPolicyOptions = [
 ];
 
 const { loading, loaded, runLoad } = useSettingsLoad();
-const saving = ref(false);
+const { saving, runSave } = useSettingsSave();
 const tmdbTesting = ref(false);
 const draggingTagIndex = ref<number | null>(null);
 const insertIndex = ref<number | null>(null);
@@ -276,19 +276,13 @@ async function loadSettings(options?: { silent?: boolean }) {
 
 async function saveSettings() {
   if (!settingsChanged.value) return;
-  saving.value = true;
-  try {
+  await runSave(async () => {
     flushTagOrderToSettings();
     const data = await saveMediaOrganizeSettings({ ...settings });
     Object.assign(settings, data);
     syncTagsFromSettings();
     snapshotBaseline();
-    toast.success("整理设置已保存");
-  } catch (e) {
-    toast.error(getApiErrorMessage(e, "保存整理设置失败"));
-  } finally {
-    saving.value = false;
-  }
+  }, { successMessage: "整理设置已保存", errorMessage: "保存整理设置失败" });
 }
 
 async function testTmdb() {
