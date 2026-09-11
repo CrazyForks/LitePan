@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import SvgIcon from "@/components/icons/SvgIcon.vue";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import AppModal from "@/components/base/AppModal.vue";
 import { ackRetentionScopeWarn } from "@/api/cacheRetention";
 import {
   deleteAllNotifications,
   deleteNotification,
   fetchNotifications,
-  fetchUnreadCount,
   isCacheScopeWarnNotification,
   isStrmScanWarnNotification,
   isStrmScrapeWarnNotification,
@@ -19,6 +18,13 @@ import {
   strmScrapeFailureStageLabel,
   type NotificationItem,
 } from "@/api/notifications";
+import {
+  refreshUnread,
+  setUnreadCount,
+  startNotificationBadge,
+  stopNotificationBadge,
+  useNotificationBadge,
+} from "@/composables/useNotificationBadge";
 import { confirm } from "@/composables/useConfirm";
 import { formatTimeShort } from "@/utils/format";
 
@@ -29,14 +35,14 @@ const props = withDefaults(
   { variant: "main" },
 );
 
+const { unreadCount, unreadRevision } = useNotificationBadge();
+
 const open = ref(false);
 const loading = ref(false);
-const unreadCount = ref(0);
 const items = ref<NotificationItem[]>([]);
 const detailItem = ref<NotificationItem | null>(null);
 const detailOpen = ref(false);
 const detailBusy = ref(false);
-let pollTimer: ReturnType<typeof setInterval> | undefined;
 
 const isMain = computed(() => props.variant === "main");
 
@@ -103,13 +109,6 @@ function levelIcon(level: string): string {
   }
 }
 
-async function refreshUnread() {
-  try {
-    const data = await fetchUnreadCount();
-    unreadCount.value = data.count ?? 0;
-  } catch {}
-}
-
 async function loadList() {
   loading.value = true;
   try {
@@ -132,7 +131,7 @@ async function toggleOpen() {
 async function handleMarkAll() {
   try {
     await markAllNotificationsRead();
-    unreadCount.value = 0;
+    setUnreadCount(0);
     items.value = items.value.map((it) => ({ ...it, is_read: true }));
   } catch {}
 }
@@ -153,7 +152,7 @@ async function handleClearAll() {
   try {
     await deleteAllNotifications();
     items.value = [];
-    unreadCount.value = 0;
+    setUnreadCount(0);
     if (detailOpen.value) closeDetail();
   } catch {}
 }
@@ -171,7 +170,7 @@ async function openDetail(item: NotificationItem) {
     try {
       await markNotificationRead(item.id);
       item.is_read = true;
-      unreadCount.value = Math.max(0, unreadCount.value - 1);
+      setUnreadCount(unreadCount.value - 1);
     } catch {}
   }
 }
@@ -180,7 +179,7 @@ function removeItem(id: number) {
   const wasUnread = items.value.find((it) => it.id === id && !it.is_read);
   items.value = items.value.filter((it) => it.id !== id);
   if (wasUnread) {
-    unreadCount.value = Math.max(0, unreadCount.value - 1);
+    setUnreadCount(unreadCount.value - 1);
   }
   if (detailItem.value?.id === id) {
     closeDetail();
@@ -263,14 +262,18 @@ function handleDocumentClick(e: MouseEvent) {
   open.value = false;
 }
 
+// 服务端推送到达时，若面板正开着就顺带刷新列表，避免看到过期内容。
+watch(unreadRevision, () => {
+  if (open.value) void loadList();
+});
+
 onMounted(() => {
-  refreshUnread();
-  pollTimer = setInterval(refreshUnread, 30000);
+  startNotificationBadge();
   document.addEventListener("click", handleDocumentClick);
 });
 
 onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer);
+  stopNotificationBadge();
   document.removeEventListener("click", handleDocumentClick);
 });
 </script>

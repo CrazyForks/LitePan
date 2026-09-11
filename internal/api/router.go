@@ -299,6 +299,7 @@ func NewRouter(d Deps) http.Handler {
 				})
 				r.Get("/notifications", h.listNotifications)
 				r.Get("/notifications/unread-count", h.notificationUnreadCount)
+				r.Get("/notifications/stream", h.streamNotificationUnread)
 				r.Post("/notifications/read-all", h.markAllNotificationsRead)
 				r.Delete("/notifications", h.deleteAllNotifications)
 				r.Post("/notifications/{id}/read", h.markNotificationRead)
