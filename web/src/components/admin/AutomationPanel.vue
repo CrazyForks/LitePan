@@ -353,7 +353,7 @@
     <AppPlainModal
       :open="pickerVisible"
       :title="pickerKind === 'trigger' ? '选择触发条件' : '添加执行动作'"
-      size="sm"
+      :size="pickerKind === 'trigger' ? 'sm' : 'md'"
       body-flush
       @close="cancelPicker"
     >
@@ -392,15 +392,39 @@
             <i class="fas fa-chevron-right"></i>
           </button>
         </div>
-        <div v-else class="pick-list">
-          <button v-for="item in actionTypeOptions" :key="item.value" class="pick-option" type="button" @click="chooseAction(item.value)">
-            <span class="pick-ico" :class="item.value"><i :class="actionIcon(item.value)"></i></span>
-            <span>
-              <b>{{ item.label }}</b>
-              <em>{{ item.desc }}</em>
-            </span>
-            <i class="fas fa-chevron-right"></i>
-          </button>
+        <div v-else class="action-picker">
+          <div class="action-picker__scroll">
+            <template v-for="group in actionGroups" :key="group.id">
+              <div class="action-picker__group-title">
+                {{ group.name }}<span class="action-picker__group-count">{{ group.items.length }}</span>
+              </div>
+              <div class="action-picker__grid">
+                <button
+                  v-for="item in group.items"
+                  :key="item.value"
+                  class="action-cell"
+                  type="button"
+                  @click="chooseAction(item.value)"
+                  @mouseenter="setActionInfo(item)"
+                  @mouseleave="resetActionInfo"
+                  @focus="setActionInfo(item)"
+                  @blur="resetActionInfo"
+                  @touchstart.passive="setActionInfo(item)"
+                >
+                  <span class="pick-ico action-cell__ico" :class="item.value"><i :class="actionIcon(item.value)"></i></span>
+                  <span class="action-cell__name">{{ item.label }}</span>
+                </button>
+              </div>
+            </template>
+            <div v-if="!actionGroups.length" class="action-picker__empty">暂无可选动作</div>
+          </div>
+          <div class="action-picker__info">
+            <template v-if="actionInfo">
+              <span class="pick-ico action-picker__info-ico" :class="actionInfo.value"><i :class="actionIcon(actionInfo.value)"></i></span>
+              <span class="action-picker__info-text"><b>{{ actionInfo.label }}</b>{{ actionInfo.desc }}</span>
+            </template>
+            <span v-else class="action-picker__info-text action-picker__info-text--hint">悬停或触摸动作查看说明</span>
+          </div>
         </div>
       </div>
     </AppPlainModal>
@@ -655,6 +679,7 @@ const form = reactive({
 
 const ACTION_DEFINITIONS = {
   cache_clear: {
+    group: 'organize',
     label: '刷新目录',
     optionLabel: '刷新目录',
     icon: 'fas fa-broom',
@@ -665,6 +690,7 @@ const ACTION_DEFINITIONS = {
     previewTitle: () => '刷新目录'
   },
   organize: {
+    group: 'organize',
     label: '整理任务',
     optionLabel: '执行整理任务',
     icon: 'fas fa-folder-tree',
@@ -678,6 +704,7 @@ const ACTION_DEFINITIONS = {
     previewTitle: action => `整理任务[${findTaskLabel('organize', action.params.task_id)}]`
   },
   strm: {
+    group: 'media',
     label: 'STRM任务',
     optionLabel: '执行STRM任务',
     icon: 'fas fa-film',
@@ -691,6 +718,7 @@ const ACTION_DEFINITIONS = {
     previewTitle: action => `执行STRM任务[${findTaskLabel('strm', action.params.task_id)}]`
   },
   strm_scrape: {
+    group: 'media',
     label: '生成本地STRM元数据',
     optionLabel: '生成本地STRM元数据',
     icon: 'fas fa-images',
@@ -705,6 +733,7 @@ const ACTION_DEFINITIONS = {
     previewTitle: action => `生成本地STRM元数据[${findTaskLabel('strm', action.params.task_id)}]`
   },
   delay: {
+    group: 'flow',
     label: '延迟',
     optionLabel: '延迟等待',
     icon: 'fas fa-clock',
@@ -715,6 +744,7 @@ const ACTION_DEFINITIONS = {
     previewTitle: action => `延迟${formatDelay(action.params.seconds)}`
   },
   emby_refresh: {
+    group: 'media',
     label: 'Emby刷库',
     optionLabel: 'Emby全局刷库',
     icon: 'fas fa-server',
@@ -732,6 +762,7 @@ const ACTION_DEFINITIONS = {
     previewTitle: action => `Emby${embyRefreshModeLabel(action)}[${embyRefreshTargetLabel(action)}]`
   },
   emby_complete_media_info: {
+    group: 'media',
     label: 'Emby 补全媒体信息',
     optionLabel: 'Emby 补全媒体信息',
     icon: 'fas fa-circle-info',
@@ -761,17 +792,43 @@ const UNKNOWN_ACTION = {
   previewTitle: () => '未知动作'
 }
 
+// 动作分组：新增动作时在 ACTION_DEFINITIONS 里标 group，未标的一律落入「其他」
+const ACTION_GROUP_ORDER = [
+  { id: 'media', name: '媒体库' },
+  { id: 'organize', name: '文件整理' },
+  { id: 'flow', name: '流程控制' },
+  { id: 'other', name: '其他' }
+]
+
 const actionDefinition = type => ACTION_DEFINITIONS[type] || UNKNOWN_ACTION
 const actionTypeOptions = Object.entries(ACTION_DEFINITIONS).map(([value, definition]) => ({
   value,
   label: definition.optionLabel,
-  desc: definition.desc
+  desc: definition.desc,
+  group: definition.group || 'other'
 }))
 
 const organizeTaskOptions = computed(() => options.value.organize_tasks.map(task => ({
   value: String(task.id),
   label: task.name || task.id
 })))
+
+// ---- 动作选择面板（图标矩阵）----
+const actionInfo = ref(null)
+
+const actionGroups = computed(() => (
+  ACTION_GROUP_ORDER
+    .map(group => ({ ...group, items: actionTypeOptions.filter(item => item.group === group.id) }))
+    .filter(group => group.items.length > 0)
+))
+
+const setActionInfo = item => { actionInfo.value = item }
+const resetActionInfo = () => { actionInfo.value = null }
+
+// 每次打开动作选择面板时重置说明条
+watch(pickerVisible, visible => {
+  if (visible && pickerKind.value === 'action') actionInfo.value = null
+})
 
 const strmTaskOptions = computed(() => options.value.strm_tasks.map(task => ({
   value: Number(task.id),
@@ -3186,6 +3243,165 @@ defineExpose({
 .pick-ico.emby_complete_media_info {
   background: color-mix(in srgb, #8b5cf6 18%, var(--panel));
   color: #8b5cf6;
+}
+
+/* ---- 动作选择面板：图标矩阵（Launchpad 风），深色模式跟随主题变量 ---- */
+/* 超高时不设内部滚动，沿用弹窗统一模式：滚动条在视口右侧（overlay 滚动） */
+.action-picker__scroll {
+  padding: 0 20px 8px;
+}
+
+.action-picker__group-title {
+  margin: 12px 4px 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.action-picker__group-title:first-child {
+  margin-top: 4px;
+}
+
+.action-picker__group-count {
+  margin-left: 4px;
+  color: var(--muted2);
+  font-weight: 400;
+}
+
+.action-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.action-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 4px 9px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s ease;
+}
+
+.action-cell:hover {
+  background: var(--surface-hover);
+}
+
+.action-cell:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
+
+.action-cell__ico.pick-ico {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  font-size: 19px;
+  box-shadow: var(--shadow-soft);
+  transition: transform 0.18s ease;
+}
+
+.action-cell:hover .action-cell__ico {
+  transform: scale(1.06);
+}
+
+.action-cell__name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: calc(1.35em * 2);
+  color: var(--text-regular);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.action-picker__empty {
+  padding: 40px 20px;
+  color: var(--muted2);
+  font-size: 13px;
+  text-align: center;
+}
+
+.action-picker__info {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 38px;
+  margin: 2px 20px 12px;
+  padding: 8px 12px;
+  flex-shrink: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--soft);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.action-picker__info-ico.pick-ico {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+/* 固定单行 + 省略号：hover 切换内容时面板高度不变，避免视觉抖动 */
+.action-picker__info-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-picker__info-text b {
+  margin-right: 6px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.action-picker__info-text--hint {
+  color: var(--muted2);
+}
+
+/* 手机小屏：3 列并收紧留白 */
+@media (max-width: 480px) {
+  .action-picker__scroll {
+    padding: 0 12px 6px;
+  }
+
+  .action-picker__grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+  }
+
+  .action-cell {
+    padding: 8px 2px 7px;
+  }
+
+  .action-cell__ico.pick-ico {
+    width: 42px;
+    height: 42px;
+    border-radius: 11px;
+    font-size: 17px;
+  }
+
+  .action-picker__info {
+    margin: 2px 12px 10px;
+  }
 }
 
 .cfg-body {
