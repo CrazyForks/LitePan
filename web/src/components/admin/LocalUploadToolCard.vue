@@ -5,7 +5,7 @@ import { getApiErrorMessage } from "@/api/client";
 import { localUploadApi, type LocalUploadMapping } from "@/api/cloudTools";
 import { toast } from "@/composables/useToast";
 import AppButton from "@/components/base/AppButton.vue";
-import CloudToolCard from "@/components/admin/CloudToolCard.vue";
+import ToolCard from "@/components/admin/ToolCard.vue";
 import ProxyWorkspace, { type ProxyField, type ProxyWorkspaceItem } from "@/components/admin/ProxyWorkspace.vue";
 
 const props = withDefaults(defineProps<{ searchQuery?: string }>(), { searchQuery: "" });
@@ -155,7 +155,7 @@ async function removeMapping() {
 
 <template>
   <div v-show="matches('从服务器上传')">
-    <CloudToolCard
+    <ToolCard
       :enabled="localEnabled"
       name="从服务器上传"
       driver="全部网盘 · 服务器目录上传"
@@ -192,14 +192,14 @@ async function removeMapping() {
           目录映射
         </AppButton>
       </template>
-    </CloudToolCard>
+    </ToolCard>
 
     <ProxyWorkspace
       v-model="localForm"
       :open="mappingOpen"
       title="从服务器上传 · 目录映射设置"
       caption="映射目录"
-      icon="📁"
+      icon="hand-folder"
       :subtitle="selectedName ? `容器内路径 · ${localForm.path || '未填写'}` : ''"
       :items="workspaceItems"
       :selected-id="selectedName"

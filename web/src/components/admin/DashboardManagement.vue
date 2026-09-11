@@ -22,6 +22,8 @@ import { useAdminPageLoading } from "@/composables/useAdminLoadingBar";
 import { toast } from "@/composables/useToast";
 import { formatRelativeTimeAgo, formatSize } from "@/utils/format";
 import "@/styles/admin-shared.css";
+import SvgIcon from "@/components/icons/SvgIcon.vue";
+import IconChip from "@/components/base/IconChip.vue";
 
 const OVERVIEW_TAB = "overview";
 const LOGS_TAB = "logs";
@@ -127,14 +129,14 @@ const recentErrorCount = computed(() => logStats.value?.recent_unacknowledged_er
 const recentErrorTotal = computed(() => logStats.value?.recent_errors ?? 0);
 const systemStatus = computed(() => {
   if (authErrorAccountCount.value > 0) {
-    return { label: "账号需要重新授权", tone: "danger", icon: "fa-triangle-exclamation" };
+    return { label: "账号需要重新授权", tone: "danger", icon: "triangle-exclamation" };
   }
   if (cooldownAccountCount.value > 0) {
-    return { label: "账号认证冷却中", tone: "warn", icon: "fa-clock" };
+    return { label: "账号认证冷却中", tone: "warn", icon: "clock" };
   }
-  if (recentErrorCount.value > 0) return { label: "需要留意", tone: "warn", icon: "fa-triangle-exclamation" };
-  if (inactiveAccountCount.value > 0) return { label: "部分账号未启用", tone: "warn", icon: "fa-circle-info" };
-  return { label: "运行正常", tone: "ok", icon: "fa-check" };
+  if (recentErrorCount.value > 0) return { label: "需要留意", tone: "warn", icon: "triangle-exclamation" };
+  if (inactiveAccountCount.value > 0) return { label: "部分账号未启用", tone: "warn", icon: "circle-info" };
+  return { label: "运行正常", tone: "ok", icon: "check" };
 });
 const systemStatusText = computed(() => {
   if (authErrorAccountCount.value > 0) {
@@ -170,7 +172,7 @@ const sortedAccounts = computed(() =>
 const taskSummaries = computed(() => [
   {
     title: "缓存任务",
-    icon: "fa-box-archive",
+    icon: "box-archive",
     count: cacheRetentionStats.value?.total ?? cacheRetentionTasks.value.length,
     enabled: enabledCacheCount.value,
     detail: `${cacheItemCount.value} 条缓存 · ${cacheHitRate.value} 命中率`,
@@ -183,7 +185,7 @@ const taskSummaries = computed(() => [
   },
   {
     title: "STRM 任务",
-    icon: "fa-film",
+    icon: "film",
     count: strmTasks.value.length,
     enabled: enabledStrmCount.value,
     detail: `已生成 ${generatedStrmCount.value} 个播放文件`,
@@ -193,7 +195,7 @@ const taskSummaries = computed(() => [
   },
   {
     title: "目录整理",
-    icon: "fa-wand-magic-sparkles",
+    icon: "wand-magic-sparkles",
     count: organizeTasks.value.length,
     enabled: enabledOrganizeCount.value,
     detail: organizeTaskDetail.value,
@@ -323,7 +325,7 @@ function downloadModeLabel(account: Account) {
 }
 
 function downloadModeIcon(account: Account) {
-  return downloadModeLabel(account) === "本机代理" ? "fa-rotate" : "fa-bolt";
+  return downloadModeLabel(account) === "本机代理" ? "rotate" : "bolt";
 }
 
 function accountRowStyle(account: Account) {
@@ -343,10 +345,10 @@ function accountStatusClass(account: Account) {
 }
 
 function accountStatusIcon(account: Account) {
-  if (isAccountAuthError(account)) return "fa-triangle-exclamation";
-  if (isAccountCooldown(account)) return "fa-clock";
-  if (!account.is_active) return "fa-circle-pause";
-  return "fa-circle-check";
+  if (isAccountAuthError(account)) return "triangle-exclamation";
+  if (isAccountCooldown(account)) return "clock";
+  if (!account.is_active) return "circle-pause";
+  return "circle-check";
 }
 
 function accountStatusLabel(account: Account) {
@@ -417,7 +419,7 @@ onMounted(() => {
       >
         <div class="dashboard-hero__main">
           <div class="dashboard-hero__icon">
-            <i class="fas" :class="systemStatus.icon" />
+            <SvgIcon :name="systemStatus.icon" size="1em" />
           </div>
           <div class="dashboard-hero__copy">
             <p class="dashboard-eyebrow">控制台</p>
@@ -446,7 +448,7 @@ onMounted(() => {
       </section>
 
       <div v-if="loadError" class="dashboard-warning">
-        <i class="fas fa-circle-info" />
+        <SvgIcon name="circle-info" size="1em" />
         <span>{{ loadError }}</span>
         <button type="button" :disabled="refreshing" @click="loadOverview">
           {{ refreshing ? "刷新中..." : "重试" }}
@@ -455,34 +457,28 @@ onMounted(() => {
 
       <section class="overview-cards" aria-label="运行概况卡片">
         <article class="overview-card">
-          <div class="overview-card__icon">
-            <i class="fas fa-folder-tree" />
-          </div>
-          <div>
+          <IconChip icon="hand-link" tone="blue" />
+          <div class="overview-card__main">
             <strong>{{ mountedFuseCount }}/{{ totalFuseCount }}</strong>
             <span>FUSE 挂载点</span>
           </div>
         </article>
         <article class="overview-card">
-          <div class="overview-card__icon">
-            <i class="fas fa-list-check" />
-          </div>
-          <div>
+          <IconChip icon="hand-list" tone="green" />
+          <div class="overview-card__main">
             <strong>{{ totalTaskCount }}</strong>
             <span>任务总数</span>
           </div>
         </article>
         <article class="overview-card overview-card--cache">
-          <div class="overview-card__icon">
-            <i class="fas fa-database" />
-          </div>
-          <div>
+          <IconChip icon="hand-database" tone="amber" />
+          <div class="overview-card__main">
             <strong>{{ cacheSizeLabel }}</strong>
             <span>缓存空间</span>
           </div>
           <AppCardActionButton
             class="overview-card__action-layout"
-            icon-class="fas fa-trash-can"
+            icon-class="trash-can"
             label="清理"
             variant="danger"
             :disabled="clearingCache"
@@ -490,10 +486,8 @@ onMounted(() => {
           />
         </article>
         <article class="overview-card">
-          <div class="overview-card__icon">
-            <i class="fas fa-bell" />
-          </div>
-          <div>
+          <IconChip icon="hand-bell" tone="purple" />
+          <div class="overview-card__main">
             <strong>{{ unreadCount }}</strong>
             <span>未读通知</span>
           </div>
@@ -508,7 +502,7 @@ onMounted(() => {
               <p>{{ accountCount }} 个接入 · {{ activeAccountCount }} 个在线</p>
             </div>
             <button type="button" class="dashboard-link-button" :disabled="refreshing" @click="loadOverview">
-              <i class="fas fa-rotate-right" :class="{ 'is-spinning': refreshing }" />
+              <SvgIcon name="rotate-right" size="1em" :class="{ 'is-spinning': refreshing }" />
               刷新
             </button>
           </header>
@@ -540,7 +534,7 @@ onMounted(() => {
                 <small>{{ accountSubline(account) }}</small>
               </div>
               <span class="method-tag">
-                <i class="fas" :class="downloadModeIcon(account)" />
+                <SvgIcon :name="downloadModeIcon(account)" size="1em" />
                 {{ downloadModeLabel(account) }}
               </span>
               <span
@@ -548,7 +542,7 @@ onMounted(() => {
                 :class="accountStatusClass(account)"
                 :title="accountStatusLabel(account)"
               >
-                <i class="fas" :class="accountStatusIcon(account)" />
+                <SvgIcon :name="accountStatusIcon(account)" size="1em" />
                 {{ accountStatusLabel(account) }}
               </span>
             </div>
@@ -568,7 +562,7 @@ onMounted(() => {
             <div class="task-list">
               <div v-for="task in taskSummaries" :key="task.title" class="task-row">
                 <div class="task-row__icon" :class="`task-row__icon--${task.tone}`">
-                  <i class="fas" :class="task.icon" />
+                  <SvgIcon :name="task.icon" size="1em" />
                 </div>
                 <div class="task-row__main">
                   <div class="task-row__title">
@@ -609,7 +603,7 @@ onMounted(() => {
                 class="notice-row"
                 :class="notificationLevelClass(notifications[0]?.level ?? 'info')"
               >
-                <i class="fas fa-bell" />
+                <SvgIcon name="bell" size="1em" />
                 <div>
                   <strong>有 {{ unreadCount }} 条未读通知</strong>
                   <small v-if="notifications.length">
@@ -620,7 +614,7 @@ onMounted(() => {
               </div>
             </div>
             <div v-else class="notice-good">
-              <i class="fas fa-check" />
+              <SvgIcon name="check" size="1em" />
               <div>
                 <strong>通知状态正常</strong>
                 <small>暂无未处理通知</small>
@@ -832,7 +826,7 @@ onMounted(() => {
 .overview-card {
   min-height: 96px;
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr);
+  grid-template-columns: 44px minmax(0, 1fr);
   align-items: center;
   gap: 13px;
   padding: 18px 20px;
@@ -840,40 +834,14 @@ onMounted(() => {
 }
 
 .overview-card--cache {
-  grid-template-columns: 46px minmax(0, 1fr) auto;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
 }
 
-.overview-card__icon {
-  width: 46px;
-  height: 46px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-md);
-  border: 1px solid color-mix(in srgb, var(--brand) 14%, var(--border));
-  background: color-mix(in srgb, var(--brand) 8%, var(--surface));
-  color: var(--brand);
-  font-size: 16px;
-}
 
-.overview-card:nth-child(2) .overview-card__icon {
-  border-color: color-mix(in srgb, var(--success) 18%, var(--border));
-  background: color-mix(in srgb, var(--success) 8%, var(--surface));
-  color: var(--success);
-}
 
-.overview-card:nth-child(3) .overview-card__icon {
-  border-color: color-mix(in srgb, var(--warning) 18%, var(--border));
-  background: color-mix(in srgb, var(--warning) 9%, var(--surface));
-  color: var(--warning);
-}
 
-.overview-card:nth-child(4) .overview-card__icon {
-  border-color: color-mix(in srgb, #8b5cf6 18%, var(--border));
-  background: color-mix(in srgb, #8b5cf6 8%, var(--surface));
-  color: #8b5cf6;
-}
 
-.overview-card strong {
+.overview-card__main strong {
   display: block;
   color: var(--text);
   font-size: 24px;
@@ -881,7 +849,7 @@ onMounted(() => {
   margin-bottom: 7px;
 }
 
-.overview-card span {
+.overview-card__main span {
   display: block;
   color: var(--text-muted);
   font-size: 13px;
@@ -935,7 +903,7 @@ onMounted(() => {
 }
 
 .is-spinning {
-  animation: dashboard-spin 0.9s linear infinite;
+  animation: spin 0.9s linear infinite;
 }
 
 .account-list,
@@ -1068,7 +1036,7 @@ onMounted(() => {
   color: var(--text-muted);
 }
 
-.method-tag i {
+.method-tag i, .method-tag .lp-svg-icon {
   color: var(--account-color);
   font-size: 11px;
 }
@@ -1205,8 +1173,8 @@ onMounted(() => {
   background: var(--surface-sunken);
 }
 
-.notice-row > i,
-.notice-good > i {
+.notice-row > i, .notice-row > .lp-svg-icon,
+.notice-good > i, .notice-good > .lp-svg-icon {
   width: 34px;
   height: 34px;
   display: grid;
@@ -1248,15 +1216,9 @@ onMounted(() => {
   border-color: color-mix(in srgb, var(--success) 22%, var(--border));
 }
 
-.notice-good > i {
+.notice-good > i, .notice-good > .lp-svg-icon {
   background: var(--surface);
   color: var(--success);
-}
-
-@keyframes dashboard-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 @media (max-width: 1180px) {
@@ -1299,7 +1261,7 @@ onMounted(() => {
   }
 
   .overview-card--cache {
-    grid-template-columns: 46px minmax(0, 1fr);
+    grid-template-columns: 44px minmax(0, 1fr);
   }
 
   .overview-card__action-layout {

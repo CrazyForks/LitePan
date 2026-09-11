@@ -44,7 +44,7 @@ function onItemClick(item: DropdownMenuItem) {
           @click="onItemClick(item)"
         >
           <span v-if="item.icon" class="menu-panel__icon">
-            <SvgIcon :name="item.icon" :size="17" />
+            <SvgIcon :name="item.icon" :size="18" />
           </span>
           <span>{{ item.label }}</span>
         </button>

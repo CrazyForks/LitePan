@@ -528,12 +528,12 @@ defineExpose({
       settings-hint="服务开关 · 读缓存"
       @open-settings="openSettingsDrawer"
     >
-      <StatCard icon="fa-folder" :value="mounts.length" label="挂载点" tone="blue" />
-      <StatCard icon="fa-link" :value="mountedCount" label="已挂载" tone="purple" />
-      <StatCard icon="fa-database" :value="readCacheUsageText" label="读缓存占用" tone="amber">
+      <StatCard icon="hand-folder" :value="mounts.length" label="挂载点" tone="blue" />
+      <StatCard icon="hand-link" :value="mountedCount" label="已挂载" tone="purple" />
+      <StatCard icon="hand-database" :value="readCacheUsageText" label="读缓存占用" tone="amber">
         <template #actions>
           <AppCardActionButton
-            icon-class="fas fa-trash-can"
+            icon-class="trash-can"
             label="清空读缓存"
             variant="danger"
             icon-only
@@ -547,7 +547,7 @@ defineExpose({
 
     <AdminEmptyState
       v-if="!listLoading && !mounts.length"
-      icon="📂"
+      icon="hand-folder"
       title="还没有挂载点"
       description="将云盘目录映射到容器内路径，宿主机 volume 映射后即可本地访问。"
     >

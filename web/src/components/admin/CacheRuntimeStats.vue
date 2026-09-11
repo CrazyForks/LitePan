@@ -50,11 +50,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <StatCard icon="fa-database" :value="stats.totalKeys" label="缓存条目" tone="blue" side-actions>
+  <StatCard icon="hand-database" :value="stats.totalKeys" label="缓存条目" tone="blue" side-actions>
     <template #actions>
       <div class="cache-runtime-actions">
         <AppCardActionButton
-          icon="fa-sync-alt"
+          icon="hand-sync-alt"
           label="刷新"
           variant="secondary"
           :disabled="refreshing"
@@ -62,7 +62,7 @@ onMounted(() => {
           @click="loadStats"
         />
         <AppCardActionButton
-          icon-class="fas fa-trash-can"
+          icon-class="trash-can"
           label="清理"
           variant="danger"
           :disabled="clearing"
@@ -72,8 +72,8 @@ onMounted(() => {
       </div>
     </template>
   </StatCard>
-  <StatCard icon="fa-hdd" :value="formatSize(stats.totalSize)" label="缓存大小" tone="purple" />
-  <StatCard icon="fa-bullseye" :value="`${stats.hitRate}%`" label="命中率" tone="amber" />
+  <StatCard icon="hand-hdd" :value="formatSize(stats.totalSize)" label="缓存大小" tone="purple" />
+  <StatCard icon="hand-bullseye" :value="`${stats.hitRate}%`" label="命中率" tone="amber" />
 </template>
 
 <style scoped>

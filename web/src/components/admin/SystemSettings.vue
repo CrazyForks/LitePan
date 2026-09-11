@@ -473,7 +473,7 @@ async function submit() {
     <template v-if="!loading">
       <div v-if="isSecurityTab && canBootstrapRestore" class="bootstrap-restore-card">
         <div class="bootstrap-restore-card__icon">
-          <SvgIcon name="fa-database" :size="24" />
+          <SvgIcon name="hand-database" :size="22" />
         </div>
         <div class="bootstrap-restore-card__copy">
           <strong>已有 LitePan 备份？</strong>
@@ -843,7 +843,7 @@ async function submit() {
   place-items: center;
   width: 46px;
   height: 46px;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   color: var(--brand);
   background: color-mix(in srgb, var(--brand) 12%, var(--surface));
 }

@@ -301,10 +301,10 @@ onUnmounted(() => clearTimeout(searchTimer));
 <template>
   <div class="logs-page">
     <div v-if="stats" class="logs-stats">
-      <StatCard icon="fa-file-alt" :value="stats.total" label="总日志数" tone="blue" />
-      <StatCard icon="fa-exclamation-triangle" :value="recentErrorCount" label="近 24 小时错误" tone="red" />
-      <StatCard icon="fa-cubes" :value="activeModuleCount" label="活跃模块" tone="purple" />
-      <StatCard icon="fa-list" :value="logs.length" label="本页结果数" tone="amber" />
+      <StatCard icon="hand-file-alt" :value="stats.total" label="总日志数" tone="blue" />
+      <StatCard icon="hand-exclamation-triangle" :value="recentErrorCount" label="近 24 小时错误" tone="red" />
+      <StatCard icon="hand-cubes" :value="activeModuleCount" label="活跃模块" tone="purple" />
+      <StatCard icon="hand-list" :value="logs.length" label="本页结果数" tone="amber" />
     </div>
 
     <div v-if="canAcknowledgeRecentErrors" class="logs-ack-banner">
@@ -371,7 +371,7 @@ onUnmounted(() => clearTimeout(searchTimer));
           @click="refreshAll"
         >
           <span class="logs-action-btn__icon">
-            <SvgIcon :name="'fa-sync-alt'" :size="18" :class-name="loading ? 'logs-action-btn__icon-spin' : ''" />
+            <SvgIcon :name="'hand-sync-alt'" :size="18" :class-name="loading ? 'logs-action-btn__icon-spin' : ''" />
           </span>
         </button>
         <button
@@ -381,7 +381,7 @@ onUnmounted(() => clearTimeout(searchTimer));
           aria-label="重置"
           @click="resetFilters"
         >
-          <span class="logs-action-btn__icon"><SvgIcon name="fa-undo-alt" :size="18" /></span>
+          <span class="logs-action-btn__icon"><SvgIcon name="hand-undo-alt" :size="18" /></span>
         </button>
         <button
           type="button"
@@ -393,7 +393,7 @@ onUnmounted(() => clearTimeout(searchTimer));
         >
           <span class="logs-action-btn__icon">
             <SvgIcon
-              :name="cleaningKeepToday ? 'fa-sync-alt' : 'fa-eraser'"
+              :name="cleaningKeepToday ? 'hand-sync-alt' : 'hand-eraser'"
               :size="18"
               :class-name="cleaningKeepToday ? 'logs-action-btn__icon-spin' : ''"
             />
@@ -409,7 +409,7 @@ onUnmounted(() => clearTimeout(searchTimer));
         >
           <span class="logs-action-btn__icon">
             <SvgIcon
-              :name="cleaningAll ? 'fa-sync-alt' : 'fa-trash-alt'"
+              :name="cleaningAll ? 'hand-sync-alt' : 'hand-trash-alt'"
               :size="18"
               :class-name="cleaningAll ? 'logs-action-btn__icon-spin' : ''"
             />

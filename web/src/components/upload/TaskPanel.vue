@@ -4,7 +4,7 @@
       <div class="panel-title">任务面板</div>
       <div class="panel-head-actions">
         <AppIconButton
-          icon="settings"
+          icon="hand-settings"
           label="设置"
           variant="ghost"
           size="sm"
@@ -26,10 +26,7 @@
           </svg>
         </button>
         <button class="head-icon" type="button" title="关闭" aria-label="关闭" @click="closeUploadTaskPanel">
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M3.5 3.5L12.5 12.5"></path>
-            <path d="M12.5 3.5L3.5 12.5"></path>
-          </svg>
+          <SvgIcon name="xmark" :size="14" />
         </button>
         <div class="panel-settings-wrap">
           <UploadTaskSettingsPanel
@@ -138,7 +135,7 @@
             >
               <div class="task-row-main">
                 <div class="file-cell">
-                  <span v-if="row.isFolder" class="folder-task-chip"><SvgIcon name="folder" :size="20" /></span>
+                  <span v-if="row.isFolder" class="folder-task-chip"><SvgIcon name="badge-folder" :size="20" /></span>
                   <DriverIcon
                     v-else
                     class="driver-chip"
@@ -922,7 +919,7 @@ const navCategories = computed(() => [
   {
     key: "upload" as const,
     label: "上传列表",
-    icon: "upload",
+    icon: "badge-upload",
     count: countByState("upload", "active"),
     states: [
       { key: "active", label: "进行中", count: countByState("upload", "active"), active: uploadStateFilter.value === "active", onClick: () => { uploadStateFilter.value = "active"; } },
@@ -933,7 +930,7 @@ const navCategories = computed(() => [
   {
     key: "relay" as const,
     label: "跨盘下载",
-    icon: "relay",
+    icon: "hand-relay",
     count: countByState("relay", "active"),
     states: [
       { key: "active", label: "进行中", count: countByState("relay", "active"), active: relayStateFilter.value === "active", onClick: () => { relayStateFilter.value = "active"; } },
@@ -943,7 +940,7 @@ const navCategories = computed(() => [
   {
     key: "offline" as const,
     label: "离线任务",
-    icon: "cloud",
+    icon: "hand-cloud",
     count: countByState("offline", "active"),
     states: [
       { key: "active", label: "进行中", count: countByState("offline", "active"), active: offlineStateFilter.value === "active", onClick: () => { offlineStateFilter.value = "active"; } },

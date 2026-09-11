@@ -11,7 +11,7 @@ import {
 import { confirm } from "@/composables/useConfirm";
 import { toast } from "@/composables/useToast";
 import AppButton from "@/components/base/AppButton.vue";
-import CloudToolCard from "@/components/admin/CloudToolCard.vue";
+import ToolCard from "@/components/admin/ToolCard.vue";
 import ProxyWorkspace, { type ProxyField, type ProxyWorkspaceItem } from "@/components/admin/ProxyWorkspace.vue";
 import QuarkTVBindModal from "@/components/admin/QuarkTVBindModal.vue";
 
@@ -312,7 +312,7 @@ async function saveSettings() {
 
 <template>
   <div v-show="matches('夸克 STRM 接管')">
-    <CloudToolCard
+    <ToolCard
       :enabled="qtvStatus.enabled"
       name="夸克 STRM 接管"
       driver="夸克网盘 · TV 版 302 直链"
@@ -350,14 +350,14 @@ async function saveSettings() {
           账号绑定
         </AppButton>
       </template>
-    </CloudToolCard>
+    </ToolCard>
 
     <ProxyWorkspace
       v-model="qtvForm"
       :open="qtvWorkspaceOpen"
       title="夸克 STRM 接管 · 账号绑定"
       caption="已绑定账号"
-      icon="☁️"
+      icon="hand-cloud"
       :subtitle="selectedBinding ? `TV 账号：${selectedBinding.tv_nickname || '未知'} · 会员：${displayMembership(selectedBinding)}` : ''"
       :items="workspaceItems"
       :selected-id="qtvSelectedID"

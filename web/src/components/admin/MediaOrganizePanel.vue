@@ -78,6 +78,7 @@ import { toast } from "@/composables/useToast";
 import { useAccountsStore } from "@/stores/accounts";
 import "@/styles/admin-shared.css";
 import "@/styles/admin-table.css";
+import SvgIcon from "@/components/icons/SvgIcon.vue";
 
 const accountsStore = useAccountsStore();
 const { accounts } = storeToRefs(accountsStore);
@@ -903,8 +904,8 @@ defineExpose({
 <template>
   <div class="organize-panel">
     <AdminStatsGrid v-if="!hideStats">
-      <StatCard icon="📋" :value="tasks.length" label="任务数量" tone="blue" />
-      <StatCard icon="▶️" :value="runningCount" label="执行中" tone="purple">
+      <StatCard icon="hand-list" :value="tasks.length" label="任务数量" tone="blue" />
+      <StatCard icon="hand-play" :value="runningCount" label="执行中" tone="purple">
         <template #actions>
           <AppIconButton
             label="刷新"
@@ -920,7 +921,7 @@ defineExpose({
 
     <AdminEmptyState
       v-if="listReady && !refreshing && !tasks.length"
-      icon="📁"
+      icon="hand-folder"
       title="还没有整理任务"
       description="添加整理任务后，可以预览整理目标，并在确认无误后手动执行。"
     >
@@ -1017,7 +1018,7 @@ defineExpose({
           <span>整理日志</span>
           <small v-if="logTaskName">（{{ logTaskName }}）</small>
         </div>
-        <button type="button" class="organize-log-panel__close" title="关闭日志" @click="closeLogPanel">×</button>
+        <button type="button" class="organize-log-panel__close" title="关闭日志" aria-label="关闭日志" @click="closeLogPanel"><SvgIcon name="xmark" :size="14" /></button>
       </header>
       <div ref="logBodyRef" class="organize-log-panel__body">
         <div v-if="!logs.length" class="organize-log-panel__empty">等待任务输出…</div>
@@ -1119,7 +1120,7 @@ defineExpose({
 
       <div class="organize-plan-content">
         <div v-if="planLoading" class="organize-plan-loading">
-        <BusySpinner variant="notch" :size="42" color="var(--brand)" />
+        <BusySpinner variant="notch" :size="40" color="var(--brand)" />
         <div class="organize-plan-loading__title">
           {{ isAIRecognizing ? aiProgressTitle : "正在扫描并生成计划…" }}
         </div>
@@ -1206,7 +1207,7 @@ defineExpose({
         <template v-if="preview.activeTab.value === 'plan'">
           <AdminEmptyState
             v-if="!preview.groups.value.length"
-            icon="📋"
+            icon="hand-list"
             title="当前没有可执行的计划"
             description="点击「重新生成」让程序扫描目录并生成新的计划"
           />
@@ -1230,8 +1231,8 @@ defineExpose({
                     @keydown.enter="commitPlanActionEdit(group.dirAction!)"
                     @keydown.esc="cancelPlanActionEdit"
                   />
-                  <button type="button" class="plan-row-btn plan-row-btn--ok" :disabled="planEditingSaving" @click.stop="commitPlanActionEdit(group.dirAction!)"><i class="fas fa-check" aria-hidden="true" /></button>
-                  <button type="button" class="plan-row-btn plan-row-btn--cancel" @click.stop="cancelPlanActionEdit"><i class="fas fa-xmark" aria-hidden="true" /></button>
+                  <button type="button" class="plan-row-btn plan-row-btn--ok" :disabled="planEditingSaving" @click.stop="commitPlanActionEdit(group.dirAction!)"><SvgIcon name="check" size="1em" /></button>
+                  <button type="button" class="plan-row-btn plan-row-btn--cancel" @click.stop="cancelPlanActionEdit"><SvgIcon name="xmark" size="1em" /></button>
                 </div>
                 <div v-else class="organize-plan-group-title-wrap">
                   <span v-if="group.hasDirInfo" class="organize-plan-group-title" :title="`${group.titleOld} → ${group.titleNew}`">
@@ -1262,15 +1263,15 @@ defineExpose({
                       rel="noopener noreferrer"
                       title="在 TMDB 核对作品"
                       @click.stop
-                    ><i class="fas fa-arrow-up-right-from-square" aria-hidden="true" /></a>
+                    ><SvgIcon name="arrow-up-right-from-square" size="1em" /></a>
                     <button
                       type="button"
                       class="plan-row-btn"
                       title="手动匹配 TMDB（纠正识别）"
                       @click.stop="openMatchGroup(group)"
-                    ><i class="fas fa-magnifying-glass" aria-hidden="true" /></button>
-                    <button v-if="group.dirAction" type="button" class="plan-row-btn" title="编辑作品目录名" @click.stop="startPlanActionEdit(group.dirAction)"><i class="fas fa-pen" aria-hidden="true" /></button>
-                    <button type="button" class="plan-row-btn plan-row-btn--danger" title="从计划中移除整组" @click.stop="removePlanGroup(group)"><i class="fas fa-trash" aria-hidden="true" /></button>
+                    ><SvgIcon name="magnifying-glass" size="1em" /></button>
+                    <button v-if="group.dirAction" type="button" class="plan-row-btn" title="编辑作品目录名" @click.stop="startPlanActionEdit(group.dirAction)"><SvgIcon name="pen" size="1em" /></button>
+                    <button type="button" class="plan-row-btn plan-row-btn--danger" title="从计划中移除整组" @click.stop="removePlanGroup(group)"><SvgIcon name="trash" size="1em" /></button>
                   </span>
                 </span>
               </div>
@@ -1316,8 +1317,8 @@ defineExpose({
                             @keydown.enter="commitPlanActionEdit(row.action!)"
                             @keydown.esc="cancelPlanActionEdit"
                           />
-                          <button type="button" class="plan-row-btn plan-row-btn--ok" :disabled="planEditingSaving" @click="commitPlanActionEdit(row.action!)"><i class="fas fa-check" aria-hidden="true" /></button>
-                          <button type="button" class="plan-row-btn plan-row-btn--cancel" @click="cancelPlanActionEdit"><i class="fas fa-xmark" aria-hidden="true" /></button>
+                          <button type="button" class="plan-row-btn plan-row-btn--ok" :disabled="planEditingSaving" @click="commitPlanActionEdit(row.action!)"><SvgIcon name="check" size="1em" /></button>
+                          <button type="button" class="plan-row-btn plan-row-btn--cancel" @click="cancelPlanActionEdit"><SvgIcon name="xmark" size="1em" /></button>
                         </div>
                       </div>
                     </template>
@@ -1346,8 +1347,8 @@ defineExpose({
                         </div>
                       </div>
                       <span class="organize-plan-row-controls">
-                        <button type="button" class="plan-row-btn" title="编辑目标名" @click="startPlanActionEdit(row.action!)"><i class="fas fa-pen" aria-hidden="true" /></button>
-                        <button type="button" class="plan-row-btn plan-row-btn--danger" title="从计划中移除" @click="removePlanAction(row.action!)"><i class="fas fa-trash" aria-hidden="true" /></button>
+                        <button type="button" class="plan-row-btn" title="编辑目标名" @click="startPlanActionEdit(row.action!)"><SvgIcon name="pen" size="1em" /></button>
+                        <button type="button" class="plan-row-btn plan-row-btn--danger" title="从计划中移除" @click="removePlanAction(row.action!)"><SvgIcon name="trash" size="1em" /></button>
                       </span>
                     </template>
                   </div>
@@ -1508,7 +1509,7 @@ defineExpose({
 .organize-log-panel {
   margin-top: 14px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   overflow: hidden;
   background: #0f172a;
 }
@@ -1543,7 +1544,7 @@ defineExpose({
   width: 28px;
   height: 28px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: #94a3b8;
   font-size: 18px;
@@ -1579,7 +1580,7 @@ defineExpose({
 
 .organize-log-panel__body::-webkit-scrollbar-thumb {
   background: rgba(148, 163, 184, 0.35);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .organize-log-panel__empty {
@@ -1662,7 +1663,7 @@ defineExpose({
 .organize-mode-badge {
   display: inline-flex;
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   font-size: 11px;
   font-weight: 600;
   background: var(--surface-sunken);
@@ -1799,7 +1800,7 @@ defineExpose({
 
 .organize-plan-metric {
   padding: 4px 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-sunken);
   color: var(--text-muted);
   font-size: 12px;
@@ -1822,7 +1823,7 @@ defineExpose({
 .organize-ai-countdown__track {
   height: 6px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-sunken);
 }
 
@@ -1887,7 +1888,7 @@ defineExpose({
 .organize-plan-tab-count {
   font-size: 11px;
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-sunken);
   color: var(--text-muted);
 }
@@ -1934,7 +1935,7 @@ defineExpose({
   gap: 12px;
   padding: 10px 12px;
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--surface-sunken);
 }
 
@@ -2006,7 +2007,7 @@ defineExpose({
   gap: 10px;
   padding: 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--surface-sunken);
   cursor: pointer;
   text-align: left;
@@ -2021,7 +2022,7 @@ defineExpose({
   width: 52px;
   height: 74px;
   flex: none;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
   background: color-mix(in srgb, var(--brand) 12%, var(--surface));
   display: flex;
@@ -2219,7 +2220,7 @@ defineExpose({
   color: var(--brand);
   background: color-mix(in srgb, var(--brand) 10%, var(--surface));
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .organize-plan-group-ai {
@@ -2228,7 +2229,7 @@ defineExpose({
   background: color-mix(in srgb, #d5a72b 15%, var(--surface));
   padding: 2px 8px;
   border: 1px solid color-mix(in srgb, #d5a72b 32%, transparent);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .organize-plan-group-classification {
@@ -2237,7 +2238,7 @@ defineExpose({
   background: color-mix(in srgb, var(--success) 11%, var(--surface));
   padding: 2px 8px;
   border: 1px solid color-mix(in srgb, var(--success) 28%, transparent);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .organize-plan-group-classification--degraded {
@@ -2251,7 +2252,7 @@ defineExpose({
   color: var(--warning);
   background: color-mix(in srgb, var(--warning) 12%, var(--surface));
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .organize-plan-group-count {
@@ -2268,7 +2269,7 @@ defineExpose({
   display: flex;
   align-items: center;
   padding: 9px 6px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 
 .organize-plan-row:hover {
@@ -2291,7 +2292,7 @@ defineExpose({
   font-size: 11px;
   font-weight: 600;
   padding: 2px 7px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--brand) 10%, var(--surface));
   color: var(--brand);
 }
@@ -2373,7 +2374,7 @@ defineExpose({
   font-size: 12px;
   font-weight: 400;
   padding: 7px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   white-space: normal;
   word-break: break-all;
 }
@@ -2419,7 +2420,7 @@ defineExpose({
   justify-content: center;
   background: var(--surface);
   border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   color: var(--text-muted);
   cursor: pointer;
   font-size: 11px;
@@ -2468,7 +2469,7 @@ defineExpose({
   min-width: 200px;
   padding: 5px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   font-size: 13px;
   background: var(--surface);
   color: var(--text);
@@ -2497,7 +2498,7 @@ defineExpose({
   font-weight: 600;
   color: #fff;
   background: var(--warning);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 1px 9px;
 }
 

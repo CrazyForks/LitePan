@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue";
 import "@/styles/settings-panel.css";
+import SvgIcon from "@/components/icons/SvgIcon.vue";
 
 defineProps<{
   title: string;
@@ -48,7 +49,7 @@ function updatePosition() {
     @mouseenter="show"
     @mouseleave="hide"
   >
-    <i class="fas fa-question-circle settings-help__icon" aria-hidden="true" />
+    <SvgIcon name="question-circle" size="1em" class="settings-help__icon" />
     <Teleport to="body">
       <div
         v-show="visible"

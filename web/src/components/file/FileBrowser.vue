@@ -986,7 +986,7 @@ homeFooterStatus.onOpenTaskPanel(openTaskPanel);
 
     <div v-else-if="showBrowserFrame" class="browser__frame" :class="{ 'browser__frame--grid': view === 'grid' }">
       <div v-if="refreshing" class="browser__refresh-overlay">
-        <BusySpinner variant="notch" :size="28" color="var(--brand)" />
+        <BusySpinner variant="notch" :size="26" color="var(--brand)" />
         <span class="browser__refresh-text">正在强制刷新…</span>
       </div>
       <FileToolbar

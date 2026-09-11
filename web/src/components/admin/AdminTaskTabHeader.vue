@@ -37,7 +37,7 @@ const emit = defineEmits<{
     >
       <template v-if="stat.refresh" #actions>
         <AppIconButton
-          icon="fa-sync-alt"
+          icon="hand-sync-alt"
           label="刷新"
           variant="secondary"
           size="xs"

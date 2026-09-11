@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SvgIcon from "@/components/icons/SvgIcon.vue";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import AppModal from "@/components/base/AppModal.vue";
 import { ackRetentionScopeWarn } from "@/api/cacheRetention";
@@ -286,10 +287,7 @@ onUnmounted(() => {
       title="通知"
       @click.stop="toggleOpen"
     >
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7" />
-        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-      </svg>
+      <SvgIcon name="hand-bell-line" :size="18" />
       <span v-if="badgeText" :class="isMain ? 'badge' : 'notify-badge'">{{ badgeText }}</span>
     </button>
 
@@ -456,7 +454,7 @@ onUnmounted(() => {
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: #ef4444;
   color: #fff;
   font-size: 10px;

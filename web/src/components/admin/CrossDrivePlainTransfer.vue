@@ -8,6 +8,7 @@ import { getApiErrorMessage } from "@/api/client";
 import { toast } from "@/composables/useToast";
 import FolderPickerModal from "@/components/file/FolderPickerModal.vue";
 import "@/styles/cross-transfer.css";
+import SvgIcon from "@/components/icons/SvgIcon.vue";
 
 /**
  * 跨盘普传：不探测指纹、不尝试秒传，直接「源盘下载到服务器临时目录 → 上传目标盘」。
@@ -262,7 +263,7 @@ async function startTransfer() {
       <!-- 顶部：源 / 目标 名称条 -->
       <div class="transfer-topbar">
         <div class="tb-side tb-src">
-          <span class="logo-chip s26"><i class="fas fa-hdd"></i></span>
+          <span class="logo-chip s26"><SvgIcon name="hdd" size="1em" /></span>
           <div class="tb-title">
             <span>{{ src?.accName || "源网盘" }}</span>
             <small>下载到服务器临时目录</small>
@@ -271,7 +272,7 @@ async function startTransfer() {
         </div>
         <div class="tb-mid">
           <button type="button" class="tb-swap" title="交换来源与目标" @click="swapSides">
-            <i class="fas fa-right-left"></i>
+            <SvgIcon name="right-left" size="1em" />
           </button>
           <span class="tb-swap-hint">可交换</span>
         </div>
@@ -281,7 +282,7 @@ async function startTransfer() {
             <span>{{ dst?.accName || "目标网盘" }}</span>
             <small>由服务器中转上传</small>
           </div>
-          <span class="logo-chip s26"><i class="fas fa-upload"></i></span>
+          <span class="logo-chip s26"><SvgIcon name="upload" size="1em" /></span>
         </div>
       </div>
 
@@ -290,18 +291,18 @@ async function startTransfer() {
         <div class="panel src">
           <div class="panel-pick">
             <button class="combo" @click="openPicker('src')">
-              <span class="c-ic"><i class="fas fa-hdd"></i></span>
+              <span class="c-ic"><SvgIcon name="hdd" size="1em" /></span>
               <span class="c-text" :class="{ placeholder: !src }">{{ srcLabel }}</span>
-              <span class="c-caret"><i class="fas fa-chevron-down"></i></span>
+              <span class="c-caret"><SvgIcon name="chevron-down" size="1em" /></span>
             </button>
           </div>
           <div class="tree tree-host">
             <div v-if="src?.sources?.length" class="src-selected">
               <div v-for="(item, i) in src.sources" :key="i" class="src-item">
-                <i class="fas fa-folder"></i>
+                <SvgIcon name="folder" size="1em" />
                 <span class="src-item-path" :title="item.path">{{ item.path || "/" }}</span>
               </div>
-              <p class="src-tip"><i class="fas fa-circle-info"></i> 将保留目录结构、包含全部子目录与文件</p>
+              <p class="src-tip"><SvgIcon name="circle-info" size="1em" /> 将保留目录结构、包含全部子目录与文件</p>
             </div>
             <div v-else class="tree-empty">选择源目录后，将按目录整树传输，不探测秒传指纹</div>
           </div>
@@ -310,15 +311,15 @@ async function startTransfer() {
         <div class="panel dst">
           <div class="panel-pick">
             <button class="combo" @click="openPicker('dst')">
-              <span class="c-ic"><i class="fas fa-hdd"></i></span>
+              <span class="c-ic"><SvgIcon name="hdd" size="1em" /></span>
               <span class="c-text" :class="{ placeholder: !dst }">{{ dstLabel }}</span>
-              <span class="c-caret"><i class="fas fa-chevron-down"></i></span>
+              <span class="c-caret"><SvgIcon name="chevron-down" size="1em" /></span>
             </button>
           </div>
           <div class="tree">
             <div v-if="dst" class="src-selected">
-              <div class="src-item"><i class="fas fa-folder"></i><span class="src-item-path" :title="dst.path">{{ dst.path || "/" }}</span></div>
-              <p class="src-tip"><i class="fas fa-circle-info"></i> 上传前会自动创建缺失的目标子目录</p>
+              <div class="src-item"><SvgIcon name="folder" size="1em" /><span class="src-item-path" :title="dst.path">{{ dst.path || "/" }}</span></div>
+              <p class="src-tip"><SvgIcon name="circle-info" size="1em" /> 上传前会自动创建缺失的目标子目录</p>
             </div>
             <div v-else class="tree-empty">选择目标目录，媒体上传后在此目录下按来源结构存放</div>
           </div>
@@ -351,7 +352,7 @@ async function startTransfer() {
           </template>
           <template v-else>
             <a class="plain-task-link" :href="tasksHref" target="_blank" rel="noopener">
-              查看传输任务 <i class="fas fa-arrow-up-right-from-square"></i>
+              查看传输任务 <SvgIcon name="arrow-up-right-from-square" size="1em" />
             </a>
           </template>
         </div>
@@ -365,7 +366,7 @@ async function startTransfer() {
             :aria-expanded="settingsOpen"
             @click="toggleSettings"
           >
-            <i class="fas fa-sliders"></i>
+            <SvgIcon name="sliders" size="1em" />
           </button>
           <div v-if="settingsOpen" class="ct-settings-dropdown ct-settings-pop">
             <div class="ct-settings-panel">
@@ -397,7 +398,7 @@ async function startTransfer() {
           </div>
         </div>
         <button class="ct-btn ct-btn-go" :disabled="!canStart" @click="startTransfer">
-          <i :class="running ? 'fas fa-spinner fa-spin' : 'fas fa-cloud-arrow-down'"></i>
+          <SvgIcon :name="running ? 'spinner' : 'cloud-arrow-down'" size="1em" :class="{ spin: running }" />
           {{ running ? "正在入队…" : "开始传输" }}
         </button>
       </div>
@@ -452,7 +453,7 @@ async function startTransfer() {
 /* 已选目录展示（树区域内） */
 .src-selected { display: flex; flex-direction: column; gap: 4px; }
 .src-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; font-size: 13px; }
-.src-item > i { color: #f59e0b; }
+.src-item > i, .src-item > .lp-svg-icon { color: #f59e0b; }
 .src-item-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .src-tip { margin-top: 8px; font-size: 12px; color: var(--text-secondary); display: flex; gap: 6px; align-items: center; }
 
@@ -485,7 +486,7 @@ async function startTransfer() {
 .plain-progress-track.is-loading > i { width: 35%; animation: plain-progress-loading 1.1s ease-in-out infinite; }
 .plain-task-link { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--brand) 20%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--brand) 6%, transparent); color: var(--brand); text-decoration: none; transition: background .15s, border-color .15s; }
 .plain-task-link:hover { border-color: color-mix(in srgb, var(--brand) 36%, transparent); background: color-mix(in srgb, var(--brand) 10%, transparent); }
-.plain-task-link i { font-size: 10px; }
+.plain-task-link i, .plain-task-link .lp-svg-icon { font-size: 10px; }
 @keyframes plain-progress-loading { from { transform: translateX(-110%); } to { transform: translateX(310%); } }
 
 @media (max-width: 720px) {

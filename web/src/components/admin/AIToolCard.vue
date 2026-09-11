@@ -9,7 +9,7 @@ import {
 } from "@/api/cloudTools";
 import { toast } from "@/composables/useToast";
 import AppButton from "@/components/base/AppButton.vue";
-import CloudToolCard from "@/components/admin/CloudToolCard.vue";
+import ToolCard from "@/components/admin/ToolCard.vue";
 import ProxyWorkspace, { type ProxyField, type ProxyWorkspaceItem } from "@/components/admin/ProxyWorkspace.vue";
 
 const props = withDefaults(defineProps<{ searchQuery?: string }>(), { searchQuery: "" });
@@ -252,7 +252,7 @@ function configCompleteFromInstances(items: AIOrganizeInstanceUpdate[]) {
 
 <template>
   <div v-show="matches('AI 辅助识别')">
-    <CloudToolCard
+    <ToolCard
       :enabled="aiConfig.enabled"
       name="AI 辅助识别"
       driver="目录整理 · 低置信作品补判"
@@ -289,14 +289,14 @@ function configCompleteFromInstances(items: AIOrganizeInstanceUpdate[]) {
           模型设置
         </AppButton>
       </template>
-    </CloudToolCard>
+    </ToolCard>
 
     <ProxyWorkspace
       v-model="aiDraft"
       :open="aiOpen"
       title="AI 辅助识别 · 模型设置"
       caption="AI 模型配置"
-      icon="🤖"
+      icon="robot"
       :subtitle="selectedInstance ? (selectedInstance.default ? '默认激活 · 运行时使用' : '备用配置') : ''"
       :items="workspaceItems"
       :selected-id="aiSelectedID"

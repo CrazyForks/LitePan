@@ -682,7 +682,7 @@ watch(
           class="folder-selector__search"
           title="仅筛选当前目录下已加载的文件夹"
         >
-          <span class="folder-selector__search-icon"><SvgIcon name="search" :size="15" /></span>
+          <span class="folder-selector__search-icon"><SvgIcon name="badge-search" :size="16" /></span>
           <input
             v-model.trim="filterKeyword"
             type="search"
@@ -708,7 +708,7 @@ watch(
         aria-label="关闭"
         @click="emit('cancel')"
       >
-        ×
+        <SvgIcon name="xmark" :size="14" />
       </button>
     </div>
 
@@ -725,7 +725,7 @@ watch(
                 aria-label="上一页"
                 @click="prevFavoritePage"
               >
-                <SvgIcon name="chevron-down" :size="12" class-name="folder-selector__favorites-page-icon folder-selector__favorites-page-icon--prev" />
+                <SvgIcon name="hand-chevron-down" :size="12" class-name="folder-selector__favorites-page-icon folder-selector__favorites-page-icon--prev" />
               </button>
               <span class="folder-selector__favorites-page-status">
                 {{ favoritePage + 1 }} / {{ favoritePageCount }}
@@ -737,7 +737,7 @@ watch(
                 aria-label="下一页"
                 @click="nextFavoritePage"
               >
-                <SvgIcon name="chevron-down" :size="12" class-name="folder-selector__favorites-page-icon folder-selector__favorites-page-icon--next" />
+                <SvgIcon name="hand-chevron-down" :size="12" class-name="folder-selector__favorites-page-icon folder-selector__favorites-page-icon--next" />
               </button>
             </span>
           </div>
@@ -753,7 +753,7 @@ watch(
               @click="void openFavorite(item)"
             >
               <span class="folder-selector__favorite-card-icon">
-                <SvgIcon name="folder" :size="16" />
+                <SvgIcon name="badge-folder" :size="16" />
               </span>
               <span class="folder-selector__favorite-card-body">
                 <span class="folder-selector__favorite-name">{{ item.name }}</span>
@@ -804,7 +804,7 @@ watch(
 
             <div class="folder-table-body">
               <div v-if="showCreateInput" class="folder-create-row">
-                <span class="folder-name-icon"><SvgIcon name="folder" :size="18" /></span>
+                <span class="folder-name-icon"><SvgIcon name="badge-folder" :size="18" /></span>
                 <input
                   ref="createInputRef"
                   v-model.trim="newFolderName"
@@ -873,7 +873,7 @@ watch(
                     />
                   </label>
                   <div class="folder-name-cell">
-                    <span class="folder-name-icon"><SvgIcon name="folder" :size="18" /></span>
+                    <span class="folder-name-icon"><SvgIcon name="badge-folder" :size="18" /></span>
                     <span class="folder-name-text" :title="dir.name">{{ dir.name }}</span>
                   </div>
                   <span class="folder-time-cell">
@@ -927,7 +927,7 @@ watch(
 
           <div class="folder-table-body">
             <div v-if="showCreateInput" class="folder-create-row">
-              <span class="folder-name-icon"><SvgIcon name="folder" :size="18" /></span>
+              <span class="folder-name-icon"><SvgIcon name="badge-folder" :size="18" /></span>
               <input
                 ref="createInputRef"
                 v-model.trim="newFolderName"
@@ -996,7 +996,7 @@ watch(
                   />
                 </label>
                 <div class="folder-name-cell">
-                  <span class="folder-name-icon"><SvgIcon name="folder" :size="18" /></span>
+                  <span class="folder-name-icon"><SvgIcon name="badge-folder" :size="18" /></span>
                   <span class="folder-name-text" :title="dir.name">{{ dir.name }}</span>
                 </div>
                 <span class="folder-time-cell">
@@ -1018,7 +1018,7 @@ watch(
         :disabled="loading || creating"
         @click="startCreateFolder"
       >
-        <span class="folder-selector__btn-icon"><SvgIcon name="folder-plus" :size="16" /></span>
+        <span class="folder-selector__btn-icon"><SvgIcon name="hand-folder-plus" :size="16" /></span>
         新建文件夹
       </button>
       <button
@@ -1029,7 +1029,7 @@ watch(
         @click="refresh"
       >
         <span class="folder-selector__btn-icon" :class="{ spin: loading }">
-          <SvgIcon name="refresh" :size="16" />
+          <SvgIcon name="badge-refresh" :size="16" />
         </span>
         刷新
       </button>

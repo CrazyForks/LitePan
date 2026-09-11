@@ -286,7 +286,7 @@ function onResolve(folder: {
               :name="accountDriverLabel(a)"
               :color="a.driver_card_color"
               :logo="a.driver_card_logo"
-              :size="28"
+              :size="26"
             />
             <span class="folder-picker__account-body">
               <span class="folder-picker__account-name">{{ a.name }}</span>
@@ -366,7 +366,7 @@ function onResolve(folder: {
   height: 20px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-muted);
   display: inline-grid;

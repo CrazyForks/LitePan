@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import SvgIcon from "@/components/icons/SvgIcon.vue";
+import IconChip from "@/components/base/IconChip.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -13,7 +12,6 @@ const props = withDefaults(
   { tone: "blue", sideActions: false },
 );
 
-const isSvgIcon = computed(() => /^[a-z0-9-]+$/i.test(props.icon));
 </script>
 
 <template>
@@ -24,10 +22,7 @@ const isSvgIcon = computed(() => /^[a-z0-9-]+$/i.test(props.icon));
       'stat-card--side-actions': sideActions && Boolean($slots.actions),
     }"
   >
-    <div class="stat-card__icon" :class="`stat-card__icon--${tone}`">
-      <SvgIcon v-if="isSvgIcon" :name="icon" :size="20" />
-      <span v-else>{{ icon }}</span>
-    </div>
+    <IconChip :icon="icon" :tone="tone" />
     <div class="stat-card__main">
       <div class="stat-card__value">{{ value }}</div>
       <div class="stat-card__footer">
@@ -49,30 +44,6 @@ const isSvgIcon = computed(() => /^[a-z0-9-]+$/i.test(props.icon));
   border-radius: var(--radius-xl);
   background: var(--surface);
   box-shadow: var(--shadow-card);
-}
-.stat-card__icon {
-  width: 44px;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 14px;
-  color: #fff;
-  font-size: 18px;
-  flex-shrink: 0;
-  overflow: hidden;
-}
-.stat-card__icon--blue {
-  background: linear-gradient(135deg, var(--brand-start), var(--brand-end));
-}
-.stat-card__icon--red {
-  background: linear-gradient(135deg, #ef4444, #f97316);
-}
-.stat-card__icon--purple {
-  background: linear-gradient(135deg, #7c3aed, #4f46e5);
-}
-.stat-card__icon--amber {
-  background: linear-gradient(135deg, #f59e0b, #f97316);
 }
 .stat-card__main {
   min-width: 0;

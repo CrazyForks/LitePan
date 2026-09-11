@@ -535,12 +535,12 @@ defineExpose({
     </div>
 
     <AdminStatsGrid v-if="!hideStats">
-      <StatCard icon="fa-folder" :value="statsTotal" label="配置目录" tone="blue" />
-      <StatCard icon="fa-play" :value="statsRunning" label="已启用" tone="purple" />
-      <StatCard icon="fa-pause" :value="statsPaused" label="已暂停" tone="amber">
+      <StatCard icon="hand-folder" :value="statsTotal" label="配置目录" tone="blue" />
+      <StatCard icon="hand-play" :value="statsRunning" label="已启用" tone="purple" />
+      <StatCard icon="hand-pause" :value="statsPaused" label="已暂停" tone="amber">
         <template #actions>
           <AppIconButton
-            icon="fa-sync-alt"
+            icon="hand-sync-alt"
             label="刷新"
             variant="secondary"
             size="xs"
@@ -554,7 +554,7 @@ defineExpose({
 
     <AdminEmptyState
       v-if="listReady && !refreshing && !tasks.length"
-      icon="🔥"
+      icon="hand-database"
       title="还没有缓存任务"
       description="添加目录后，系统会定期预热列表缓存，减少浏览时的 API 请求。"
     >

@@ -64,7 +64,7 @@ defineProps<{
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: rgba(244, 248, 255, 0.92);
   border: 1px solid rgba(76, 116, 223, 0.18);
   color: var(--brand, #4c74df);

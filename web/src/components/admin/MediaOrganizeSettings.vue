@@ -684,7 +684,7 @@ defineExpose(
   padding: 6px 10px;
   background: color-mix(in srgb, var(--brand) 10%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--brand) 25%, var(--border));
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   font-size: 13px;
   line-height: 1.2;
   color: var(--brand);
@@ -705,7 +705,7 @@ defineExpose(
   height: var(--tag-chip-height, 32px);
   min-height: var(--tag-chip-height, 32px);
   border: 1px dashed var(--brand);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: color-mix(in srgb, var(--brand) 6%, transparent);
 }
 

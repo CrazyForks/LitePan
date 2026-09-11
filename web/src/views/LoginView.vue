@@ -429,7 +429,7 @@ onMounted(async () => {
   color: #111827;
   background: rgba(248, 250, 252, 0.95);
   border: 1px solid #d8dee8;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   outline: none;
   box-sizing: border-box;
   transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
@@ -504,7 +504,7 @@ onMounted(async () => {
   height: 52px;
   font-size: 15px;
   font-weight: 600;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   border: none;
   color: #fff;
   letter-spacing: 0.5px;

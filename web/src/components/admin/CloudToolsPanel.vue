@@ -14,10 +14,11 @@ import AIToolCard from "@/components/admin/AIToolCard.vue";
 import ClassificationToolCard from "@/components/admin/ClassificationToolCard.vue";
 import CleanupToolCard from "@/components/admin/CleanupToolCard.vue";
 import CoverExtractToolCard from "@/components/admin/CoverExtractToolCard.vue";
-import CloudToolCard from "@/components/admin/CloudToolCard.vue";
+import ToolCard from "@/components/admin/ToolCard.vue";
 import LocalUploadToolCard from "@/components/admin/LocalUploadToolCard.vue";
 import ProxyToolsPanel from "@/components/admin/ProxyToolsPanel.vue";
 import QuarkTVToolCard from "@/components/admin/QuarkTVToolCard.vue";
+import SvgIcon from "@/components/icons/SvgIcon.vue";
 
 const props = withDefaults(defineProps<{ searchOpen?: boolean }>(), { searchOpen: false });
 const emit = defineEmits<{ "update:searchOpen": [boolean] }>();
@@ -117,12 +118,12 @@ async function clearCache() {
       <div class="tool-search__mask" @click="closeSearch" />
       <div class="tool-search__box">
         <input ref="searchInputRef" v-model="searchQuery" placeholder="搜索工具，如：飞牛、Emby、反代" @keydown.esc="closeSearch" />
-        <button type="button" @click="closeSearch">×</button>
+        <button type="button" aria-label="关闭搜索" @click="closeSearch"><SvgIcon name="xmark" :size="14" /></button>
       </div>
     </div>
     <div class="cloud-tools__grid">
       <ProxyToolsPanel :search-query="searchQuery" />
-      <CloudToolCard
+      <ToolCard
         v-show="matches('115 STRM 增强')"
         :enabled="status.enabled"
         name="115 STRM 增强"
@@ -161,7 +162,7 @@ async function clearCache() {
             {{ clearing ? "清空中…" : "清空映射" }}
           </AppButton>
         </template>
-      </CloudToolCard>
+      </ToolCard>
 
       <QuarkTVToolCard :search-query="searchQuery" />
 

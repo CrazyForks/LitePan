@@ -270,16 +270,16 @@ const enabledCount = computed(() => tasks.value.filter((t) => isTaskEnabled(t)).
 const errorCount = computed(() => tasks.value.filter((t) => t.status === "error").length);
 
 const strmTabStats = computed<AdminTaskTabStat[]>(() => [
-  { icon: "fa-list", value: tasks.value.length, label: "任务总数", tone: "blue" },
-  { icon: "fa-play", value: enabledCount.value, label: "已启用", tone: "purple" },
-  { icon: "fa-pause", value: errorCount.value, label: "异常", tone: "amber" },
+  { icon: "hand-list", value: tasks.value.length, label: "任务总数", tone: "blue" },
+  { icon: "hand-play", value: enabledCount.value, label: "已启用", tone: "purple" },
+  { icon: "hand-pause", value: errorCount.value, label: "异常", tone: "amber" },
 ]);
 
 const organizeTabStats = computed<AdminTaskTabStat[]>(() => [
-  { icon: "fa-list", value: organizePanelRef.value?.taskCount ?? 0, label: "任务数量", tone: "blue" },
-  { icon: "fa-play", value: organizePanelRef.value?.runningCount ?? 0, label: "执行中", tone: "purple" },
+  { icon: "hand-list", value: organizePanelRef.value?.taskCount ?? 0, label: "任务数量", tone: "blue" },
+  { icon: "hand-play", value: organizePanelRef.value?.runningCount ?? 0, label: "执行中", tone: "purple" },
   {
-    icon: "fa-pause",
+    icon: "hand-pause",
     value: organizePanelRef.value?.errorTaskCount ?? 0,
     label: "有失败",
     tone: "amber",
@@ -1104,7 +1104,7 @@ watch(activeTab, (tab) => {
 
       <AdminEmptyState
         v-if="strmListReady && !refreshing && !tasks.length"
-        icon="🎬"
+        icon="hand-play"
         title="还没有 STRM 任务"
         description="添加任务后，系统会定期扫描网盘目录并生成本地 .strm 播放链接文件。"
       >
@@ -1378,7 +1378,7 @@ watch(activeTab, (tab) => {
           </div>
 
           <div v-else-if="strmRepairPhase === 'loading'" class="strm-repair-loading">
-            <BusySpinner variant="notch" :size="42" color="var(--brand)" />
+            <BusySpinner variant="notch" :size="40" color="var(--brand)" />
             <div class="strm-repair-loading__title">{{ strmRepairLoadingTitle }}</div>
           </div>
 
@@ -1675,7 +1675,7 @@ watch(activeTab, (tab) => {
   min-width: 112px;
   padding: 6px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   box-shadow: var(--shadow-pop);
   opacity: 0;
@@ -1697,7 +1697,7 @@ watch(activeTab, (tab) => {
   width: 100%;
   box-sizing: border-box;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -1900,7 +1900,7 @@ watch(activeTab, (tab) => {
   flex-shrink: 0;
   width: 28px;
   height: 16px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--border-soft);
   transition: background 0.2s ease;
 }
@@ -2046,7 +2046,7 @@ watch(activeTab, (tab) => {
 .strm-branch-column__badge {
   min-width: 22px;
   padding: 0 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--brand) 12%, var(--surface));
   color: var(--brand);
   font-size: 12px;
@@ -2066,7 +2066,7 @@ watch(activeTab, (tab) => {
 
 .strm-branch-column__meta {
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--brand) 10%, transparent);
   color: var(--brand);
   font-weight: 500;

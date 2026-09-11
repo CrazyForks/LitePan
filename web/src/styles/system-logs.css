@@ -52,7 +52,7 @@
   align-items: center;
   justify-content: center;
   border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--surface);
   color: var(--text-secondary);
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
@@ -106,16 +106,7 @@
 }
 
 .logs-action-btn__icon-spin {
-  animation: logs-toolbar-spin 0.9s linear infinite;
-}
-
-@keyframes logs-toolbar-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  animation: spin 0.9s linear infinite;
 }
 
 :root[data-skin="brutal"] .logs-filter .select__trigger,
