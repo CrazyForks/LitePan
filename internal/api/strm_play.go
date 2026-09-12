@@ -17,6 +17,7 @@ func (h *Handler) strmPlay(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, domain.Errf(domain.CodeNotImplement))
 		return
 	}
+	h.logSTRMPlayEntry(r, "strm_play")
 	accountID, err := parsePathInt64(r, "account_id")
 	if err != nil {
 		writeErr(w, err)
@@ -28,6 +29,7 @@ func (h *Handler) strmPlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.authorizeSTRMPlay(r); err != nil {
+		h.logSTRMPlayDenied(r, "strm_play", err)
 		writeErr(w, err)
 		return
 	}
@@ -45,6 +47,7 @@ func (h *Handler) strmPathPlay(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, domain.Errf(domain.CodeNotImplement))
 		return
 	}
+	h.logSTRMPlayEntry(r, "strm_path_play")
 	accountID, err := parsePathInt64(r, "account_id")
 	if err != nil {
 		writeErr(w, err)
@@ -61,6 +64,7 @@ func (h *Handler) strmPathPlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.authorizeSTRMPlay(r); err != nil {
+		h.logSTRMPlayDenied(r, "strm_path_play", err)
 		writeErr(w, err)
 		return
 	}
@@ -76,6 +80,31 @@ func (h *Handler) strmPathPlay(w http.ResponseWriter, r *http.Request) {
 	if err := h.playback.ServeHTTP(w, r, playback.Request{AccountID: accountID, FileID: item.ID}, playback.Intent{FileName: fileName}); err != nil {
 		writeErr(w, err)
 	}
+}
+
+// logSTRMPlayEntry 在 debug 级别记录 STRM 播放入口请求。
+// 这是「客户端回来取流」的必经入口，且日志打在 token/签名校验之前，
+// 因此能把「压根没来取」和「来了但被鉴权挡掉」分开——排查直读类播放问题时这是关键分界。
+// 只记 token/签名的有无，不记它们的值（凭据不能进日志）。
+func (h *Handler) logSTRMPlayEntry(r *http.Request, route string) {
+	if h.log == nil {
+		return
+	}
+	h.log.Debug("STRM 播放入口",
+		"route", route,
+		"user_agent", r.UserAgent(),
+		"has_token", strings.TrimSpace(chi.URLParam(r, "token")) != "",
+		"has_signature", strings.TrimSpace(chi.URLParam(r, "signature")) != "",
+		"signature_required", h.strm != nil && h.strm.SignatureEnabled(),
+	)
+}
+
+// logSTRMPlayDenied 记录鉴权失败的取流请求，用来区分「回来了但被拒」和「压根没回来」。
+func (h *Handler) logSTRMPlayDenied(r *http.Request, route string, err error) {
+	if h.log == nil {
+		return
+	}
+	h.log.Debug("STRM 播放鉴权失败", "route", route, "user_agent", r.UserAgent(), "error", err)
 }
 
 func (h *Handler) authorizeSTRMPlay(r *http.Request) error {

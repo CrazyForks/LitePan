@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"litepan/internal/domain"
@@ -476,6 +477,10 @@ func (s *Service) serveSTRM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.servePlaybackHTTP(w, r, playback.Request{AccountID: accountID, FileID: fileID}, playback.Intent{FileName: ref.FileName}); err != nil {
+		if isClientDisconnect(r.Context(), err) {
+			s.log.Debug("飞牛反代 STRM 播放被客户端中断", "error", err)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -503,11 +508,34 @@ func (s *Service) resolveLitePanSTRM(ctx context.Context, value string) (int64, 
 	return accountID, fileID, true, err
 }
 
-func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg Config, fullPath string) {
+// logPlaybackRequest 在 debug 级别记录播放请求来源。
+// 排查「某个播放器放不了」时靠它对比：不同客户端发到哪个 route、带什么 UA。
+func (s *Service) logPlaybackRequest(r *http.Request, route string) {
 	s.log.Debug("飞牛反代播放请求来源",
+		"route", route,
 		"client", proxybase.EmbyClientName(r),
 		"user_agent", r.UserAgent(),
 	)
+}
+
+// logPlaybackOutcome 在 debug 级别记录播放请求最终的处理结果。
+// 只看「请求来源」无法区分「解析成功交给播放器」和「静默透传给上游」，两者在日志里长得一样。
+// 只记目标 host，不记完整地址：STRM 地址里可能带 token/签名。
+func (s *Service) logPlaybackOutcome(action, mediaSourceID, itemID, playURL string) {
+	host := ""
+	if u, err := url.Parse(playURL); err == nil {
+		host = u.Host
+	}
+	s.log.Debug("飞牛反代播放请求处理结果",
+		"action", action,
+		"media_source_id", mediaSourceID,
+		"item_id", itemID,
+		"target_host", host,
+	)
+}
+
+func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg Config, fullPath string) {
+	s.logPlaybackRequest(r, "stream")
 	mediaSourceID := queryValue(r, "mediasourceid")
 	itemID := ""
 	if m := videoStreamPathRE.FindStringSubmatch(fullPath); len(m) > 1 {
@@ -530,12 +558,15 @@ func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg
 	}
 	if playURL != "" {
 		if proxybase.MatchesClientKeywords(r, cfg.DirectSTRMClients) {
+			s.logPlaybackOutcome("strm_descriptor", mediaSourceID, itemID, playURL)
 			proxybase.ServeSTRMDescriptor(w, r, playURL)
 			return
 		}
 		if s.serveLitePanPlayback(w, r, playURL) {
+			s.logPlaybackOutcome("litepan_proxy", mediaSourceID, itemID, playURL)
 			return
 		}
+		s.logPlaybackOutcome("redirect", mediaSourceID, itemID, playURL)
 		w.Header().Set("Location", playURL)
 		w.WriteHeader(http.StatusFound)
 		return
@@ -543,6 +574,7 @@ func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg
 	if strmPath != "" {
 		s.log.Warn("飞牛反代无法读取 strm，透传上游", "path", strmPath, "media_source_id", mediaSourceID, "item_id", itemID)
 	}
+	s.logPlaybackOutcome("passthrough", mediaSourceID, itemID, "")
 	s.proxyRequest(w, r, cfg, fullPath)
 }
 
@@ -550,27 +582,69 @@ func (s *Service) serveLitePanPlayback(w http.ResponseWriter, r *http.Request, p
 	if !isLitePanSTRMURL(playURL) {
 		return false
 	}
+	// 播放地址里带 token/签名，属凭据；这几条日志的典型用途又恰恰是「出问题把日志发出来」，
+	// 所以日志里只保留能定位问题的 host 和文件名。
+	logHost, logFile := playURLSummary(playURL)
 	accountID, fileID, ok, err := s.resolveLitePanSTRM(r.Context(), playURL)
 	if !ok {
-		s.log.Warn("飞牛反代无法解析 LitePan STRM", "url", playURL)
+		s.log.Warn("飞牛反代无法解析 LitePan STRM", "host", logHost, "file", logFile)
 		http.Error(w, "invalid litepan strm url", http.StatusBadGateway)
 		return true
 	}
 	if err != nil {
-		s.log.Warn("飞牛反代解析路径型 LitePan STRM 失败", "url", playURL, "error", err)
+		s.log.Warn("飞牛反代解析路径型 LitePan STRM 失败", "host", logHost, "file", logFile, "error", err)
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return true
 	}
 	name := strmFileNameFromPlayURL(playURL)
-	if err := s.servePlaybackHTTP(w, r, playback.Request{
+	err = s.servePlaybackHTTP(w, r, playback.Request{
 		AccountID: accountID,
 		FileID:    fileID,
-	}, playback.Intent{FileName: name}); err != nil {
-		s.log.Warn("飞牛反代解析 LitePan STRM 失败", "url", playURL, "error", err)
-		http.Error(w, err.Error(), http.StatusBadGateway)
+	}, playback.Intent{FileName: name})
+	if err == nil {
 		return true
 	}
+	// 播放器拖动进度/切流/放弃播放时会直接断开连接，这类错误不是反代故障，
+	// 报成 WARN「解析失败」会把真正的问题淹没在噪音里。
+	if isClientDisconnect(r.Context(), err) {
+		s.log.Debug("飞牛反代播放被客户端中断", "host", logHost, "file", logFile, "error", err)
+		return true
+	}
+	s.log.Warn("飞牛反代解析 LitePan STRM 失败", "host", logHost, "file", logFile, "error", err)
+	http.Error(w, err.Error(), http.StatusBadGateway)
 	return true
+}
+
+// playURLSummary 把播放地址收敛成「host + 文件名」，只用于日志。
+// 完整地址含播放 token 与签名，不能落盘。
+func playURLSummary(playURL string) (host, file string) {
+	file = strmFileNameFromPlayURL(playURL)
+	u, err := url.Parse(strings.TrimSpace(playURL))
+	if err != nil {
+		return "", file
+	}
+	host = u.Host
+	if file == "" {
+		if idx := strings.LastIndex(u.Path, "/"); idx >= 0 {
+			file = u.Path[idx+1:]
+		}
+	}
+	return host, file
+}
+
+// isClientDisconnect 判断错误是否来自客户端主动断开（ECONNRESET / EPIPE / 请求上下文取消）。
+func isClientDisconnect(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return true
+	}
+	return errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, io.ErrClosedPipe) ||
+		errors.Is(err, context.Canceled)
 }
 
 func (s *Service) resolvePlayURL(mediaSourceID, itemID string, cfg Config) (playURL, strmPath string) {
@@ -594,6 +668,8 @@ func (s *Service) redirectItemFile(w http.ResponseWriter, r *http.Request, cfg C
 	if m := itemFilePathRE.FindStringSubmatch(fullPath); len(m) > 1 {
 		itemID = m[1]
 	}
+	// 部分播放器改走 /Items/{id}/Download 取流，这条路径不走直读名单，必须单独留痕。
+	s.logPlaybackRequest(r, "item_file")
 	playURL, strmPath := s.resolvePlayURL("", itemID, cfg)
 	if playURL == "" && itemID != "" {
 		// PlaybackInfo 未走过时，按 Item 详情 Path 读 strm
@@ -607,8 +683,10 @@ func (s *Service) redirectItemFile(w http.ResponseWriter, r *http.Request, cfg C
 	}
 	if playURL != "" {
 		if s.serveLitePanPlayback(w, r, playURL) {
+			s.logPlaybackOutcome("litepan_proxy", "", itemID, playURL)
 			return
 		}
+		s.logPlaybackOutcome("redirect", "", itemID, playURL)
 		w.Header().Set("Location", playURL)
 		w.WriteHeader(http.StatusFound)
 		return
@@ -616,6 +694,7 @@ func (s *Service) redirectItemFile(w http.ResponseWriter, r *http.Request, cfg C
 	if strmPath != "" {
 		s.log.Warn("飞牛反代 Item 文件请求无法读 strm，透传上游", "item_id", itemID, "path", strmPath)
 	}
+	s.logPlaybackOutcome("passthrough", "", itemID, "")
 	s.proxyRequest(w, r, cfg, fullPath)
 }
 
@@ -677,6 +756,7 @@ func (s *Service) fetchItemPath(r *http.Request, cfg Config, itemID string) stri
 
 // modifyPlaybackInfo 缓存 STRM 媒体源、补齐播放字段，并强制从 /emby 路径取得 JSON。
 func (s *Service) modifyPlaybackInfo(w http.ResponseWriter, r *http.Request, cfg Config, fullPath string) {
+	s.logPlaybackRequest(r, "playback_info")
 	upstreamPath := withEmbyAPIPrefix(fullPath)
 	itemID := ""
 	if m := playbackInfoPathRE.FindStringSubmatch(fullPath); len(m) > 1 {

@@ -83,7 +83,7 @@ const embyFields: ProxyField[] = [
     label: "STRM 直读客户端",
     placeholder: "默认留空",
     helpTitle: "STRM 直读客户端说明",
-    helpBody: "一般无需填写。播放器无法通过反代播放 STRM 时，可让它自己读取 STRM 中的地址。<br>填写客户端关键字，多个用分号隔开，例如 <code>XXXPlay;YYYPlayer</code>；未匹配的播放器仍由 LitePan 代取地址。<br>外网播放时，请确保 STRM 的 URL 基础地址可从外网访问。",
+    helpBody: "一般无需填写。播放器无法通过反代播放 STRM 时，可让它自己读取 STRM 中的地址。<br>填写客户端关键字，多个用分号隔开，例如 <code>XXXPlay;YYYPlayer</code>；未匹配的播放器仍由 LitePan 代取地址，填错了反而播不了。<br>外网播放时，请确保 STRM 的 URL 基础地址可从外网访问。",
   },
 ];
 
@@ -343,7 +343,7 @@ const fnosFields: ProxyField[] = [
     label: "STRM 直读客户端",
     placeholder: "Infuse;XXXPlay",
     helpTitle: "STRM 直读客户端说明",
-    helpBody: "部分播放器（如 Infuse）不支持由 LitePan 代取下载地址，需要自己读取 STRM 中的地址。<br>填写这些播放器的客户端关键字，多个用分号隔开，例如 <code>Infuse;XXXPlay</code>；未匹配的播放器仍由 LitePan 代取地址。<br>外网播放时，请确保 STRM 的 URL 基础地址可从外网访问。",
+    helpBody: "目前已知只有 Infuse 不支持由 LitePan 代取下载地址，需要自己读取 STRM 中的地址。<br>填写这些播放器的客户端关键字，多个用分号隔开，例如 <code>Infuse;XXXPlay</code>；未匹配的播放器仍由 LitePan 代取地址，填错了反而播不了。<br>外网播放时，请确保 STRM 的 URL 基础地址可从外网访问。",
   },
 ];
 
