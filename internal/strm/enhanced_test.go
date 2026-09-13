@@ -273,6 +273,49 @@ func TestEnhancedScanGeneratesStrmAndCachesDirPaths(t *testing.T) {
 	}
 }
 
+func TestEnhancedScanRespectsExcludedDirectoryKeywords(t *testing.T) {
+	root := t.TempDir()
+	drv := &enhancedTestDriver{
+		entries: []driver.FullListEntry{
+			{FileID: "f-keep", ParentID: "d-keep", Name: "保留.mkv"},
+			{FileID: "f-skip", ParentID: "d-skip", Name: "忽略.mkv"},
+		},
+		dirPaths: map[string]string{
+			"d-keep": "/库/电影",
+			"d-skip": "/库/临时目录/子目录",
+		},
+	}
+	files := file.NewService(driverexec.New(enhancedTestProvider{drv: drv}, nil), nil, nil, nil, nil, nil)
+	task := &domain.StrmTask{
+		ID:                 8,
+		AccountID:          1,
+		ParentID:           "lib",
+		Path:               "/库",
+		ScanMode:           domain.StrmScanModeIncrementalUpdate,
+		Extensions:         "mkv",
+		ExcludeDirKeywords: "临时",
+		OutputFolder:       "任务",
+	}
+	result, err := ScanTask(context.Background(), task, ScanDeps{
+		Files:    files,
+		DirCache: newMemDirCache(),
+		StrmDir:  root,
+		Settings: ScanSettings{Tool115TreeEnabled: true},
+	}, domain.StrmRunModeAuto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.GeneratedCount != 1 {
+		t.Fatalf("应只生成未命中排除目录的 STRM: %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(root, "任务", "电影", "保留.strm")); err != nil {
+		t.Fatalf("未排除目录中的 STRM 未生成: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "任务", "临时目录", "子目录", "忽略.strm")); !os.IsNotExist(err) {
+		t.Fatalf("命中任意一级排除目录后不应生成 STRM: %v", err)
+	}
+}
+
 func TestEnhancedScanRespectsTaskRootPrefix(t *testing.T) {
 	root := t.TempDir()
 	drv := &enhancedTestDriver{
@@ -445,6 +488,13 @@ func TestEnhancedScanSkipsPruneWhenEmptyList(t *testing.T) {
 	_ = cache.UpsertBatch(context.Background(), []domain.StrmDirCacheEntry{
 		{AccountID: 1, DirID: "d-x", DirPath: "/库/电影/某目录", LastSeenAt: time.Now()},
 	})
+	local := filepath.Join(root, "任务", "电影", "某影片.strm")
+	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(local, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	task := &domain.StrmTask{
 		ID:           6,
 		AccountID:    1,
@@ -454,7 +504,7 @@ func TestEnhancedScanSkipsPruneWhenEmptyList(t *testing.T) {
 		Extensions:   "mkv",
 		OutputFolder: "任务",
 	}
-	_, err := ScanTask(context.Background(), task, ScanDeps{
+	result, err := ScanTask(context.Background(), task, ScanDeps{
 		Files:    files,
 		DirCache: cache,
 		StrmDir:  root,
@@ -465,6 +515,12 @@ func TestEnhancedScanSkipsPruneWhenEmptyList(t *testing.T) {
 	}
 	if _, ok, _ := cache.Get(context.Background(), 1, "d-x"); !ok {
 		t.Fatal("远端清单为空时不应清理映射（防止 API 异常误清）")
+	}
+	if !result.Protected || result.RemovedCount != 0 {
+		t.Fatalf("远端清单为空时应阻止本地清理: %+v", result)
+	}
+	if _, err := os.Stat(local); err != nil {
+		t.Fatalf("远端空清单不得删除现有 STRM: %v", err)
 	}
 }
 
@@ -483,6 +539,9 @@ func TestEnhancedScanSkipsMissingDirectoryAndBlocksCleanup(t *testing.T) {
 	}
 	files := file.NewService(driverexec.New(enhancedTestProvider{drv: drv}, nil), nil, nil, nil, nil, nil)
 	cache := newMemDirCache()
+	_ = cache.UpsertBatch(context.Background(), []domain.StrmDirCacheEntry{
+		{AccountID: 1, DirID: "d-missing", DirPath: "/旧库/已失效", LastSeenAt: time.Now()},
+	})
 	stalePath := filepath.Join(root, "任务", "旧目录", "旧影片.strm")
 	if err := os.MkdirAll(filepath.Dir(stalePath), 0o755); err != nil {
 		t.Fatalf("创建旧目录失败: %v", err)
@@ -549,7 +608,7 @@ func TestEnhancedScanPersistsResolvedMappingsBeforeFatalError(t *testing.T) {
 	}
 	files := file.NewService(driverexec.New(enhancedTestProvider{drv: drv}, nil), nil, nil, nil, nil, nil)
 	cache := newMemDirCache()
-	_, _, err := resolveDirPaths(context.Background(), ScanDeps{Files: files, DirCache: cache}, 1, drv.entries)
+	_, _, err := resolveDirPaths(context.Background(), ScanDeps{Files: files, DirCache: cache}, 1, describeEnhancedDirs(drv.entries))
 	if err == nil {
 		t.Fatal("非目录不存在错误应中断本次扫描")
 	}
