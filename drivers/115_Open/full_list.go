@@ -85,7 +85,7 @@ func collectFullListPages(ctx context.Context, fetch fullListPageFetcher) ([]dri
 }
 
 // ResolveDirPath 通过 /open/folder/get_info 拼出目录完整路径。
-// 注意：接口返回的 paths 只是“父目录链”（不含目录自身），必须再追加目录自身名称。
+// 返回的 paths 只是“父目录链”，不含目录自身，需要再追加目录名。
 func (d *Driver) ResolveDirPath(ctx context.Context, dirID string) (string, error) {
 	id := strings.TrimSpace(dirID)
 	if id == "" || id == "0" || id == d.rootID() {

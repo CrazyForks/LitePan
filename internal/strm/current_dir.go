@@ -139,7 +139,7 @@ func (s *Service) GenerateCurrentDirectory(ctx context.Context, accountID int64,
 		seen[relSlash] = struct{}{}
 		if _, migrateErr := MigrateLegacyISOStrmFile(work.root, work.outputFolder, item.relDirs, item.fileName, item.fileID, work.scanCfg.ISOFilenameEnabled); migrateErr != nil {
 			if s.log != nil {
-				s.log.Warn("strm current dir legacy ISO migration failed", "path", relSlash, "err", migrateErr)
+				s.log.Warn("STRM 当前目录旧版 ISO 迁移失败", "path", relSlash, "err", migrateErr)
 			}
 			continue
 		}
@@ -154,7 +154,7 @@ func (s *Service) GenerateCurrentDirectory(ctx context.Context, accountID int64,
 		created, updated, writeErr := writeStrmFile(work.root, relPath, url, work.task.ScanMode)
 		if writeErr != nil {
 			if s.log != nil {
-				s.log.Warn("strm current dir write failed", "path", relSlash, "err", writeErr)
+				s.log.Warn("STRM 当前目录写入失败", "path", relSlash, "err", writeErr)
 			}
 			continue
 		}

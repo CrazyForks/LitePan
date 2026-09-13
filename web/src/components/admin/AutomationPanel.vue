@@ -585,7 +585,6 @@ import {
 } from 'vue'
 import AppButton from '@/components/base/AppButton.vue'
 import AppBadge from '@/components/base/AppBadge.vue'
-import AppModal from '@/components/base/AppModal.vue'
 import AppPlainModal from '@/components/base/AppPlainModal.vue'
 import AppSelect from '@/components/base/AppSelect.vue'
 import FolderPickerModal from '@/components/file/FolderPickerModal.vue'
@@ -662,6 +661,22 @@ const dragGhost = reactive({
   y: 0,
   width: 0
 })
+
+const normalizeEmbyActionParams = params => ({
+  emby_id: String(params.emby_id || defaultEmbyConfig()?.id || ''),
+  mode: params.mode === 'library' ? 'library' : 'global',
+  library_id: String(params.library_id || ''),
+  library_name: String(params.library_name || '')
+})
+
+const canApplyEmbyAction = action => Boolean(findEmbyConfig(action?.params?.emby_id)?.emby_url) && (
+  action?.params?.mode !== 'library' || Boolean(String(action?.params?.library_id || '').trim())
+)
+
+const embyScopedActionDefinition = {
+  normalize: normalizeEmbyActionParams,
+  canApply: canApplyEmbyAction
+}
 let validationTimer = null
 let validationSeq = 0
 let rulesRefreshTimer = null
@@ -750,15 +765,7 @@ const ACTION_DEFINITIONS = {
     optionLabel: 'Emby全局刷库',
     icon: 'server',
     desc: '通知 Emby 扫描全部媒体库，或只扫描指定媒体库',
-    normalize: params => ({
-      emby_id: String(params.emby_id || defaultEmbyConfig()?.id || ''),
-      mode: params.mode === 'library' ? 'library' : 'global',
-      library_id: String(params.library_id || ''),
-      library_name: String(params.library_name || '')
-    }),
-    canApply: action => Boolean(findEmbyConfig(action?.params?.emby_id)?.emby_url) && (
-      action?.params?.mode !== 'library' || Boolean(String(action?.params?.library_id || '').trim())
-    ),
+    ...embyScopedActionDefinition,
     nodeTitle: action => `Emby ${embyRefreshModeLabel(action)}「${embyRefreshTargetLabel(action)}」`,
     previewTitle: action => `Emby${embyRefreshModeLabel(action)}[${embyRefreshTargetLabel(action)}]`
   },
@@ -768,15 +775,7 @@ const ACTION_DEFINITIONS = {
     optionLabel: 'Emby 补全媒体信息',
     icon: 'circle-info',
     desc: '检查媒体流信息缺失的条目，并通知 Emby 重新提取',
-    normalize: params => ({
-      emby_id: String(params.emby_id || defaultEmbyConfig()?.id || ''),
-      mode: params.mode === 'library' ? 'library' : 'global',
-      library_id: String(params.library_id || ''),
-      library_name: String(params.library_name || '')
-    }),
-    canApply: action => Boolean(findEmbyConfig(action?.params?.emby_id)?.emby_url) && (
-      action?.params?.mode !== 'library' || Boolean(String(action?.params?.library_id || '').trim())
-    ),
+    ...embyScopedActionDefinition,
     nodeTitle: action => `Emby 补全媒体信息「${embyRefreshTargetLabel(action)}」`,
     previewTitle: action => `Emby补全媒体信息[${embyRefreshTargetLabel(action)}]`
   }
@@ -1202,6 +1201,15 @@ const chooseTrigger = (type) => {
   openConfig('trigger')
 }
 
+const insertActionAt = (action, index) => {
+  if (index === 0 && !form.actions[0]) {
+    if (form.actions.length === 0) form.actions.push(action)
+    else form.actions[0] = action
+    return
+  }
+  form.actions.splice(Math.max(1, index), 0, action)
+}
+
 const chooseAction = (type) => {
   const action = createAction(type)
   pickerVisible.value = false
@@ -1211,15 +1219,7 @@ const chooseAction = (type) => {
     openConfig('action', -1)
     return
   }
-  if (actionInsertIndex.value === 0 && !form.actions[0]) {
-    if (form.actions.length === 0) {
-      form.actions.push(action)
-    } else {
-      form.actions[0] = action
-    }
-  } else {
-    form.actions.splice(Math.max(1, actionInsertIndex.value), 0, action)
-  }
+  insertActionAt(action, actionInsertIndex.value)
   normalizeActionConditions()
   scheduleValidation()
 }
@@ -1390,15 +1390,7 @@ const applyConfig = () => {
   if (pendingConfigAction.value) {
     const action = pendingConfigAction.value
     const insertIndex = pendingConfigInsertIndex.value
-    if (insertIndex === 0 && !form.actions[0]) {
-      if (form.actions.length === 0) {
-        form.actions.push(action)
-      } else {
-        form.actions[0] = action
-      }
-    } else {
-      form.actions.splice(Math.max(1, insertIndex), 0, action)
-    }
+    insertActionAt(action, insertIndex)
     normalizeActionConditions()
   }
   scheduleValidation()
@@ -1723,9 +1715,6 @@ const embyRefreshTargetLabel = (action) => {
 }
 
 const findTaskLabel = (type, id) => {
-  if (type === 'emby_refresh') {
-    return embyDisplayLabel({ params: { emby_id: id } })
-  }
   if (!id) return '未选择'
   if (type === 'organize') {
     return options.value.organize_tasks.find(task => String(task.id) === String(id))?.name || '整理任务'
@@ -2022,7 +2011,6 @@ defineExpose({
   --muted: var(--text-muted);
   --muted2: color-mix(in srgb, var(--text-muted) 72%, transparent);
   --blue: var(--brand);
-  --brand-grad: var(--brand-gradient);
   --ok: var(--success);
   --warn: var(--warning);
   --bad: var(--danger);
@@ -3147,12 +3135,6 @@ defineExpose({
   --blue: var(--brand);
   --ok: var(--success);
   --warn: var(--warning);
-}
-
-.modal-group {
-  padding: 2px 20px 8px;
-  color: var(--muted2);
-  font-size: 12px;
 }
 
 .pick-list {

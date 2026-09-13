@@ -174,27 +174,39 @@ func (s *storeLayer) stats() (used int64, blocks int64, err error) {
 }
 
 func (s *storeLayer) expireBefore(cutoff int64) error {
-	rows, err := s.db.Query(`
+	metas, err := s.collectMetas(`
 SELECT account_id,file_id,block_idx,byte_len,created_at,accessed_at
 FROM blocks WHERE created_at < ?`, cutoff)
 	if err != nil {
 		return err
+	}
+	return s.deleteMetas(metas)
+}
+
+func (s *storeLayer) collectMetas(query string, args ...any) ([]blockMeta, error) {
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
 	}
 	var metas []blockMeta
 	for rows.Next() {
 		var m blockMeta
 		if err := rows.Scan(&m.AccountID, &m.FileID, &m.BlockIdx, &m.ByteLen, &m.CreatedAt, &m.AccessedAt); err != nil {
 			_ = rows.Close()
-			return err
+			return nil, err
 		}
 		metas = append(metas, m)
 	}
 	if err := rows.Close(); err != nil {
-		return err
+		return nil, err
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return nil, err
 	}
+	return metas, nil
+}
+
+func (s *storeLayer) deleteMetas(metas []blockMeta) error {
 	for _, m := range metas {
 		if err := s.deleteBlock(m); err != nil {
 			return err
@@ -238,62 +250,28 @@ ORDER BY b.accessed_at ASC LIMIT 1`)
 }
 
 func (s *storeLayer) invalidateFile(accountID int64, fileID string) error {
-	rows, err := s.db.Query(`
+	metas, err := s.collectMetas(`
 SELECT account_id,file_id,block_idx,byte_len,created_at,accessed_at
 FROM blocks WHERE account_id=? AND file_id=?`, accountID, fileID)
 	if err != nil {
 		return err
 	}
-	var metas []blockMeta
-	for rows.Next() {
-		var m blockMeta
-		if err := rows.Scan(&m.AccountID, &m.FileID, &m.BlockIdx, &m.ByteLen, &m.CreatedAt, &m.AccessedAt); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		metas = append(metas, m)
-	}
-	if err := rows.Close(); err != nil {
+	if err := s.deleteMetas(metas); err != nil {
 		return err
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, m := range metas {
-		if err := s.deleteBlock(m); err != nil {
-			return err
-		}
 	}
 	_ = os.RemoveAll(filepath.Join(s.blocks, strconv.FormatInt(accountID, 10), fileDir(fileID)))
 	return nil
 }
 
 func (s *storeLayer) invalidateAccount(accountID int64) error {
-	rows, err := s.db.Query(`
+	metas, err := s.collectMetas(`
 SELECT account_id,file_id,block_idx,byte_len,created_at,accessed_at
 FROM blocks WHERE account_id=?`, accountID)
 	if err != nil {
 		return err
 	}
-	var metas []blockMeta
-	for rows.Next() {
-		var m blockMeta
-		if err := rows.Scan(&m.AccountID, &m.FileID, &m.BlockIdx, &m.ByteLen, &m.CreatedAt, &m.AccessedAt); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		metas = append(metas, m)
-	}
-	if err := rows.Close(); err != nil {
+	if err := s.deleteMetas(metas); err != nil {
 		return err
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, m := range metas {
-		if err := s.deleteBlock(m); err != nil {
-			return err
-		}
 	}
 	_ = os.RemoveAll(filepath.Join(s.blocks, strconv.FormatInt(accountID, 10)))
 	return nil

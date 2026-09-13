@@ -31,13 +31,17 @@ const embySelectedID = ref("");
 const embySaving = ref(false);
 const embyTesting = ref(false);
 const embyRefreshing = ref(false);
-const embyDraft = reactive<Record<string, string>>({
-  name: "",
-  emby_url: "",
-  api_key: "",
-  proxy_port: "",
-  direct_strm_clients: "",
-});
+function emptyEmbyDraft(name = "") {
+  return {
+    name,
+    emby_url: "",
+    api_key: "",
+    proxy_port: "",
+    direct_strm_clients: "",
+  };
+}
+
+const embyDraft = reactive<Record<string, string>>(emptyEmbyDraft());
 
 const embyRunning = computed(() => embyConfigs.value.filter((item) => item.running).length);
 const selectedEmby = computed(() => embyConfigs.value.find((item) => item.id === embySelectedID.value) || null);
@@ -94,13 +98,7 @@ function openEmby() {
     loadEmbyDraft(embyConfigs.value[0]);
   } else {
     embySelectedID.value = "";
-    Object.assign(embyDraft, {
-      name: "",
-      emby_url: "",
-      api_key: "",
-      proxy_port: "",
-      direct_strm_clients: "",
-    });
+    Object.assign(embyDraft, emptyEmbyDraft());
   }
 }
 
@@ -123,13 +121,7 @@ function selectEmby(id: string) {
 
 function addEmby() {
   embySelectedID.value = "";
-  Object.assign(embyDraft, {
-    name: embyConfigs.value.length ? `Emby ${embyConfigs.value.length + 1}` : "Emby",
-    emby_url: "",
-    api_key: "",
-    proxy_port: "",
-    direct_strm_clients: "",
-  });
+  Object.assign(embyDraft, emptyEmbyDraft(embyConfigs.value.length ? `Emby ${embyConfigs.value.length + 1}` : "Emby"));
 }
 
 function updatesFromConfigs(configs: EmbyConfig[]): EmbyConfigUpdate[] {
@@ -240,13 +232,7 @@ async function deleteEmby() {
     loadEmbyDraft(embyConfigs.value[0]);
   } else {
     embySelectedID.value = "";
-    Object.assign(embyDraft, {
-      name: "",
-      emby_url: "",
-      api_key: "",
-      proxy_port: "",
-      direct_strm_clients: "",
-    });
+    Object.assign(embyDraft, emptyEmbyDraft());
   }
 }
 

@@ -17,6 +17,7 @@ import (
 	"litepan/internal/playback"
 	"litepan/internal/settings"
 	"litepan/internal/startupwait"
+	"litepan/pkg/safego"
 )
 
 const defaultScanIntervalMinutes = 6 * 60
@@ -284,15 +285,17 @@ func (s *Service) Start(ctx context.Context) {
 		if !s.awaitStartup(ctx) {
 			return
 		}
+		// 兜住单轮崩溃：一轮调度出错只跳过这一轮，不能让整个服务下线。
+		runOnce := func() { safego.Guard(s.log, "strm.schedule", func() { s.scheduleOnce(ctx) }) }
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-		s.scheduleOnce(ctx)
+		runOnce()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				s.scheduleOnce(ctx)
+				runOnce()
 			}
 		}
 	}()
@@ -526,14 +529,14 @@ func (s *Service) ReplaceBaseURL(ctx context.Context, newBaseURL string) (Replac
 
 func (s *Service) PrecheckAccountRepair(ctx context.Context, in AccountRepairPrecheckInput) (AccountRepairPrecheckResult, error) {
 	if s == nil {
-		return AccountRepairPrecheckResult{}, domain.Errorf(domain.CodeInternal, "strm service unavailable")
+		return AccountRepairPrecheckResult{}, domain.Errorf(domain.CodeInternal, "STRM 服务不可用")
 	}
 	return PrecheckAccountRepair(ctx, s.files, s.strmDir, in)
 }
 
 func (s *Service) RepairAccountReferences(ctx context.Context, in AccountRepairInput) (AccountRepairResult, error) {
 	if s == nil {
-		return AccountRepairResult{}, domain.Errorf(domain.CodeInternal, "strm service unavailable")
+		return AccountRepairResult{}, domain.Errorf(domain.CodeInternal, "STRM 服务不可用")
 	}
 	token, err := s.ensureToken(ctx)
 	if err != nil {

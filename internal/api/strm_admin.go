@@ -660,18 +660,10 @@ func toStrmTaskDTO(task *domain.StrmTask, meta strm.TaskListMeta, automationMana
 	if meta.StaleRunning {
 		out.Status = domain.StrmStatusActive
 	}
-	if !meta.StartedAt.IsZero() {
-		out.StartedAt = FormatAPITime(meta.StartedAt)
-	}
-	if !task.LastScan.IsZero() {
-		out.LastScan = FormatAPITime(task.LastScan)
-	}
-	if !task.CreatedAt.IsZero() {
-		out.CreatedAt = FormatAPITime(task.CreatedAt)
-	}
-	if !task.UpdatedAt.IsZero() {
-		out.UpdatedAt = FormatAPITime(task.UpdatedAt)
-	}
+	out.StartedAt = FormatAPITime(meta.StartedAt)
+	out.LastScan = FormatAPITime(task.LastScan)
+	out.CreatedAt = FormatAPITime(task.CreatedAt)
+	out.UpdatedAt = FormatAPITime(task.UpdatedAt)
 	return out
 }
 

@@ -88,7 +88,7 @@ func scanEnhancedTask(
 	}
 	if len(unresolved) == 0 && pathConflict == "" {
 		if derr := pruneDirCache(ctx, deps, task, entries); derr != nil {
-			log.Warn("strm dir cache prune failed", "account_id", task.AccountID, "err", derr.Error())
+			log.Warn("STRM 目录缓存清理失败", "account_id", task.AccountID, "err", derr.Error())
 		}
 	} else if len(unresolved) > 0 {
 		log.Info("115 STRM 增强检测到失效目录，本次跳过映射清理", "task_id", task.ID,
@@ -154,7 +154,7 @@ func scanEnhancedTask(
 		}
 	}
 
-	log.Info("strm enhanced scan", "task_id", task.ID, "task_name", task.Name,
+	log.Info("STRM 增强扫描完成", "task_id", task.ID, "task_name", task.Name,
 		"account_id", task.AccountID, "remote_files", len(entries),
 		"candidates", len(harvest.candidates), "mode", "full-list")
 

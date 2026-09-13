@@ -2,8 +2,7 @@ import { ref } from "vue";
 import { ApiError } from "@/api/client";
 import { fetchUnreadCount } from "@/api/notifications";
 
-// 未读通知数全局单例：以服务端 SSE 推送为主，连接不可用时退回轮询。
-// 组件只读这里的 unreadCount，避免多个铃铛实例各开一条连接、各自轮询。
+// 未读通知数全局单例：以 SSE 推送为主，断线退回轮询，多个铃铛组件共用一份状态。
 const unreadCount = ref(0);
 // 每次收到服务端推送自增，通知面板据此在打开状态下刷新列表。
 const unreadRevision = ref(0);
@@ -17,6 +16,7 @@ const RECONNECT_MS = 10_000;
 
 let source: EventSource | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let pollInterval = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let mountedConsumers = 0;
 let authDenied = false;
@@ -49,7 +49,9 @@ export async function refreshUnread() {
 }
 
 function startPolling(interval: number) {
+  if (pollTimer && pollInterval === interval) return;
   if (pollTimer) clearInterval(pollTimer);
+  pollInterval = interval;
   pollTimer = setInterval(() => void refreshUnread(), interval);
 }
 

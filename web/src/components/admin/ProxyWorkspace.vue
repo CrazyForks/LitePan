@@ -40,7 +40,7 @@ export interface ProxyWorkspaceItem {
   lastError?: string;
 }
 
-const props = withDefaults(
+withDefaults(
   defineProps<{
     open: boolean;
     title: string;

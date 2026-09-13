@@ -185,14 +185,6 @@ func (s *Service) State(r *http.Request) State {
 	return State{Enabled: s.enabled() && len(items) > 0, Items: items}
 }
 
-func (s *Service) Snapshot(r *http.Request) Config {
-	configs := s.Snapshots(r)
-	if len(configs) > 0 {
-		return configs[0]
-	}
-	return Config{}
-}
-
 func (s *Service) Replace(ctx context.Context, enabled bool, inputs []UpdateRequest) (State, error) {
 	if s.settings == nil {
 		return State{}, domain.Errf(domain.CodeNotImplement)
@@ -744,8 +736,7 @@ func (s *Service) handleWithConfig(cfg Config, w http.ResponseWriter, r *http.Re
 		http.Error(w, "Emby proxy is not enabled", http.StatusNotFound)
 		return
 	}
-	// WebSocket 等升级请求（Emby for Kodi「Next Gen」的实时通道）必须走 101 隧道：
-	// 普通转发会剥掉 Upgrade 头且只单向回写响应体，握手必然失败。
+	// WebSocket 等升级请求走 101 隧道，普通转发会剥掉 Upgrade 头、握手必然失败。
 	if proxybase.IsUpgradeRequest(r) {
 		s.proxyUpgrade(w, r, cfg)
 		return
@@ -878,8 +869,7 @@ func (s *Service) serveLitePanPlayback(w http.ResponseWriter, r *http.Request, l
 	return true
 }
 
-// isExpectedClientDisconnect 识别播放器探测、跳转 Range 或重建播放链路时主动取消的旧请求。
-// 这类错误不代表解析或上游故障，不应记为 Warn，也不再尝试补写 500 响应。
+// isExpectedClientDisconnect 识别播放器主动取消的旧请求，这类错误不记为 Warn，也不补写 500。
 func isExpectedClientDisconnect(ctx context.Context, err error) bool {
 	if err == nil {
 		return false

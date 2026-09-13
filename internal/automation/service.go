@@ -110,8 +110,6 @@ type WebhookEvent struct {
 	Event  string `json:"event"`
 	Source string `json:"source"`
 	Path   string `json:"path"`
-	// 兼容外部 webhook 携带的延迟字段，当前不参与执行逻辑。
-	DelayTime int `json:"delayTime,omitempty"`
 }
 
 type queuedRun struct {
@@ -235,7 +233,7 @@ func (s *Service) CreateRule(ctx context.Context, in RuleInput) (RuleView, error
 	id, err := s.rules.Create(ctx, row)
 	if err != nil {
 		if rollbackErr := rollbackStrm(ctx); rollbackErr != nil {
-			s.log.Warn("automation rollback strm schedule failed", "err", rollbackErr)
+			s.log.Warn("回滚 STRM 调度失败", "err", rollbackErr)
 		}
 		return RuleView{}, err
 	}
@@ -266,7 +264,7 @@ func (s *Service) UpdateRule(ctx context.Context, id int64, in RuleInput) (RuleV
 	}
 	if err := s.rules.Update(ctx, existing); err != nil {
 		if rollbackErr := rollbackStrm(ctx); rollbackErr != nil {
-			s.log.Warn("automation rollback strm schedule failed", "rule_id", id, "err", rollbackErr)
+			s.log.Warn("回滚 STRM 调度失败", "rule_id", id, "err", rollbackErr)
 		}
 		return RuleView{}, err
 	}

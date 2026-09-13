@@ -40,7 +40,7 @@ func (s *Service) runRule(id int64, triggerSource string) {
 
 	rule, err := s.rules.Get(ctx, id)
 	if err != nil {
-		s.log.Warn("automation get rule failed", "rule_id", id, "err", err)
+		s.log.Warn("读取自动化规则失败", "rule_id", id, "err", err)
 		return
 	}
 	actions := decodeActions(rule.Actions)
@@ -53,7 +53,7 @@ func (s *Service) runRule(id int64, triggerSource string) {
 	}
 	runID, err := s.runs.Create(ctx, run)
 	if err != nil {
-		s.log.Warn("automation create run failed", "rule_id", id, "err", err)
+		s.log.Warn("创建自动化运行记录失败", "rule_id", id, "err", err)
 		return
 	}
 	run.ID = runID

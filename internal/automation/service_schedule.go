@@ -56,7 +56,7 @@ func (s *Service) schedulerLoop(ctx context.Context) {
 func (s *Service) scheduleOnce(ctx context.Context) {
 	rules, err := s.rules.List(ctx, false)
 	if err != nil {
-		s.log.Warn("automation scheduler list failed", "err", err)
+		s.log.Warn("读取自动化调度列表失败", "err", err)
 		return
 	}
 	now := time.Now()
@@ -80,14 +80,14 @@ func (s *Service) scheduleOnce(ctx context.Context) {
 			if corrected {
 				rule.NextRunAt = nextRun
 				if err := s.rules.Update(ctx, rule); err != nil {
-					s.log.Warn("automation schedule correct next run failed", "rule_id", rule.ID, "err", err)
+					s.log.Warn("校正下次运行时间失败", "rule_id", rule.ID, "err", err)
 				}
 			}
 			continue
 		}
 		rule.NextRunAt = advanceNextRun(rule.TriggerType, cfg, nextRun)
 		if err := s.rules.Update(ctx, rule); err != nil {
-			s.log.Warn("automation schedule update next run failed", "rule_id", rule.ID, "err", err)
+			s.log.Warn("更新下次运行时间失败", "rule_id", rule.ID, "err", err)
 			continue
 		}
 		s.submitRun(rule.ID, "schedule", true)

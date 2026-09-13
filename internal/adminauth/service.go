@@ -36,7 +36,6 @@ const (
 	KeyIndexStrmAutoDetectEnabled = "index_strm_auto_detect_enabled"
 	KeyAdminTempPasswordHash      = "admin_temp_password_hash"
 	KeyAdminTempPasswordExpiresAt = "admin_temp_password_expires_at"
-	KeyAdminTempPasswordLastReset = "admin_temp_password_last_reset_at"
 	KeyAdminSessionGeneration     = "admin_session_generation"
 )
 
@@ -303,7 +302,6 @@ func (s *Service) ResetPassword(ctx context.Context, r *http.Request) (map[strin
 	expiresAt := now + tempPasswordTTL
 	_ = s.configs.Set(ctx, KeyAdminTempPasswordHash, hash)
 	_ = s.configs.Set(ctx, KeyAdminTempPasswordExpiresAt, strconv.FormatInt(expiresAt, 10))
-	_ = s.configs.Set(ctx, KeyAdminTempPasswordLastReset, strconv.FormatInt(now, 10))
 	s.resetLastAt = now
 	if ip != "" {
 		s.resetIPCooldown.Store(ip, now)
@@ -348,8 +346,7 @@ func (s *Service) EnsureAdminAccess(ctx context.Context, r *http.Request, sess *
 	return nil
 }
 
-// passwordChangeBootstrapRestoreAllowed 只为首次使用默认账号的恢复流程开放最小写接口。
-// 临时密码会话不能借此绕过强制改密，备份列表及其他后台能力也保持锁定。
+// passwordChangeBootstrapRestoreAllowed 只为默认账号恢复流程开放最小写接口，临时密码会话仍不能借此绕过强制改密。
 func passwordChangeBootstrapRestoreAllowed(r *http.Request, reason string) bool {
 	if r == nil || reason != "default_credentials" || r.Method != http.MethodPost {
 		return false
@@ -624,19 +621,16 @@ func (s *Service) sessionTimeout(ctx context.Context) int {
 type tempPasswordState struct {
 	Hash      string
 	ExpiresAt int64
-	LastReset int64
 	Valid     bool
 }
 
 func (s *Service) tempPasswordState(ctx context.Context) tempPasswordState {
 	hash := s.configString(ctx, KeyAdminTempPasswordHash, "")
 	expiresAt := int64(s.configInt(ctx, KeyAdminTempPasswordExpiresAt, 0))
-	lastReset := int64(s.configInt(ctx, KeyAdminTempPasswordLastReset, 0))
 	now := time.Now().Unix()
 	return tempPasswordState{
 		Hash:      hash,
 		ExpiresAt: expiresAt,
-		LastReset: lastReset,
 		Valid:     hash != "" && expiresAt > now,
 	}
 }

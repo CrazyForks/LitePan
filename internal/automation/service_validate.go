@@ -268,7 +268,7 @@ func (s *Service) bindStrmTasksManual(ctx context.Context, actions []RuleAction)
 		task.ScheduleMode = domain.StrmScheduleManual
 		if _, err := s.strm.UpdateTask(ctx, taskID, task); err != nil {
 			if rollbackErr := s.rollbackStrmTasks(ctx, rollbacks); rollbackErr != nil {
-				s.log.Warn("automation rollback strm schedule failed", "err", rollbackErr)
+				s.log.Warn("回滚 STRM 调度失败", "err", rollbackErr)
 			}
 			return nil, err
 		}
