@@ -89,6 +89,19 @@ func TestReplanMatchedGroupRebuildsTVWorkDir(t *testing.T) {
 	if !strings.Contains(plan.Actions[fileIdx].TargetName, "转生贵族的异世界冒险录 (2023) S01E01") {
 		t.Fatalf("文件名未使用手动匹配后的标准名: %q", plan.Actions[fileIdx].TargetName)
 	}
+	var cleanup *moplan.PlanAction
+	for i := range plan.Actions {
+		if plan.Actions[i].Kind == moplan.ActionKindDeleteEmptyDir && plan.Actions[i].SourceID == "show1" {
+			cleanup = &plan.Actions[i]
+			break
+		}
+	}
+	if cleanup == nil {
+		t.Fatalf("手动匹配后应清理搬空的源目录: %+v", plan.Actions)
+	}
+	if len(cleanup.DependsOn) != 1 || cleanup.DependsOn[0] != plan.Actions[fileIdx].ID {
+		t.Fatalf("空目录清理应等待文件移动完成: %+v", cleanup)
+	}
 }
 
 func TestReplanMatchedGroupUsesSelectedTVTypeForBareNumberedFiles(t *testing.T) {

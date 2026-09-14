@@ -57,6 +57,7 @@ func (p *Planner) ReplanMatchedGroup(group ManualMatchGroup, raw map[string]any)
 	if err := p.planGroupWithMatch(key, items, bucketDefaults, &match, false); err != nil {
 		return nil, err
 	}
+	p.planEmptyDirCleanup()
 	return p.finalize(), nil
 }
 
