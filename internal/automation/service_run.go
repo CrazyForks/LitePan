@@ -125,6 +125,10 @@ func (s *Service) executeAction(ctx context.Context, action RuleAction, followin
 		return s.runEmbyRefresh(ctx, action.Params)
 	case domain.AutomationActionEmbyCompleteMediaInfo:
 		return s.runEmbyCompleteMediaInfo(ctx, action.Params)
+	case domain.AutomationActionFnosScan:
+		return s.runFnosLibraryAction(ctx, action.Params, false)
+	case domain.AutomationActionFnosRefreshMetadata:
+		return s.runFnosLibraryAction(ctx, action.Params, true)
 	default:
 		return map[string]any{"status": "failed", "success": false, "message": "动作类型不支持"}
 	}
@@ -519,6 +523,33 @@ func (s *Service) runEmbyCompleteMediaInfo(ctx context.Context, params map[strin
 	return map[string]any{"status": status, "success": success, "message": message, "data": result}
 }
 
+func (s *Service) runFnosLibraryAction(ctx context.Context, params map[string]any, refreshMetadata bool) map[string]any {
+	if s.fnos == nil {
+		return map[string]any{"status": "failed", "success": false, "message": "飞牛影视服务未就绪"}
+	}
+	libraryID := strings.TrimSpace(anyString(params["library_id"]))
+	libraryName := strings.TrimSpace(anyString(params["library_name"]))
+	var err error
+	message := "已通知飞牛影视扫描媒体库"
+	if refreshMetadata {
+		refreshMode := anyInt(params["refresh_mode"])
+		err = s.fnos.RefreshMetadata(ctx, libraryID, refreshMode)
+		message = "已通知飞牛影视刷新元数据（仅补充缺失项）"
+		if refreshMode == 0 {
+			message = "已通知飞牛影视刷新元数据（替换全部）"
+		}
+	} else {
+		err = s.fnos.ScanLibrary(ctx, libraryID)
+	}
+	if err != nil {
+		return map[string]any{"status": "failed", "success": false, "message": err.Error()}
+	}
+	if libraryName != "" {
+		message += "：" + libraryName
+	}
+	return map[string]any{"status": "success", "success": true, "message": message, "data": map[string]any{"library_id": libraryID, "library_name": libraryName}}
+}
+
 type submitRunResult struct {
 	queued bool
 }
@@ -648,6 +679,10 @@ func actionDisplayName(action RuleAction) string {
 		return "Emby 刷库"
 	case domain.AutomationActionEmbyCompleteMediaInfo:
 		return "Emby 补全媒体信息"
+	case domain.AutomationActionFnosScan:
+		return "飞牛影视扫库"
+	case domain.AutomationActionFnosRefreshMetadata:
+		return "飞牛影视刷新元数据"
 	default:
 		return action.Type
 	}

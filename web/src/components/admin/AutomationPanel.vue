@@ -563,6 +563,27 @@
               </button>
             </div>
           </template>
+          <template v-else-if="isFnosAction(configAction)">
+            <div class="cfg-row">
+              <label>媒体库</label>
+              <AppSelect
+                v-model="configAction.params.library_id"
+                :options="fnosLibraryOptions"
+                :disabled="fnosLibrariesLoading || !options.fnos_management_ready"
+                :placeholder="fnosLibrariesLoading ? '正在加载媒体库...' : options.fnos_management_ready ? '请选择媒体库' : '请先配置飞牛管理权限'"
+                @update:model-value="libraryId => onFnosLibraryChange(configAction, libraryId)"
+              />
+              <div class="field-tip">媒体库列表从飞牛影视实时拉取；管理账号只用于执行这两个动作。</div>
+              <button class="inline-link-btn" type="button" :disabled="fnosLibrariesLoading || !options.fnos_management_ready" @click="ensureFnosLibrariesLoaded(true)">
+                {{ fnosLibrariesLoading ? '加载中...' : '刷新媒体库列表' }}
+              </button>
+            </div>
+            <div v-if="configAction.type === 'fnos_refresh_metadata'" class="cfg-row">
+              <label>刷新方式</label>
+              <AppSelect v-model="configAction.params.refresh_mode" :options="fnosRefreshModeOptions" />
+              <div class="field-tip">日常联动建议仅补充缺失信息；元数据错误时再替换全部。</div>
+            </div>
+          </template>
         </div>
       </div>
 
@@ -628,6 +649,7 @@ import {
   validateAutomationRule
 } from '../../api/automation'
 import { fetchEmbyLibraries } from '../../api/emby'
+import { fetchFnosLibraries } from '../../api/fnos'
 import { formatTime } from '../../utils/format'
 import '@/styles/admin-table.css'
 import SvgIcon from "@/components/icons/SvgIcon.vue";
@@ -644,12 +666,15 @@ const expandedRunIds = ref(new Set())
 const runsDrawerVisible = ref(false)
 const runsLoading = ref(false)
 const accounts = ref([])
-const emptyOptions = () => ({ organize_tasks: [], strm_tasks: [], emby_configs: [] })
+const emptyOptions = () => ({ organize_tasks: [], strm_tasks: [], emby_configs: [], fnos_management_ready: false })
 const options = ref(emptyOptions())
 const embyLibraries = ref([])
 const embyLibrariesLoading = ref(false)
 const embyLibrariesLoaded = ref(false)
 const embyLibrariesConfigID = ref('')
+const fnosLibraries = ref([])
+const fnosLibrariesLoading = ref(false)
+const fnosLibrariesLoaded = ref(false)
 const validationIssues = ref([])
 const validationOk = ref(false)
 const timePickerVisible = ref(false)
@@ -811,6 +836,32 @@ const ACTION_DEFINITIONS = {
     ...embyScopedActionDefinition,
     nodeTitle: action => `Emby 补全媒体信息「${embyRefreshTargetLabel(action)}」`,
     previewTitle: action => `Emby补全媒体信息[${embyRefreshTargetLabel(action)}]`
+  },
+  fnos_scan: {
+    group: 'media',
+    label: '飞牛影视扫库',
+    optionLabel: '飞牛影视扫库',
+    icon: 'server',
+    desc: '通知飞牛影视扫描指定媒体库，让新增影片入库',
+    normalize: params => ({ library_id: String(params.library_id || ''), library_name: String(params.library_name || '') }),
+    canApply: action => Boolean(options.value.fnos_management_ready && String(action.params.library_id || '').trim()),
+    nodeTitle: action => `飞牛影视扫库「${action.params.library_name || '未选择'}」`,
+    previewTitle: action => `飞牛影视扫库[${action.params.library_name || '未选择'}]`
+  },
+  fnos_refresh_metadata: {
+    group: 'media',
+    label: '飞牛影视刷新元数据',
+    optionLabel: '飞牛影视刷新元数据',
+    icon: 'rotate',
+    desc: '通知飞牛影视刷新指定媒体库的元数据',
+    normalize: params => ({
+      library_id: String(params.library_id || ''),
+      library_name: String(params.library_name || ''),
+      refresh_mode: Number(params.refresh_mode) === 0 ? 0 : 1
+    }),
+    canApply: action => Boolean(options.value.fnos_management_ready && String(action.params.library_id || '').trim()),
+    nodeTitle: action => `飞牛影视刷新元数据「${action.params.library_name || '未选择'}」`,
+    previewTitle: action => `飞牛影视刷新元数据[${action.params.library_name || '未选择'}]`
   }
 }
 
@@ -889,6 +940,11 @@ const embyRefreshModeOptions = [
   { value: 'library', label: '指定媒体库扫描' }
 ]
 
+const fnosRefreshModeOptions = [
+  { value: 1, label: '仅补充缺失的元数据（推荐）' },
+  { value: 0, label: '替换所有元数据' }
+]
+
 const embyConfigOptions = computed(() => (options.value.emby_configs || []).map(item => ({
   value: item.id,
   label: item.name
@@ -898,6 +954,7 @@ const embyLibraryOptions = computed(() => embyLibraries.value.map(item => ({
   value: item.id,
   label: item.name
 })))
+const fnosLibraryOptions = computed(() => fnosLibraries.value.map(item => ({ value: item.id, label: item.name })))
 
 const linkedActionItems = computed(() => (
   form.actions
@@ -1130,6 +1187,8 @@ const resetForm = () => {
   embyLibrariesLoading.value = false
   embyLibrariesLoaded.value = false
   embyLibrariesConfigID.value = ''
+  fnosLibraries.value = []
+  fnosLibrariesLoaded.value = false
   validationIssues.value = []
   validationOk.value = false
 }
@@ -1229,6 +1288,7 @@ const openConfig = (mode, actionIndex = -1) => {
       normalizeEmbyScopedAction(targetAction)
       void ensureEmbyLibrariesLoaded()
     }
+    if (isFnosAction(targetAction)) void ensureFnosLibrariesLoaded()
   }
   configVisible.value = true
 }
@@ -1440,6 +1500,7 @@ const applyConfig = () => {
   if (configMode.value === 'trigger') commitTrigger()
   if (configAction.value) ensureStrmRunMode(configAction.value)
   if (isEmbyScopedAction(configAction.value)) normalizeEmbyScopedAction(configAction.value)
+  if (isFnosAction(configAction.value)) onFnosLibraryChange(configAction.value, configAction.value.params.library_id)
   if (pendingConfigAction.value) {
     const action = pendingConfigAction.value
     const insertIndex = pendingConfigInsertIndex.value
@@ -1577,6 +1638,27 @@ const onEmbyLibraryChange = (action, libraryId) => {
   if (!isEmbyScopedAction(action)) return
   action.params.library_id = String(libraryId || '')
   action.params.library_name = findEmbyLibraryName(action.params.library_id)
+}
+
+const isFnosAction = action => ['fnos_scan', 'fnos_refresh_metadata'].includes(action?.type)
+
+const ensureFnosLibrariesLoaded = async (force = false) => {
+  if (!options.value.fnos_management_ready || fnosLibrariesLoading.value || (fnosLibrariesLoaded.value && !force)) return
+  fnosLibrariesLoading.value = true
+  try {
+    fnosLibraries.value = await fetchFnosLibraries()
+    fnosLibrariesLoaded.value = true
+  } catch (error) {
+    toast.error('加载飞牛影视媒体库失败: ' + getApiErrorMessage(error, '请检查管理权限配置'))
+  } finally {
+    fnosLibrariesLoading.value = false
+  }
+}
+
+const onFnosLibraryChange = (action, libraryId) => {
+  if (!isFnosAction(action)) return
+  action.params.library_id = String(libraryId || '')
+  action.params.library_name = fnosLibraries.value.find(item => String(item.id) === action.params.library_id)?.name || String(action.params.library_name || '')
 }
 
 const normalizeActions = (actions) => actions.map((action, index) => ({

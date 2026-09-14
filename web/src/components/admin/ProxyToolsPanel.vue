@@ -10,10 +10,11 @@ import {
   type EmbyConfig,
   type EmbyConfigUpdate,
 } from "@/api/emby";
-import { fetchFnosConfig, saveFnosConfig, testFnosConfig } from "@/api/fnos";
+import { fetchFnosConfig, saveFnosConfig, saveFnosManagement, testFnosConfig, testFnosManagement } from "@/api/fnos";
 import { confirm } from "@/composables/useConfirm";
 import { copyTextToClipboard, toast } from "@/composables/useToast";
 import AppButton from "@/components/base/AppButton.vue";
+import AppModal from "@/components/base/AppModal.vue";
 import ToolCard from "@/components/admin/ToolCard.vue";
 import ProxyWorkspace, { type ProxyField, type ProxyWorkspaceItem } from "@/components/admin/ProxyWorkspace.vue";
 
@@ -257,6 +258,12 @@ const fnosSaving = ref(false);
 const fnosTesting = ref(false);
 const fnosProxyURL = ref("");
 const fnosLastError = ref("");
+const fnosManagementOpen = ref(false);
+const fnosManagementSaving = ref(false);
+const fnosManagementTesting = ref(false);
+const fnosManagementReady = ref(false);
+const fnosPasswordMask = "********";
+const fnosManagement = reactive({ username: "", password: "" });
 const fnosForm = reactive<Record<string, string>>({
   name: "飞牛影视",
   fnos_url: "",
@@ -275,11 +282,16 @@ function applyFnos(config: {
   proxy_url?: string;
   running?: boolean;
   last_error?: string;
+  admin_username?: string;
+  management_ready?: boolean;
 }) {
   fnosEnabled.value = Boolean(config.enabled);
   fnosRunning.value = Boolean(config.running);
   fnosProxyURL.value = config.proxy_url || "";
   fnosLastError.value = config.last_error || "";
+  fnosManagementReady.value = Boolean(config.management_ready);
+  fnosManagement.username = config.admin_username || "";
+  fnosManagement.password = fnosManagementReady.value ? fnosPasswordMask : "";
   Object.assign(fnosForm, {
     name: config.name || "飞牛影视",
     fnos_url: config.fnos_url || "",
@@ -287,6 +299,38 @@ function applyFnos(config: {
     proxy_port: config.proxy_port || "",
     direct_strm_clients: config.direct_strm_clients || "",
   });
+}
+
+async function testManagement() {
+  fnosManagementTesting.value = true;
+  try {
+    await testFnosManagement({
+      username: fnosManagement.username,
+      password: fnosManagement.password === fnosPasswordMask ? "" : fnosManagement.password,
+    });
+    toast.success("飞牛影视管理权限验证成功");
+  } catch (error) {
+    toast.error(getApiErrorMessage(error, "飞牛影视管理员登录失败"));
+  } finally {
+    fnosManagementTesting.value = false;
+  }
+}
+
+async function saveManagement() {
+  fnosManagementSaving.value = true;
+  try {
+    const saved = await saveFnosManagement({
+      username: fnosManagement.username,
+      password: fnosManagement.password === fnosPasswordMask ? "" : fnosManagement.password,
+    });
+    applyFnos(saved);
+    fnosManagementOpen.value = false;
+    toast.success(saved.management_ready ? "飞牛影视管理权限已保存" : "飞牛影视管理权限已清除");
+  } catch (error) {
+    toast.error(getApiErrorMessage(error, "保存飞牛影视管理权限失败"));
+  } finally {
+    fnosManagementSaving.value = false;
+  }
 }
 
 const fnosItems = computed<ProxyWorkspaceItem[]>(() => [
@@ -522,7 +566,27 @@ onMounted(async () => {
       @copy="copyEndpoint(fnosProxyURL, fnosForm.proxy_port, fnosRunning)"
       @save="saveFnos"
       @cancel="fnosOpen = false"
-    />
+    >
+      <template #footer-actions>
+        <AppButton variant="secondary" @click="fnosManagementOpen = true">
+          {{ fnosManagementReady ? "管理权限已配置" : "配置管理权限" }}
+        </AppButton>
+      </template>
+    </ProxyWorkspace>
+
+    <AppModal :open="fnosManagementOpen" size="sm" title="飞牛影视管理权限" @close="fnosManagementOpen = false">
+      <div class="management-form">
+        <p>仅用于自动联动中的媒体库扫描和元数据刷新；飞牛反代播放本身不需要管理员账号。不使用这些动作可以留空。</p>
+        <label>管理员账号</label>
+        <input v-model.trim="fnosManagement.username" class="form-input" autocomplete="username" placeholder="飞牛影视管理员账号">
+        <label>管理员密码</label>
+        <input v-model="fnosManagement.password" class="form-input" type="password" autocomplete="new-password" placeholder="飞牛影视管理员密码" @focus="fnosManagement.password === fnosPasswordMask && (fnosManagement.password = '')">
+      </div>
+      <template #footer>
+        <AppButton variant="secondary" :disabled="fnosManagementTesting" @click="testManagement">{{ fnosManagementTesting ? "测试中…" : "测试登录" }}</AppButton>
+        <AppButton variant="primary" :disabled="fnosManagementSaving" @click="saveManagement">{{ fnosManagementSaving ? "保存中…" : "保存" }}</AppButton>
+      </template>
+    </AppModal>
   </div>
 </template>
 
@@ -530,4 +594,19 @@ onMounted(async () => {
 .proxy-enhancement-cards {
   display: contents;
 }
+.management-form { display: grid; gap: 10px; }
+.management-form p { margin: 0 0 4px; color: var(--text-muted); line-height: 1.65; font-size: 13px; }
+.management-form label { font-size: 13px; font-weight: 650; color: var(--text); }
+.management-form .form-input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+}
+.management-form .form-input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
 </style>

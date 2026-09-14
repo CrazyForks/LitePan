@@ -3,7 +3,7 @@ import { http } from "./client";
 export type AutomationTriggerType = "daily" | "interval" | "advanced" | "webhook" | "offline_download";
 export type AutomationStatus = "running" | "paused";
 export type AutomationCondition = "always" | "prev_success" | "prev_failed";
-export type AutomationActionType = "cache_clear" | "organize" | "strm" | "strm_scrape" | "delay" | "emby_refresh" | "emby_complete_media_info";
+export type AutomationActionType = "cache_clear" | "organize" | "strm" | "strm_scrape" | "delay" | "emby_refresh" | "emby_complete_media_info" | "fnos_scan" | "fnos_refresh_metadata";
 
 export interface AutomationAction {
   id: string;
@@ -74,6 +74,7 @@ export interface AutomationOptions {
     name: string;
     emby_url: string;
   }>;
+  fnos_management_ready: boolean;
 }
 
 export interface AutomationTriggerConfig {

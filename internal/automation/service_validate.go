@@ -90,6 +90,20 @@ func (s *Service) ValidateRule(ctx context.Context, actions []RuleAction) (Valid
 			if s.emby == nil || !s.hasEmbyConfig(embyID) {
 				issues = append(issues, ValidationIssue{Level: "error", Message: "所选 Emby 配置不存在", ActionIndex: index, ActionType: action.Type})
 			}
+		case domain.AutomationActionFnosScan, domain.AutomationActionFnosRefreshMetadata:
+			if s.fnos == nil || !s.fnos.ManagementConfigured() {
+				issues = append(issues, ValidationIssue{Level: "error", Message: "请先在飞牛影视反代中配置管理权限", ActionIndex: index, ActionType: action.Type})
+				continue
+			}
+			if strings.TrimSpace(anyString(action.Params["library_id"])) == "" {
+				issues = append(issues, ValidationIssue{Level: "error", Message: "请选择飞牛影视媒体库", ActionIndex: index, ActionType: action.Type})
+			}
+			if action.Type == domain.AutomationActionFnosRefreshMetadata {
+				mode := anyInt(action.Params["refresh_mode"])
+				if mode != 0 && mode != 1 {
+					issues = append(issues, ValidationIssue{Level: "error", Message: "飞牛影视元数据刷新方式无效", ActionIndex: index, ActionType: action.Type})
+				}
+			}
 		}
 	}
 	if len(organizeActions) > 0 && len(strmActions) > 0 {
@@ -230,7 +244,7 @@ func (s *Service) normalizeInput(ctx context.Context, in RuleInput) (RuleInput, 
 		}
 		in.Actions[i].Type = strings.TrimSpace(in.Actions[i].Type)
 		switch in.Actions[i].Type {
-		case domain.AutomationActionOrganize, domain.AutomationActionStrm, domain.AutomationActionStrmScrape, domain.AutomationActionCacheClear, domain.AutomationActionDelay, domain.AutomationActionEmbyRefresh, domain.AutomationActionEmbyCompleteMediaInfo:
+		case domain.AutomationActionOrganize, domain.AutomationActionStrm, domain.AutomationActionStrmScrape, domain.AutomationActionCacheClear, domain.AutomationActionDelay, domain.AutomationActionEmbyRefresh, domain.AutomationActionEmbyCompleteMediaInfo, domain.AutomationActionFnosScan, domain.AutomationActionFnosRefreshMetadata:
 		default:
 			return in, domain.Errorf(domain.CodeValidation, "存在不支持的动作")
 		}

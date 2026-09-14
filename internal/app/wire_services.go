@@ -196,6 +196,7 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		StrmScrape: strmScrapeSvc,
 		Organize:   mediaOrganizeSvc,
 		Emby:       embyProxySvc,
+		Fnos:       fnosProxySvc,
 		Files:      fileSvc,
 		Log:        logs.For(logx.ModuleSystem),
 	})

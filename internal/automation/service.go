@@ -10,6 +10,7 @@ import (
 	"litepan/internal/domain"
 	"litepan/internal/embyproxy"
 	filesvc "litepan/internal/file"
+	"litepan/internal/fnosproxy"
 	"litepan/internal/mediaorganize"
 	"litepan/internal/strm"
 	"litepan/internal/strmscrape"
@@ -23,6 +24,7 @@ type Service struct {
 	strmScrape *strmscrape.Service
 	organize   *mediaorganize.Service
 	emby       *embyproxy.Service
+	fnos       *fnosproxy.Service
 	files      *filesvc.Service
 	log        *slog.Logger
 
@@ -45,6 +47,7 @@ type Options struct {
 	StrmScrape *strmscrape.Service
 	Organize   *mediaorganize.Service
 	Emby       *embyproxy.Service
+	Fnos       *fnosproxy.Service
 	Files      *filesvc.Service
 	Log        *slog.Logger
 }
@@ -130,6 +133,7 @@ func New(opts Options) *Service {
 		strmScrape:   opts.StrmScrape,
 		organize:     opts.Organize,
 		emby:         opts.Emby,
+		fnos:         opts.Fnos,
 		files:        opts.Files,
 		log:          log,
 		runningStep:  make(map[int64]map[string]any),
@@ -360,10 +364,12 @@ func (s *Service) ListOptions(ctx context.Context) (map[string]any, error) {
 			})
 		}
 	}
+	fnosReady := s.fnos != nil && s.fnos.ManagementConfigured()
 	return map[string]any{
-		"strm_tasks":     strmData,
-		"organize_tasks": organizeData,
-		"emby_configs":   embyConfigs,
+		"strm_tasks":            strmData,
+		"organize_tasks":        organizeData,
+		"emby_configs":          embyConfigs,
+		"fnos_management_ready": fnosReady,
 	}, nil
 }
 
