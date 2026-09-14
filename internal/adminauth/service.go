@@ -109,9 +109,12 @@ type UpdateCredentialsRequest struct {
 }
 
 type Service struct {
-	configs domain.ConfigRepository
-	secret  []byte
-	log     *slog.Logger
+	configs      domain.ConfigRepository
+	secret       []byte
+	log          *slog.Logger
+	configMu     sync.RWMutex
+	configLoaded bool
+	configValues map[string]string
 
 	resetIPCooldown sync.Map
 	resetLastAt     int64
@@ -122,7 +125,7 @@ func New(configs domain.ConfigRepository, secret []byte, log *slog.Logger) *Serv
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{configs: configs, secret: secret, log: log}
+	return &Service{configs: configs, secret: secret, log: log, configValues: map[string]string{}}
 }
 
 func (s *Service) serializer() *security.TimedSerializer {
@@ -300,8 +303,8 @@ func (s *Service) ResetPassword(ctx context.Context, r *http.Request) (map[strin
 	password := randomPassword(12)
 	hash := security.HashPassword(password)
 	expiresAt := now + tempPasswordTTL
-	_ = s.configs.Set(ctx, KeyAdminTempPasswordHash, hash)
-	_ = s.configs.Set(ctx, KeyAdminTempPasswordExpiresAt, strconv.FormatInt(expiresAt, 10))
+	_ = s.setConfig(ctx, KeyAdminTempPasswordHash, hash)
+	_ = s.setConfig(ctx, KeyAdminTempPasswordExpiresAt, strconv.FormatInt(expiresAt, 10))
 	s.resetLastAt = now
 	if ip != "" {
 		s.resetIPCooldown.Store(ip, now)
@@ -414,7 +417,7 @@ func (s *Service) IndexStrmAutoDetectEnabled(ctx context.Context) bool {
 
 func (s *Service) UpdateWebDAVConfig(ctx context.Context, req WebDAVConfigRequest) error {
 	if req.WebDAVEnabled != nil {
-		_ = s.configs.Set(ctx, KeyWebDAVEnabled, boolString(*req.WebDAVEnabled))
+		_ = s.setConfig(ctx, KeyWebDAVEnabled, boolString(*req.WebDAVEnabled))
 	}
 	return nil
 }
@@ -430,7 +433,7 @@ func (s *Service) UpdateCredentials(ctx context.Context, r *http.Request, w http
 		return err
 	}
 	for _, update := range updates {
-		if err := s.configs.Set(ctx, update.key, update.value); err != nil {
+		if err := s.setConfig(ctx, update.key, update.value); err != nil {
 			return domain.Wrap(domain.CodeInternal, err)
 		}
 	}
@@ -553,7 +556,7 @@ func (s *Service) adminCredentials(ctx context.Context) (string, string) {
 	password := s.configString(ctx, KeyAdminPassword, "")
 	if password == "" || (username == defaultAdminUsername && strings.TrimSpace(password) == defaultAdminPassword) {
 		password = security.HashPassword(defaultAdminPassword)
-		_ = s.configs.Set(ctx, KeyAdminPassword, password)
+		_ = s.setConfig(ctx, KeyAdminPassword, password)
 	}
 	return username, password
 }
@@ -636,7 +639,7 @@ func (s *Service) tempPasswordState(ctx context.Context) tempPasswordState {
 }
 
 func (s *Service) configString(ctx context.Context, key, fallback string) string {
-	v, ok, err := s.configs.Get(ctx, key)
+	v, ok, err := s.configValue(ctx, key)
 	if err != nil || !ok || strings.TrimSpace(v) == "" {
 		return fallback
 	}
@@ -644,7 +647,7 @@ func (s *Service) configString(ctx context.Context, key, fallback string) string
 }
 
 func (s *Service) configInt(ctx context.Context, key string, fallback int) int {
-	v, ok, err := s.configs.Get(ctx, key)
+	v, ok, err := s.configValue(ctx, key)
 	if err != nil || !ok || strings.TrimSpace(v) == "" {
 		return fallback
 	}
@@ -656,7 +659,7 @@ func (s *Service) configInt(ctx context.Context, key string, fallback int) int {
 }
 
 func (s *Service) configBool(ctx context.Context, key string, fallback bool) bool {
-	v, ok, err := s.configs.Get(ctx, key)
+	v, ok, err := s.configValue(ctx, key)
 	if err != nil || !ok {
 		return fallback
 	}
@@ -668,6 +671,41 @@ func (s *Service) configBool(ctx context.Context, key string, fallback bool) boo
 	default:
 		return fallback
 	}
+}
+
+func (s *Service) configValue(ctx context.Context, key string) (string, bool, error) {
+	s.configMu.RLock()
+	if s.configLoaded {
+		value, ok := s.configValues[key]
+		s.configMu.RUnlock()
+		return value, ok, nil
+	}
+	s.configMu.RUnlock()
+
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+	if !s.configLoaded {
+		values, err := s.configs.All(ctx)
+		if err != nil {
+			return "", false, err
+		}
+		s.configValues = values
+		s.configLoaded = true
+	}
+	value, ok := s.configValues[key]
+	return value, ok, nil
+}
+
+func (s *Service) setConfig(ctx context.Context, key, value string) error {
+	if err := s.configs.Set(ctx, key, value); err != nil {
+		return err
+	}
+	s.configMu.Lock()
+	if s.configLoaded {
+		s.configValues[key] = value
+	}
+	s.configMu.Unlock()
+	return nil
 }
 
 func boolString(v bool) string {

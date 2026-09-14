@@ -137,6 +137,7 @@ type Handler struct {
 
 	devMu       sync.Mutex
 	devUnlocked bool
+	slowLogs    slowRequestLogs
 }
 
 // NewRouter 装配并返回 HTTP 路由（含内嵌管理页面）。
