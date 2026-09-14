@@ -127,21 +127,25 @@ UPDATE blocks SET accessed_at=? WHERE account_id=? AND file_id=? AND block_idx=?
 	return err
 }
 
-func (s *storeLayer) putBlock(accountID int64, fileID string, blockIdx int64, data []byte) error {
+func (s *storeLayer) putBlock(accountID int64, fileID string, blockIdx int64, data []byte) (int64, error) {
 	if len(data) == 0 {
-		return nil
+		return 0, nil
 	}
 	path := s.blockPath(accountID, fileID, blockIdx)
+	var previousSize int64
+	if info, err := os.Stat(path); err == nil {
+		previousSize = info.Size()
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return 0, err
 	}
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
+		return 0, err
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
-		return err
+		return 0, err
 	}
 	now := time.Now().Unix()
 	_, err := s.db.Exec(`
@@ -154,7 +158,7 @@ ON CONFLICT(account_id,file_id,block_idx) DO UPDATE SET
 	if err == nil {
 		s.lastTouches[blockKey{AccountID: accountID, FileID: fileID, BlockIdx: blockIdx}] = now
 	}
-	return err
+	return int64(len(data)) - previousSize, err
 }
 
 func (s *storeLayer) deleteBlock(meta blockMeta) error {
