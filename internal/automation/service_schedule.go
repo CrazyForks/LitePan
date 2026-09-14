@@ -105,6 +105,8 @@ func computeNextRun(triggerType string, cfg map[string]any, base time.Time) time
 		return next
 	case domain.AutomationTriggerInterval:
 		return computeIntervalStartRun(cfg, base)
+	case domain.AutomationTriggerAdvanced:
+		return nextAdvancedRun(cfg, base)
 	default:
 		return time.Time{}
 	}
@@ -119,9 +121,45 @@ func advanceNextRun(triggerType string, cfg map[string]any, current time.Time) t
 		return advanceDailyRun(cfg, current)
 	case domain.AutomationTriggerInterval:
 		return advanceIntervalRun(cfg, current)
+	case domain.AutomationTriggerAdvanced:
+		return nextAdvancedRun(cfg, current)
 	default:
 		return time.Time{}
 	}
+}
+
+func nextAdvancedRun(cfg map[string]any, base time.Time) time.Time {
+	base = wallClockTime(base)
+	h, m := parseClock(anyString(cfg["time"]))
+	mode := anyString(cfg["schedule_mode"])
+	selected := map[int]bool{}
+	key := "weekdays"
+	if mode == "monthly" {
+		key = "month_days"
+	}
+	if values, ok := cfg[key].([]any); ok {
+		for _, value := range values {
+			selected[anyInt(value)] = true
+		}
+	}
+	for day := 0; day <= 366; day++ {
+		date := base.AddDate(0, 0, day)
+		candidate := time.Date(date.Year(), date.Month(), date.Day(), h, m, 0, 0, date.Location())
+		if !candidate.After(base) {
+			continue
+		}
+		matches := selected[int(candidate.Weekday())]
+		if candidate.Weekday() == time.Sunday {
+			matches = selected[7]
+		}
+		if mode == "monthly" {
+			matches = selected[candidate.Day()]
+		}
+		if matches {
+			return candidate
+		}
+	}
+	return time.Time{}
 }
 
 func advanceDailyRun(cfg map[string]any, current time.Time) time.Time {

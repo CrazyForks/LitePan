@@ -1,6 +1,6 @@
 import { http } from "./client";
 
-export type AutomationTriggerType = "daily" | "interval" | "webhook" | "offline_download";
+export type AutomationTriggerType = "daily" | "interval" | "advanced" | "webhook" | "offline_download";
 export type AutomationStatus = "running" | "paused";
 export type AutomationCondition = "always" | "prev_success" | "prev_failed";
 export type AutomationActionType = "cache_clear" | "organize" | "strm" | "strm_scrape" | "delay" | "emby_refresh" | "emby_complete_media_info";
@@ -80,6 +80,9 @@ export interface AutomationTriggerConfig {
   time: string;
   start_time: string;
   interval_hours: number;
+  schedule_mode: "weekly" | "monthly";
+  weekdays: number[];
+  month_days: number[];
   event: string;
   source: string;
   path_prefix: string;
@@ -97,6 +100,9 @@ export function normalizeAutomationTriggerConfig(
     time: String(config.time ?? ""),
     start_time: String(config.start_time ?? ""),
     interval_hours: Number(config.interval_hours || 72),
+    schedule_mode: config.schedule_mode === "monthly" ? "monthly" : "weekly",
+    weekdays: Array.isArray(config.weekdays) ? config.weekdays.map(Number) : [1],
+    month_days: Array.isArray(config.month_days) ? config.month_days.map(Number) : [1],
     event: String(config.event ?? ""),
     source: String(config.source ?? ""),
     path_prefix: String(config.path_prefix ?? ""),
@@ -115,6 +121,9 @@ export function serializeAutomationTriggerConfig(
     time: config.time || "",
     start_time: config.start_time || "",
     interval_hours: Number(config.interval_hours || 72),
+    schedule_mode: config.schedule_mode,
+    weekdays: config.weekdays.map(Number),
+    month_days: config.month_days.map(Number),
     event: String(config.event || "").trim(),
     source: String(config.source || "").trim(),
     path_prefix: String(config.path_prefix || "").trim(),

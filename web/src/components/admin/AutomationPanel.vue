@@ -353,44 +353,41 @@
     <AppPlainModal
       :open="pickerVisible"
       :title="pickerKind === 'trigger' ? '选择触发条件' : '添加执行动作'"
-      :size="pickerKind === 'trigger' ? 'sm' : 'md'"
+      size="md"
       body-flush
       @close="cancelPicker"
     >
       <div class="automation-scope">
-        <div v-if="pickerKind === 'trigger'" class="pick-list">
-          <button class="pick-option" type="button" @click="chooseTrigger('daily')">
-            <span class="pick-ico trigger"><SvgIcon name="clock" size="1em" /></span>
-            <span>
-              <b>每天定时</b>
-              <em>每天到设定时间触发</em>
-            </span>
-            <SvgIcon name="chevron-right" size="1em" />
-          </button>
-          <button class="pick-option" type="button" @click="chooseTrigger('interval')">
-            <span class="pick-ico interval"><SvgIcon name="rotate" size="1em" /></span>
-            <span>
-              <b>本次触发时间 + 间隔</b>
-              <em>从某个时间开始按间隔循环执行</em>
-            </span>
-            <SvgIcon name="chevron-right" size="1em" />
-          </button>
-          <button class="pick-option" type="button" @click="chooseTrigger('external_event')">
-            <span class="pick-ico external_event"><SvgIcon name="plug" size="1em" /></span>
-            <span>
-              <b>第三方通知</b>
-              <em>外部程序调用 Webhook 接口通知 LitePan</em>
-            </span>
-            <SvgIcon name="chevron-right" size="1em" />
-          </button>
-          <button class="pick-option" type="button" @click="chooseTrigger('offline_download')">
-            <span class="pick-ico offline_download"><SvgIcon name="cloud-arrow-down" size="1em" /></span>
-            <span>
-              <b>离线下载完成</b>
-              <em>指定目录或其子目录中的离线任务完成后触发</em>
-            </span>
-            <SvgIcon name="chevron-right" size="1em" />
-          </button>
+        <div v-if="pickerKind === 'trigger'" class="action-picker trigger-picker">
+          <div class="action-picker__scroll">
+            <template v-for="group in triggerGroups" :key="group.name">
+              <div class="action-picker__group-title">{{ group.name }}</div>
+              <div class="action-picker__grid">
+                <button
+                  v-for="item in group.items"
+                  :key="item.value"
+                  class="action-cell"
+                  type="button"
+                  @click="chooseTrigger(item.value)"
+                  @mouseenter="setTriggerInfo(item)"
+                  @mouseleave="resetTriggerInfo"
+                  @focus="setTriggerInfo(item)"
+                  @blur="resetTriggerInfo"
+                  @touchstart.passive="setTriggerInfo(item)"
+                >
+                  <span class="pick-ico action-cell__ico" :class="item.value"><SvgIcon :name="item.icon" size="1em" /></span>
+                  <span class="action-cell__name">{{ item.label }}</span>
+                </button>
+              </div>
+            </template>
+          </div>
+          <div class="action-picker__info">
+            <template v-if="triggerInfo">
+              <span class="pick-ico action-picker__info-ico" :class="triggerInfo.value"><SvgIcon :name="triggerInfo.icon" size="1em" /></span>
+              <span class="action-picker__info-text"><b>{{ triggerInfo.label }}</b>{{ triggerInfo.desc }}</span>
+            </template>
+            <span v-else class="action-picker__info-text action-picker__info-text--hint">悬停或触摸触发方式查看说明</span>
+          </div>
         </div>
         <div v-else class="action-picker">
           <div class="action-picker__scroll">
@@ -457,6 +454,23 @@
                 {{ offlineDownloadDirectoryLabel }}
               </button>
               <div class="field-tip">该账号中，目标为此目录或其任意子目录的离线任务完成后触发。</div>
+            </div>
+          </template>
+          <template v-else-if="form.trigger_type === 'advanced'">
+            <div class="cfg-row">
+              <label>执行周期</label>
+              <AutomationAdvancedSchedule
+                v-model:mode="form.trigger_config.schedule_mode"
+                v-model:weekdays="form.trigger_config.weekdays"
+                v-model:month-days="form.trigger_config.month_days"
+              />
+            </div>
+            <div class="cfg-row">
+              <label>触发时间</label>
+              <button class="time-btn" type="button" @click="openTimePicker">
+                <SvgIcon name="clock" size="1em" />
+                {{ form.trigger_config.time || '请选择时间' }}
+              </button>
             </div>
           </template>
           <template v-else>
@@ -592,6 +606,7 @@ import AdminEnableToggle from '@/components/admin/AdminEnableToggle.vue'
 import AdminRowActions from '@/components/admin/AdminRowActions.vue'
 import AdminRunStatusCell from '@/components/admin/AdminRunStatusCell.vue'
 import AdminTableActionBtn from '@/components/admin/AdminTableActionBtn.vue'
+import AutomationAdvancedSchedule from '@/components/admin/AutomationAdvancedSchedule.vue'
 import TimeWheelPicker from '../base/TimeWheelPicker.vue'
 import { confirm } from '../../composables/useConfirm'
 import { findDustTarget, useDustRemoval } from '../../composables/useDustRemoval'
@@ -692,6 +707,24 @@ const form = reactive({
   status: 'running',
   actions: []
 })
+
+const triggerGroups = [
+  {
+    name: '时间触发',
+    items: [
+      { value: 'daily', label: '每天定时', icon: 'clock', desc: '每天在指定时间自动启动联动' },
+      { value: 'interval', label: '时间 + 间隔', icon: 'rotate', desc: '从指定时间开始，按小时周期循环执行' },
+      { value: 'advanced', label: '高级定时', icon: 'clock-rotate-left', desc: '按每周星期或每月日期，在指定时间执行' }
+    ]
+  },
+  {
+    name: '事件触发',
+    items: [
+      { value: 'external_event', label: '第三方通知', icon: 'plug', desc: '外部程序调用 Webhook 接口时触发' },
+      { value: 'offline_download', label: '离线下载完成', icon: 'cloud-arrow-down', desc: '指定目录或其子目录中的离线任务完成后触发' }
+    ]
+  }
+]
 
 const ACTION_DEFINITIONS = {
   cache_clear: {
@@ -815,6 +848,7 @@ const organizeTaskOptions = computed(() => options.value.organize_tasks.map(task
 
 // ---- 动作选择面板（图标矩阵）----
 const actionInfo = ref(null)
+const triggerInfo = ref(null)
 
 const actionGroups = computed(() => (
   ACTION_GROUP_ORDER
@@ -824,10 +858,14 @@ const actionGroups = computed(() => (
 
 const setActionInfo = item => { actionInfo.value = item }
 const resetActionInfo = () => { actionInfo.value = null }
+const setTriggerInfo = item => { triggerInfo.value = item }
+const resetTriggerInfo = () => { triggerInfo.value = null }
 
 // 每次打开动作选择面板时重置说明条
 watch(pickerVisible, visible => {
-  if (visible && pickerKind.value === 'action') actionInfo.value = null
+  if (!visible) return
+  if (pickerKind.value === 'action') actionInfo.value = null
+  else triggerInfo.value = null
 })
 
 const strmTaskOptions = computed(() => options.value.strm_tasks.map(task => ({
@@ -891,7 +929,7 @@ const runningFlowSignature = computed(() => (
 ))
 
 const triggerTime = computed(() => (
-  form.trigger_type === 'daily'
+  form.trigger_type === 'daily' || form.trigger_type === 'advanced'
     ? form.trigger_config.time
     : form.trigger_config.start_time
 ))
@@ -903,6 +941,7 @@ const triggerNodeTitle = computed(() => {
       ? `${form.trigger_config.start_time} 起，每 ${form.trigger_config.interval_hours || 24} 小时`
       : '本次触发时间 + 间隔'
   }
+  if (form.trigger_type === 'advanced') return advancedScheduleLabel(form.trigger_config)
   if (form.trigger_type === 'external_event') {
     return form.trigger_config.event ? `收到通知：${form.trigger_config.event}` : '第三方通知'
   }
@@ -917,6 +956,8 @@ const triggerNodeSub = computed(() => (
     ? '时间 / 间隔触发'
     : form.trigger_type === 'interval'
     ? '从指定时间开始按间隔轮询执行'
+    : form.trigger_type === 'advanced'
+    ? '按选择的星期或日期自动启动联动'
     : form.trigger_type === 'external_event'
     ? externalEventSubtitle.value
     : form.trigger_type === 'offline_download'
@@ -960,6 +1001,10 @@ const hasValidationError = computed(() => validationIssues.value.some(issue => i
 const triggerReady = computed(() => {
   if (form.trigger_type === 'daily') return Boolean(form.trigger_config.time)
   if (form.trigger_type === 'interval') return Boolean(form.trigger_config.start_time) && Number(form.trigger_config.interval_hours || 0) > 0
+  if (form.trigger_type === 'advanced') {
+    const values = form.trigger_config.schedule_mode === 'monthly' ? form.trigger_config.month_days : form.trigger_config.weekdays
+    return Boolean(form.trigger_config.time) && values.length > 0
+  }
   if (form.trigger_type === 'external_event') return Boolean(String(form.trigger_config.event || '').trim())
   if (form.trigger_type === 'offline_download') {
     return Number(form.trigger_config.account_id || 0) > 0 && Boolean(String(form.trigger_config.path || '').trim())
@@ -976,6 +1021,9 @@ const configCanApply = computed(() => {
   if (configMode.value === 'trigger' && form.trigger_type === 'offline_download') {
     return triggerReady.value
   }
+  if (configMode.value === 'trigger' && form.trigger_type === 'advanced') {
+    return triggerReady.value
+  }
   if (configMode.value === 'action' && configAction.value) {
     return actionDefinition(configAction.value.type).canApply(configAction.value)
   }
@@ -984,6 +1032,7 @@ const configCanApply = computed(() => {
 const configTitle = computed(() => {
   if (configMode.value === 'trigger') {
     if (form.trigger_type === 'daily') return '每天定时'
+    if (form.trigger_type === 'advanced') return '高级定时'
     if (form.trigger_type === 'external_event') return '第三方通知'
     if (form.trigger_type === 'offline_download') return '离线下载完成'
     return '本次触发时间 + 间隔'
@@ -1112,6 +1161,8 @@ const backToList = async () => {
 const setTriggerType = (type) => {
   form.trigger_type = type
   if (type === 'daily') {
+    form.trigger_config.start_time = ''
+  } else if (type === 'advanced') {
     form.trigger_config.start_time = ''
   } else if (type === 'interval') {
     form.trigger_config.time = ''
@@ -1379,6 +1430,8 @@ const applyConfig = () => {
       toast.warning('请输入通知名称')
     } else if (configMode.value === 'trigger' && form.trigger_type === 'offline_download') {
       toast.warning('请选择离线下载监控目录')
+    } else if (configMode.value === 'trigger' && form.trigger_type === 'advanced') {
+      toast.warning('请选择执行周期和触发时间')
     } else if (configMode.value === 'action') {
       toast.warning('请完善动作配置')
     }
@@ -1404,7 +1457,7 @@ const openTimePicker = () => {
 
 const confirmTimePicker = (payload) => {
   const value = payload?.startTime || '00:00'
-  if (form.trigger_type === 'daily') {
+  if (form.trigger_type === 'daily' || form.trigger_type === 'advanced') {
     form.trigger_config.time = value
   } else {
     form.trigger_config.start_time = value
@@ -1730,6 +1783,7 @@ const triggerLabel = (rule) => {
   if (rule.trigger_type === 'interval') {
     return `${config.start_time || '00:00'} 起，每 ${config.interval_hours || 24} 小时`
   }
+  if (rule.trigger_type === 'advanced') return advancedScheduleLabel(config)
   if (rule.trigger_type === 'external_event' || rule.trigger_type === 'webhook') {
     return `收到通知：${config.event || '-'}`
   }
@@ -1738,6 +1792,17 @@ const triggerLabel = (rule) => {
     return `离线下载完成：${accountName} · ${config.path || '/'}`
   }
   return `每天 ${config.time || '00:00'}`
+}
+
+const advancedScheduleLabel = config => {
+  const time = config.time || '00:00'
+  if (config.schedule_mode === 'monthly') {
+    const days = (config.month_days || []).map(Number).sort((a, b) => a - b).join('、')
+    return `每月 ${days || '-'} 日 ${time}`
+  }
+  const names = ['一', '二', '三', '四', '五', '六', '日']
+  const days = (config.weekdays || []).map(value => names[Number(value) - 1]).filter(Boolean).join('、')
+  return `每周${days || '-'} ${time}`
 }
 
 const actionLabel = action => actionDefinition(action.type).label
@@ -3137,53 +3202,6 @@ defineExpose({
   --warn: var(--warning);
 }
 
-.pick-list {
-  padding-bottom: 14px;
-}
-
-.pick-option {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  width: 100%;
-  padding: 12px 20px;
-  border: 0;
-  background: var(--panel);
-  color: var(--ink);
-  cursor: pointer;
-  text-align: left;
-}
-
-.pick-option:hover {
-  background: var(--soft);
-}
-
-.pick-option > span:nth-child(2) {
-  flex: 1;
-  min-width: 0;
-}
-
-.pick-option b,
-.pick-option em {
-  display: block;
-  font-style: normal;
-}
-
-.pick-option b {
-  font-size: 14.5px;
-}
-
-.pick-option em {
-  margin-top: 2px;
-  color: var(--muted2);
-  font-size: 12px;
-}
-
-.pick-option > i, .pick-option > .lp-svg-icon {
-  color: var(--muted2);
-  font-size: 13px;
-}
-
 .pick-ico {
   display: inline-grid;
   place-items: center;
@@ -3197,7 +3215,8 @@ defineExpose({
 }
 
 .pick-ico.trigger,
-.pick-ico.interval {
+.pick-ico.interval,
+.pick-ico.advanced {
   background: color-mix(in srgb, #6366f1 16%, var(--panel));
   color: #6366f1;
 }

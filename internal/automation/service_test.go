@@ -183,6 +183,36 @@ func TestComputeNextRunIntervalUsesNextDayAnchorWhenTodayStartPassed(t *testing.
 	}
 }
 
+func TestComputeNextRunAdvancedWeekly(t *testing.T) {
+	t.Parallel()
+	loc := time.FixedZone("UTC+8", 8*3600)
+	base := time.Date(2026, 9, 14, 12, 0, 0, 0, loc) // 周一
+	got := computeNextRun(domain.AutomationTriggerAdvanced, map[string]any{
+		"schedule_mode": "weekly",
+		"weekdays":      []any{float64(1), float64(3)},
+		"time":          "10:30",
+	}, base)
+	want := time.Date(2026, 9, 16, 10, 30, 0, 0, loc)
+	if !got.Equal(want) {
+		t.Fatalf("每周下次运行 = %v, want %v", got, want)
+	}
+}
+
+func TestComputeNextRunAdvancedMonthlySkipsMissingDay(t *testing.T) {
+	t.Parallel()
+	loc := time.FixedZone("UTC+8", 8*3600)
+	base := time.Date(2026, 1, 31, 12, 0, 0, 0, loc)
+	got := computeNextRun(domain.AutomationTriggerAdvanced, map[string]any{
+		"schedule_mode": "monthly",
+		"month_days":    []any{float64(31)},
+		"time":          "10:30",
+	}, base)
+	want := time.Date(2026, 3, 31, 10, 30, 0, 0, loc)
+	if !got.Equal(want) {
+		t.Fatalf("每月下次运行 = %v, want %v", got, want)
+	}
+}
+
 func TestAdvanceNextRunIntervalKeepsSameDaySlotsThenResetsToNextAnchor(t *testing.T) {
 	t.Parallel()
 

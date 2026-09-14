@@ -16,6 +16,7 @@ const (
 
 	AutomationTriggerDaily           = "daily"
 	AutomationTriggerInterval        = "interval"
+	AutomationTriggerAdvanced        = "advanced"
 	AutomationTriggerWebhook         = "webhook"
 	AutomationTriggerOfflineDownload = "offline_download"
 
