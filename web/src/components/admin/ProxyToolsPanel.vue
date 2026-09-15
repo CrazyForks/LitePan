@@ -62,18 +62,18 @@ const embyItems = computed<ProxyWorkspaceItem[]>(() =>
 const embyFields: ProxyField[] = [
   {
     key: "emby_url",
-    label: "Emby 地址",
+    label: "Emby/Jellyfin 地址",
     placeholder: "http://192.168.1.10:8096",
-    helpTitle: "Emby 地址说明",
-    helpBody: "你的 Emby 服务器地址，例如 <code>http://192.168.1.10:8096</code>。<br>给 LitePan 连 Emby 用的，播放器里不要填这个。",
+    helpTitle: "媒体服务器地址说明",
+    helpBody: "你的 Emby 或 Jellyfin 服务器地址，例如 <code>http://192.168.1.10:8096</code>。<br>给 LitePan 连接媒体服务器使用，播放器里不要填这个。",
   },
   {
     key: "api_key",
     label: "API Key",
     type: "password",
-    placeholder: "Emby API Key",
+    placeholder: "Emby/Jellyfin API Key",
     helpTitle: "API Key 说明",
-    helpBody: "在 Emby 后台「API 密钥」里生成一个，粘贴到这里，用来连接 Emby 和刷库。",
+    helpBody: "在 Emby 或 Jellyfin 后台生成 API Key，粘贴到这里，用来连接媒体服务器、扫库和补全媒体信息。",
   },
   {
     key: "proxy_port",
@@ -122,7 +122,7 @@ function selectEmby(id: string) {
 
 function addEmby() {
   embySelectedID.value = "";
-  Object.assign(embyDraft, emptyEmbyDraft(embyConfigs.value.length ? `Emby ${embyConfigs.value.length + 1}` : "Emby"));
+  Object.assign(embyDraft, emptyEmbyDraft(embyConfigs.value.length ? `媒体服务 ${embyConfigs.value.length + 1}` : "媒体服务"));
 }
 
 function updatesFromConfigs(configs: EmbyConfig[]): EmbyConfigUpdate[] {
@@ -145,7 +145,7 @@ async function persistEmby(items: EmbyConfigUpdate[], message: string, enabled =
     toast.success(message);
     return true;
   } catch (error) {
-    toast.error(getApiErrorMessage(error, "保存 Emby 配置失败"));
+    toast.error(getApiErrorMessage(error, "保存 Emby/Jellyfin 配置失败"));
     return false;
   } finally {
     embySaving.value = false;
@@ -154,7 +154,7 @@ async function persistEmby(items: EmbyConfigUpdate[], message: string, enabled =
 
 async function saveEmby() {
   if (!embyDraft.name.trim() || !embyDraft.emby_url.trim() || !embyDraft.api_key.trim() || !embyDraft.proxy_port.trim()) {
-    toast.error("请填写配置名称、Emby 地址、API Key 和反代端口");
+    toast.error("请填写配置名称、Emby/Jellyfin 地址、API Key 和反代端口");
     return;
   }
   const items = updatesFromConfigs(embyConfigs.value);
@@ -173,7 +173,7 @@ async function saveEmby() {
   } else {
     items.push(next);
   }
-  if (await persistEmby(items, editing ? "Emby 配置已保存" : "Emby 配置已添加")) {
+  if (await persistEmby(items, editing ? "Emby/Jellyfin 配置已保存" : "Emby/Jellyfin 配置已添加")) {
     if (editing) {
       embySelectedID.value = editing.id;
     } else {
@@ -195,9 +195,9 @@ async function testEmby() {
       proxy_port: embyDraft.proxy_port,
       direct_strm_clients: embyDraft.direct_strm_clients,
     });
-    toast.success("Emby 连接成功");
+    toast.success("Emby/Jellyfin 连接成功");
   } catch (error) {
-    toast.error(getApiErrorMessage(error, "Emby 连接失败"));
+    toast.error(getApiErrorMessage(error, "Emby/Jellyfin 连接失败"));
   } finally {
     embyTesting.value = false;
   }
@@ -208,9 +208,9 @@ async function refreshEmby() {
   embyRefreshing.value = true;
   try {
     await refreshEmbyLibrary({ config_id: selectedEmby.value.id, mode: "global" });
-    toast.success(`已通知「${selectedEmby.value.name}」刷库`);
+    toast.success(`已通知「${selectedEmby.value.name}」扫描全部媒体库`);
   } catch (error) {
-    toast.error(getApiErrorMessage(error, "刷库失败"));
+    toast.error(getApiErrorMessage(error, "Emby/Jellyfin 扫库失败"));
   } finally {
     embyRefreshing.value = false;
   }
@@ -220,14 +220,14 @@ async function deleteEmby() {
   const config = selectedEmby.value;
   if (!config) return;
   const ok = await confirm({
-    title: "删除 Emby 配置？",
-    message: `将删除「${config.name}」。引用它的自动联动需要重新选择 Emby。`,
+    title: "删除 Emby/Jellyfin 配置？",
+    message: `将删除「${config.name}」。引用它的自动联动需要重新选择 Emby/Jellyfin 配置。`,
     confirmText: "确认删除",
     cancelText: "取消",
     danger: true,
   }).catch(() => false);
   if (!ok) return;
-  await persistEmby(updatesFromConfigs(embyConfigs.value.filter((item) => item.id !== config.id)), "Emby 配置已删除");
+  await persistEmby(updatesFromConfigs(embyConfigs.value.filter((item) => item.id !== config.id)), "Emby/Jellyfin 配置已删除");
   if (embyConfigs.value.length) {
     embySelectedID.value = embyConfigs.value[0].id;
     loadEmbyDraft(embyConfigs.value[0]);
@@ -239,13 +239,13 @@ async function deleteEmby() {
 
 async function setEmbyEnabled(enabled: boolean) {
   if (enabled && embyConfigs.value.length === 0) {
-    toast.error("请先添加 Emby 配置");
+    toast.error("请先添加 Emby/Jellyfin 配置");
     embyOpen.value = true;
     return;
   }
   await persistEmby(
     updatesFromConfigs(embyConfigs.value),
-    enabled ? "Emby 反代已启用" : "Emby 反代已停用",
+    enabled ? "Emby/Jellyfin 反代已启用" : "Emby/Jellyfin 反代已停用",
     enabled,
   );
 }
@@ -366,7 +366,7 @@ const fnosFields: ProxyField[] = [
     inputmode: "numeric",
     placeholder: "例如 18997",
     helpTitle: "反代端口说明",
-    helpBody: "反代用的端口，随便选一个没被占用的数字就行，别和 Emby 反代用同一个。<br>留空则不启动反代。",
+    helpBody: "反代用的端口，随便选一个没被占用的数字就行，别和 Emby/Jellyfin 反代用同一个。<br>留空则不启动反代。",
   },
   {
     key: "direct_strm_clients",
@@ -475,20 +475,20 @@ onMounted(async () => {
 <template>
   <div class="proxy-enhancement-cards">
     <ToolCard
-      v-show="matches('Emby 反代')"
+      v-show="matches('Emby/Jellyfin 反代')"
       :enabled="embyEnabled"
-      name="Emby 反代"
-      driver="STRM 直连 · 多 Emby 服务"
+      name="Emby/Jellyfin 反代"
+      driver="STRM 直连 · 多媒体服务"
       logo-src="/logos/emby.png"
       logo-fit="contain"
-      logo-alt="Emby"
+      logo-alt="Emby/Jellyfin"
       :stat-value="embyConfigs.length"
       :stat-label="`个配置 · ${embyRunning} 个运行`"
     >
       <template #toggle>
         <button class="check-toggle" type="button" :class="{ on: embyEnabled }" :disabled="embySaving" title="启用 / 停用" @click="setEmbyEnabled(!embyEnabled)"><svg viewBox="0 0 16 16"><path d="M3.5 8.5 6.5 11.5 12.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
       </template>
-      将 Emby 的 STRM 播放请求转换为网盘 302 直链，避免媒体流量经过 Emby 服务器中转。
+      将 Emby/Jellyfin 的 STRM 播放请求转换为网盘 302 直链，避免媒体流量经过媒体服务器中转。
       <template #actions>
         <AppButton size="sm" variant="secondary" @click="openEmby">配置反代</AppButton>
       </template>
@@ -516,17 +516,17 @@ onMounted(async () => {
     <ProxyWorkspace
       v-model="embyDraft"
       :open="embyOpen"
-      title="Emby 反代配置"
+      title="Emby/Jellyfin 反代配置"
       caption="EMBY 配置"
       icon="hand-play"
-      subtitle="STRM 直连 · 多 Emby 服务"
+      subtitle="STRM 直连 · 多媒体服务"
       :items="embyItems"
       :selected-id="embySelectedID"
       :fields="embyFields"
       :entry-url="embyEntryURL"
       :entry-running="embyEntryRunning"
       entry-help-title="反代入口说明"
-      entry-help-body="在播放器里添加 Emby 服务器时，填这个地址。<br>注意不是上面的 Emby 地址，别填混了。"
+      entry-help-body="在播放器里添加 Emby 或 Jellyfin 服务器时，填这个地址。<br>注意不是上面的媒体服务器地址，别填混了。"
       :show-refresh="true"
       :refreshing="embyRefreshing"
       :testing="embyTesting"

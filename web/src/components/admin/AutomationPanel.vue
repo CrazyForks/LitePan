@@ -5,7 +5,7 @@
         <div class="panel-head">
           <div>
             <div class="panel-title">自动联动</div>
-            <div class="panel-sub">示例：定时执行整理任务，质量达标后联动 STRM 和 Emby 刷库。</div>
+            <div class="panel-sub">示例：定时执行整理任务，质量达标后联动 STRM 和 Emby/JF 扫库。</div>
           </div>
           <div class="panel-head-actions">
             <AppButton type="button" size="sm" variant="secondary" @click="openRuns">
@@ -203,7 +203,7 @@
                 <div class="node-ico add"><SvgIcon name="plus" size="1em" /></div>
                 <div class="node-body">
                   <div class="node-title ph">选择要执行的任务</div>
-                  <div class="node-sub">整理 / STRM / 延迟 / Emby 全局刷库</div>
+                  <div class="node-sub">整理 / STRM / 延迟 / Emby/JF 扫库</div>
                 </div>
               </div>
             </div>
@@ -536,11 +536,11 @@
           </template>
           <template v-else-if="isEmbyScopedAction(configAction)">
             <div class="cfg-row">
-              <label>Emby配置</label>
+              <label>Emby/Jellyfin 配置</label>
               <AppSelect
                 v-model="configAction.params.emby_id"
                 :options="embyConfigOptions"
-                placeholder="请选择 Emby 配置"
+                placeholder="请选择 Emby/Jellyfin 配置"
                 @update:model-value="embyId => onEmbyConfigChange(configAction, embyId)"
               />
             </div>
@@ -557,7 +557,7 @@
                 :placeholder="embyLibrariesLoading ? '正在加载媒体库...' : '请选择媒体库'"
                 @update:model-value="libraryId => onEmbyLibraryChange(configAction, libraryId)"
               />
-              <div class="field-tip">媒体库列表从 Emby 实时拉取，仅在配置该动作时按需加载。</div>
+              <div class="field-tip">媒体库列表从 Emby/Jellyfin 实时拉取，仅在配置该动作时按需加载。</div>
               <button class="inline-link-btn" type="button" :disabled="embyLibrariesLoading || !configAction.params.emby_id" @click="ensureEmbyLibrariesLoaded(true)">
                 {{ embyLibrariesLoading ? '加载中...' : '刷新媒体库列表' }}
               </button>
@@ -819,23 +819,23 @@ const ACTION_DEFINITIONS = {
   },
   emby_refresh: {
     group: 'media',
-    label: 'Emby刷库',
-    optionLabel: 'Emby全局刷库',
+    label: 'Emby/JF 扫库',
+    optionLabel: 'Emby/JF 扫库',
     icon: 'server',
-    desc: '通知 Emby 扫描全部媒体库，或只扫描指定媒体库',
+    desc: '通知 Emby/Jellyfin 扫描全部媒体库，或只扫描指定媒体库',
     ...embyScopedActionDefinition,
-    nodeTitle: action => `Emby ${embyRefreshModeLabel(action)}「${embyRefreshTargetLabel(action)}」`,
-    previewTitle: action => `Emby${embyRefreshModeLabel(action)}[${embyRefreshTargetLabel(action)}]`
+    nodeTitle: action => `Emby/JF ${embyRefreshModeLabel(action)}「${embyRefreshTargetLabel(action)}」`,
+    previewTitle: action => `Emby/JF ${embyRefreshModeLabel(action)}[${embyRefreshTargetLabel(action)}]`
   },
   emby_complete_media_info: {
     group: 'media',
-    label: 'Emby 补全媒体信息',
-    optionLabel: 'Emby 补全媒体信息',
+    label: 'Emby/JF 补媒体信息',
+    optionLabel: 'Emby/JF 补媒体信息',
     icon: 'circle-info',
-    desc: '检查媒体流信息缺失的条目，并通知 Emby 重新提取',
+    desc: '检查媒体流信息缺失的条目，并通知 Emby/Jellyfin 重新提取',
     ...embyScopedActionDefinition,
-    nodeTitle: action => `Emby 补全媒体信息「${embyRefreshTargetLabel(action)}」`,
-    previewTitle: action => `Emby补全媒体信息[${embyRefreshTargetLabel(action)}]`
+    nodeTitle: action => `Emby/JF 补媒体信息「${embyRefreshTargetLabel(action)}」`,
+    previewTitle: action => `Emby/JF 补媒体信息[${embyRefreshTargetLabel(action)}]`
   },
   fnos_scan: {
     group: 'media',
@@ -1605,7 +1605,7 @@ const ensureEmbyLibrariesLoaded = async (force = false) => {
     embyLibrariesConfigID.value = embyId
   } catch (error) {
     if (force || !embyLibrariesLoaded.value) {
-      toast.error('加载 Emby 媒体库失败: ' + getApiErrorMessage(error, '请检查 Emby 配置'))
+      toast.error('加载 Emby/Jellyfin 媒体库失败: ' + getApiErrorMessage(error, '请检查 Emby/Jellyfin 配置'))
     }
   } finally {
     embyLibrariesLoading.value = false
@@ -1833,7 +1833,7 @@ const deleteRule = async (rule) => {
 
 const embyDisplayLabel = (action) => {
   const config = findEmbyConfig(action?.params?.emby_id) || defaultEmbyConfig()
-  return config?.name || '未选择 Emby'
+  return config?.name || '未选择 Emby/Jellyfin'
 }
 
 const embyRefreshModeLabel = (action) => (

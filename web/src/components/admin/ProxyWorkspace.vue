@@ -75,7 +75,7 @@ withDefaults(
     addable?: boolean;
   }>(),
   {
-    namePlaceholder: "例如：家庭 Emby",
+    namePlaceholder: "例如：家庭媒体服务",
     nameEditable: true,
     showEntry: true,
     entryUrl: "",

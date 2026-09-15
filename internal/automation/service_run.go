@@ -454,7 +454,7 @@ func strmScrapeOutcome(progress strmscrape.Progress, policy string) (string, boo
 
 func (s *Service) runEmbyRefresh(ctx context.Context, params map[string]any) map[string]any {
 	if s.emby == nil {
-		return map[string]any{"status": "failed", "success": false, "message": "Emby 服务未就绪"}
+		return map[string]any{"status": "failed", "success": false, "message": "Emby/Jellyfin 服务未就绪"}
 	}
 	req := embyproxy.RefreshRequest{
 		ConfigID:  strings.TrimSpace(anyString(params["emby_id"])),
@@ -465,9 +465,9 @@ func (s *Service) runEmbyRefresh(ctx context.Context, params map[string]any) map
 	if err != nil {
 		return map[string]any{"status": "failed", "success": false, "message": err.Error()}
 	}
-	message := "已通知 Emby 刷库"
+	message := "已通知 Emby/Jellyfin 扫描全部媒体库"
 	if result.Mode == "library" && result.LibraryName != "" {
-		message = "已通知 Emby 扫描媒体库：" + result.LibraryName
+		message = "已通知 Emby/Jellyfin 扫描媒体库：" + result.LibraryName
 	}
 	return map[string]any{
 		"status":  "success",
@@ -486,7 +486,7 @@ func (s *Service) runEmbyRefresh(ctx context.Context, params map[string]any) map
 
 func (s *Service) runEmbyCompleteMediaInfo(ctx context.Context, params map[string]any) map[string]any {
 	if s.emby == nil {
-		return map[string]any{"status": "failed", "success": false, "message": "Emby 服务未就绪"}
+		return map[string]any{"status": "failed", "success": false, "message": "Emby/Jellyfin 服务未就绪"}
 	}
 	result, err := s.emby.CompleteMediaInfo(ctx, embyproxy.CompleteMediaInfoRequest{
 		ConfigID:  strings.TrimSpace(anyString(params["emby_id"])),
@@ -504,7 +504,7 @@ func (s *Service) runEmbyCompleteMediaInfo(ctx context.Context, params map[strin
 		status = "partial"
 		message = fmt.Sprintf("已检查 %d 个条目，补全 %d 个，仍缺失 %d 个，等待超时 %d 个，失败 %d 个", result.Scanned, result.Completed, result.Unchanged, result.TimedOut, result.Failed)
 		if result.TimedOut > 0 {
-			message += "；超时条目可能仍在 Emby 后台处理"
+			message += "；超时条目可能仍在 Emby/Jellyfin 后台处理"
 		}
 		if len(result.FailedItems) > 0 {
 			names := result.FailedItems
@@ -676,9 +676,9 @@ func actionDisplayName(action RuleAction) string {
 	case domain.AutomationActionCacheClear:
 		return "刷新目录"
 	case domain.AutomationActionEmbyRefresh:
-		return "Emby 刷库"
+		return "Emby/JF 扫库"
 	case domain.AutomationActionEmbyCompleteMediaInfo:
-		return "Emby 补全媒体信息"
+		return "Emby/JF 补媒体信息"
 	case domain.AutomationActionFnosScan:
 		return "飞牛影视扫库"
 	case domain.AutomationActionFnosRefreshMetadata:

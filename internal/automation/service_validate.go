@@ -79,16 +79,16 @@ func (s *Service) ValidateRule(ctx context.Context, actions []RuleAction) (Valid
 				mode = "global"
 			}
 			if mode != "global" && mode != "library" {
-				issues = append(issues, ValidationIssue{Level: "error", Message: "Emby 执行范围无效", ActionIndex: index, ActionType: action.Type})
+				issues = append(issues, ValidationIssue{Level: "error", Message: "Emby/Jellyfin 执行范围无效", ActionIndex: index, ActionType: action.Type})
 				continue
 			}
 			if mode == "library" && strings.TrimSpace(anyString(action.Params["library_id"])) == "" {
-				issues = append(issues, ValidationIssue{Level: "error", Message: "请选择 Emby 媒体库", ActionIndex: index, ActionType: action.Type})
+				issues = append(issues, ValidationIssue{Level: "error", Message: "请选择 Emby/Jellyfin 媒体库", ActionIndex: index, ActionType: action.Type})
 				continue
 			}
 			embyID := strings.TrimSpace(anyString(action.Params["emby_id"]))
 			if s.emby == nil || !s.hasEmbyConfig(embyID) {
-				issues = append(issues, ValidationIssue{Level: "error", Message: "所选 Emby 配置不存在", ActionIndex: index, ActionType: action.Type})
+				issues = append(issues, ValidationIssue{Level: "error", Message: "所选 Emby/Jellyfin 配置不存在", ActionIndex: index, ActionType: action.Type})
 			}
 		case domain.AutomationActionFnosScan, domain.AutomationActionFnosRefreshMetadata:
 			if s.fnos == nil || !s.fnos.ManagementConfigured() {

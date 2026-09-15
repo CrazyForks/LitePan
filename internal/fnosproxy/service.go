@@ -204,7 +204,7 @@ func (s *Service) checkPortConflict(port string) error {
 		return nil
 	}
 	if s.portUsedByEmby != nil && s.portUsedByEmby(port) {
-		return domain.Errorf(domain.CodeValidation, "反代端口与 Emby 反代端口冲突")
+		return domain.Errorf(domain.CodeValidation, "反代端口与 Emby/Jellyfin 反代端口冲突")
 	}
 	return nil
 }

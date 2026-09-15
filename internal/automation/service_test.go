@@ -359,7 +359,7 @@ func TestValidateRuleRequiresLibrarySelectionForEmbyLibraryMode(t *testing.T) {
 	if result.OK {
 		t.Fatalf("期望未选择媒体库时校验失败")
 	}
-	if len(result.Issues) == 0 || !strings.Contains(result.Issues[0].Message, "请选择 Emby 媒体库") {
+	if len(result.Issues) == 0 || !strings.Contains(result.Issues[0].Message, "请选择 Emby/Jellyfin 媒体库") {
 		t.Fatalf("issues=%#v", result.Issues)
 	}
 }

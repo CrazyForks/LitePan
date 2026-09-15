@@ -320,6 +320,49 @@ func TestListLibrariesAndRefreshSpecificLibrary(t *testing.T) {
 	}
 }
 
+func TestJellyfinV12AuthAndVirtualFolderFallback(t *testing.T) {
+	var refreshed bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("ApiKey") != "test-key" {
+			http.Error(w, "missing ApiKey", http.StatusUnauthorized)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != `MediaBrowser Token="test-key"` {
+			http.Error(w, "missing MediaBrowser authorization", http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.URL.Path == "/Library/SelectableMediaFolders":
+			http.NotFound(w, r)
+		case r.URL.Path == "/Library/VirtualFolders":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"Name": "Jellyfin 电影", "ItemId": "jf-lib", "CollectionType": "movies",
+			}})
+		case r.URL.Path == "/Items/jf-lib/Refresh" && r.Method == http.MethodPost:
+			refreshed = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	svc := testEmbyProxyService(t, server.URL)
+	libraries, err := svc.ListLibraries(context.Background())
+	if err != nil {
+		t.Fatalf("列出 Jellyfin v12 媒体库: %v", err)
+	}
+	if len(libraries) != 1 || libraries[0].ID != "jf-lib" || libraries[0].Name != "Jellyfin 电影" {
+		t.Fatalf("Jellyfin 媒体库解析错误: %+v", libraries)
+	}
+	if _, err := svc.RefreshLibrary(context.Background(), RefreshRequest{Mode: "library", LibraryID: "jf-lib"}); err != nil {
+		t.Fatalf("刷新 Jellyfin v12 媒体库: %v", err)
+	}
+	if !refreshed {
+		t.Fatal("Jellyfin 媒体库刷新接口未调用")
+	}
+}
+
 func TestReplaceConfigsKeepsFirstAndMaskedSecret(t *testing.T) {
 	svc := testEmbyProxyService(t, "http://emby.test:8096")
 	state, err := svc.Replace(context.Background(), false, []UpdateRequest{
