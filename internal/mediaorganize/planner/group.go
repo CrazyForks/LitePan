@@ -254,7 +254,7 @@ func (p *Planner) groupEntries(entries []batchEntry) (map[groupKey][]batchEntry,
 		}
 		if movieDirID == "" && len(ancestors) > 0 {
 			anc := ancestors[len(ancestors)-1]
-			if !rules.IsGenericMediaDir(anc.Name) && !rules.IsSeasonDirName(anc.Name) && !rules.IsEpisodeRangeDirName(anc.Name) {
+			if !rules.IsGenericMediaDir(anc.Name) && !rules.IsSeasonDirName(anc.Name) && !rules.IsEpisodeRangeDirName(anc.Name) && !rules.IsCollectionContainerDir(anc.Name) {
 				parsed := rules.NormalizeParsedMedia(rules.ParseDirName(anc.Name))
 				if parsed.Title != "" {
 					movieDirID = anc.ID

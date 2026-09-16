@@ -192,16 +192,11 @@ func isCollectionContainerDir(name string) bool {
 	if LooksLikeSceneMovieRelease(raw) {
 		return false
 	}
-	dirParsed := NormalizeParsedMedia(ParseDirName(raw))
-	title := strings.TrimSpace(dirParsed.Title)
-	if title != "" && ScoreTitleForTMDB(title) >= 0.45 {
-		if !collectionContainerStrongHintRe.MatchString(raw) {
-			return false
-		}
-	}
 	if collectionContainerHintRe.MatchString(raw) {
 		return true
 	}
+	// 形如「一季」「2季」「前3季」的纯季名目录只是季范围容器，不是作品名。
+	title := strings.TrimSpace(NormalizeParsedMedia(ParseDirName(raw)).Title)
 	if seasonRangeTitleRe.MatchString(title) {
 		return true
 	}
@@ -293,12 +288,14 @@ func IsStandaloneMovieDirName(name string) bool {
 }
 
 var (
-	specialContentDirRe             = regexpMust(`(?:^|[\s._\-（(【\[])(?:番外篇?|特别篇|特別篇|前传|后传|外传|OVA|OAD|SP|Side Story|Specials?)(?:[\s._\-）)】\]\']|$)`)
-	collectionContainerHintRe       = regexpMust(`(?i)(?:\+|＋|/|(?:前?第?[一二三四五六七八九十\d]+季[与和]|[与和]前?第?[一二三四五六七八九十\d]+季|季[与和][前第]?[一二三四五六七八九十\d]+)|打包|合集|全集|全季|各季|前几季|前五季|前\d+季|番外.*剧场|剧场.*番外|番外\+|\+番外|季\+|\+季|多季|seasons?\s*[\+\&]|extras?\s*[\+\&])`)
-	collectionContainerStrongHintRe = collectionContainerHintRe
-	seasonRangeTitleRe              = regexpMust(`^前?[一二三四五六七八九十\d]+季$`)
-	standaloneMovieDirHintRe        = regexpMust(`(?i)(?:剧场版|映画|电影版|大电影|院线版|Movie\s*Edition)`)
-	seasonOnlyTitleRe               = regexpMust(`(?i)^第\s*\d{1,3}\s*季$`)
+	specialContentDirRe = regexpMust(`(?:^|[\s._\-（(【\[])(?:番外篇?|特别篇|特別篇|前传|后传|外传|OVA|OAD|SP|Side Story|Specials?)(?:[\s._\-）)】\]\']|$)`)
+	// 合集容器目录：命中即视为「装多部作品的容器」，不再当成单个作品名。
+	// 前半段关键字出现在名字任意位置即算；结尾那组只认「名字结尾」，
+	// 避免把「007系列：无暇赴死」这类单片片名误判成合集。
+	collectionContainerHintRe = regexpMust(`(?i)(?:\+|＋|/|(?:前?第?[一二三四五六七八九十\d]+季[与和]|[与和]前?第?[一二三四五六七八九十\d]+季|季[与和][前第]?[一二三四五六七八九十\d]+)|打包|合集|全集|全季|各季|前几季|前五季|前\d+季|番外.*剧场|剧场.*番外|番外\+|\+番外|季\+|\+季|多季|seasons?\s*[\+\&]|extras?\s*[\+\&]|(?:系列|大全|汇总|[二三四五六七八九十两\d]+部曲)\s*$)`)
+	seasonRangeTitleRe        = regexpMust(`^前?[一二三四五六七八九十\d]+季$`)
+	standaloneMovieDirHintRe  = regexpMust(`(?i)(?:剧场版|映画|电影版|大电影|院线版|Movie\s*Edition)`)
+	seasonOnlyTitleRe         = regexpMust(`(?i)^第\s*\d{1,3}\s*季$`)
 )
 
 func regexpMust(pattern string) *regexp.Regexp {

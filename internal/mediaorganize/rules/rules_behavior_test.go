@@ -640,3 +640,53 @@ func TestAudioCodecRank(t *testing.T) {
 		}
 	}
 }
+
+// 合集容器目录识别：命中即认为该目录装的是多部作品，不能让目录名变成作品名。
+func TestIsCollectionContainerDirKeywords(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		// 任意位置命中的关键字
+		{"黑夜传说合集", true},
+		{"喜剧片打包", true},
+		{"某某全集", true},
+		{"某某全季", true},
+		{"某某多季", true},
+		{"某某前3季", true},
+		{"第1季+第2季", true},
+		{"电影/剧集", true},
+		{"season1+2", true},
+		// 只在结尾命中的新增关键字
+		{"漫威系列", true},
+		{"无间道系列", true},
+		{"007系列", true},
+		{"指环王全系列", true},
+		{"周星驰大全", true},
+		{"电影汇总", true},
+		{"教父三部曲", true},
+		{"指环王三部曲", true},
+		{"2部曲", true},
+		// 单片片名里带关键字，不能误判成合集
+		{"007系列：无暇赴死", false},
+		{"007系列之无暇赴死", false},
+		{"阴阳路系列之我在你左右", false},
+		// 普通作品名
+		{"复仇者联盟", false},
+		{"黑客帝国", false},
+		{"流浪地球2", false},
+		{"千与千寻", false},
+		// 纯季名目录属于季范围容器，不是作品名
+		{"一季", true},
+		{"2季", true},
+		{"前3季", true},
+		// 带季字但不是纯季名，仍按作品处理
+		{"第一季", false},
+		{"第3季", false},
+	}
+	for _, c := range cases {
+		if got := isCollectionContainerDir(c.name); got != c.want {
+			t.Errorf("isCollectionContainerDir(%q) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
