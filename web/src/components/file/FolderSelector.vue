@@ -86,6 +86,7 @@ const emit = defineEmits<{
     accountId: number;
     parentId: string;
     path: string;
+    dirs: string[];
     selections?: FolderSelection[];
   }];
   cancel: [];
@@ -121,15 +122,17 @@ function formatFolderTimeShort(value?: string) {
 }
 
 const currentParentId = computed(() => breadcrumb.value[breadcrumb.value.length - 1]?.id ?? "");
+// 相对目录的「目录段数组」。显示路径是用 "/" 拼起来的字符串，目录名自带斜杠时
+// （例：一个名为 abc/def/ghi 的目录）跟三层目录的显示路径完全一样，无法还原段边界，
+// 所以把段数组一并传出，交给后端按段处理。
+const currentDirNames = computed(() => breadcrumb.value.slice(1).map((c) => c.name));
 const currentPath = computed(() => {
   if (props.rootAnchor) {
     const base = props.rootAnchor.path.replace(/\/+$/, "") || "/";
-    const extra = breadcrumb.value.slice(1).map((c) => c.name);
-    if (!extra.length) return base;
-    return `${base}/${extra.join("/")}`;
+    if (!currentDirNames.value.length) return base;
+    return `${base}/${currentDirNames.value.join("/")}`;
   }
-  const names = breadcrumb.value.slice(1).map((c) => c.name);
-  return names.length ? `/${names.join("/")}` : "/";
+  return currentDirNames.value.length ? `/${currentDirNames.value.join("/")}` : "/";
 });
 
 function anchorLabel(anchor: { path: string; label?: string }) {
@@ -606,11 +609,13 @@ function selectCurrent() {
     accountId: number;
     parentId: string;
     path: string;
+    dirs: string[];
     selections?: FolderSelection[];
   } = {
     accountId: props.accountId,
     parentId: currentParentId.value,
     path: currentPath.value,
+    dirs: currentDirNames.value,
   };
   if (props.multiSelect && selectedCount.value > 0) {
     payload.selections = activeSelections.value;

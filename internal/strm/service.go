@@ -701,7 +701,7 @@ type BranchPatch struct {
 	Status        *string
 }
 
-func (s *Service) CreateBranch(ctx context.Context, branch *domain.StrmBranch) (*domain.StrmBranch, error) {
+func (s *Service) CreateBranch(ctx context.Context, branch *domain.StrmBranch, relativeDirs []string) (*domain.StrmBranch, error) {
 	if s.branches == nil {
 		return nil, domain.Errf(domain.CodeNotImplement)
 	}
@@ -710,7 +710,7 @@ func (s *Service) CreateBranch(ctx context.Context, branch *domain.StrmBranch) (
 		return nil, err
 	}
 	branch.AccountID = task.AccountID
-	branch.RelativePath = branchRelativePath(task.Path, branch.Path)
+	branch.RelativePath = resolveBranchRelativePath(task.Path, branch.Path, relativeDirs)
 	if branch.BranchType == "" {
 		branch.BranchType = domain.StrmBranchTypeTemporary
 	}
@@ -734,7 +734,7 @@ func (s *Service) CreateBranch(ctx context.Context, branch *domain.StrmBranch) (
 	return s.branches.Get(ctx, id)
 }
 
-func (s *Service) UpdateBranch(ctx context.Context, taskID, branchID int64, patch BranchPatch) (*domain.StrmBranch, error) {
+func (s *Service) UpdateBranch(ctx context.Context, taskID, branchID int64, patch BranchPatch, relativeDirs []string) (*domain.StrmBranch, error) {
 	if s.branches == nil {
 		return nil, domain.Errf(domain.CodeNotImplement)
 	}
@@ -768,7 +768,13 @@ func (s *Service) UpdateBranch(ctx context.Context, taskID, branchID int64, patc
 	if patch.Status != nil {
 		branch.Status = *patch.Status
 	}
-	branch.RelativePath = branchRelativePath(task.Path, branch.Path)
+	// 只在真的改了目录时才重算相对路径：否则像“只改保留天数”这种更新
+	// 会拿显示路径重算一遍，把已经按目录段存好的值覆盖掉。
+	if len(relativeDirs) > 0 {
+		branch.RelativePath = dirKey(relativeDirs)
+	} else if patch.ParentID != nil || patch.Path != nil {
+		branch.RelativePath = branchRelativePath(task.Path, branch.Path)
+	}
 	if branch.BranchType == domain.StrmBranchTypeBase {
 		branch.Recursive = false
 		branch.RetentionDays = 0
@@ -805,6 +811,20 @@ func (s *Service) DeleteBranch(ctx context.Context, id int64) error {
 		return domain.Errf(domain.CodeNotImplement)
 	}
 	return s.branches.Delete(ctx, id)
+}
+
+// resolveBranchRelativePath 计算分支的相对路径。
+//
+// 优先用调用方传来的「目录段数组」：显示路径是用 "/" 拼起来的字符串，
+// 当某个目录名自带斜杠时（例：一个名为 abc/def/ghi 的目录），
+// 它和三层目录 abc/def/ghi 的显示路径完全相同，无法还原段边界，
+// 于是本地会被建出多层目录。拿到数组就不会丢这个信息。
+// 只有拿不到数组时才退回按显示路径做前缀相减。
+func resolveBranchRelativePath(taskPath, branchPath string, relativeDirs []string) string {
+	if len(relativeDirs) > 0 {
+		return dirKey(relativeDirs)
+	}
+	return branchRelativePath(taskPath, branchPath)
 }
 
 func branchRelativePath(taskPath, branchPath string) string {

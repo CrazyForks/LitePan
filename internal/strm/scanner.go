@@ -406,7 +406,8 @@ func validateMonitorBranches(task *domain.StrmTask, branches []*domain.StrmBranc
 		path := strings.TrimSpace(branch.Path)
 		relativePath := strings.Trim(strings.TrimSpace(branch.RelativePath), "/")
 		expectedRelative := branchRelativePath(task.Path, path)
-		if parentID != "" && parentID != "0" && path != "" && relativePath != "" && expectedRelative == relativePath {
+		if parentID != "" && parentID != "0" && path != "" && relativePath != "" &&
+			pathMatchesIgnoringSeparators(expectedRelative, relativePath) {
 			continue
 		}
 		if path == "" {
@@ -419,6 +420,38 @@ func validateMonitorBranches(task *domain.StrmTask, branches []*domain.StrmBranc
 		)
 	}
 	return nil
+}
+
+// pathMatchesIgnoringSeparators 比较两条路径字符串是否指向同一条路径。
+//
+// 同样的路径有两种等价写法：
+//  1. 按目录段拼（例：电影/2024 表示两层目录）；
+//  2. 目录名自带斜杠时按净化后的名字存（例：剧集/abc/def/ghi 里的第二段其实就是
+//     一个名为 abc/def/ghi 的目录，存成 剧集/abc_def_ghi）。
+//
+// 字符串本身分不清这两种情况（分隔符和名字里的斜杠是同一种字符），
+// 所以两边都先把分隔符折叠掉再比，只要“段内容一致”就算同一条。
+// 监控分支校验拿它比对，否则新存的分支会被误判成“监控分支目录异常”而停止扫描。
+func pathMatchesIgnoringSeparators(a, b string) bool {
+	return SafeName(strings.Trim(a, "/")) == SafeName(strings.Trim(b, "/"))
+}
+
+// segmentsBelowRoot 返回 segs 中位于 rootSegs 之下的部分。
+//
+// 目录名自带斜杠时，一个名字可能在 segs 里被拆成多段（例：一个名为 abc/def/ghi
+// 的目录在路径里就是三段），所以不能按段数硬比前缀。这里按「净化后相等」找出
+// rootSegs 实际占用的段数 k，返回 segs[k:]；对不上返回 false。
+func segmentsBelowRoot(segs, rootSegs []string) ([]string, bool) {
+	if len(rootSegs) == 0 {
+		return segs, true
+	}
+	want := strings.ToLower(SafeName(strings.Join(rootSegs, "/")))
+	for k := 1; k <= len(segs); k++ {
+		if strings.ToLower(SafeName(strings.Join(segs[:k], "/"))) == want {
+			return segs[k:], true
+		}
+	}
+	return nil, false
 }
 
 func effectiveCleanupScopes(useBranch bool, scopes []cleanupScope) []cleanupScope {
@@ -633,7 +666,9 @@ func walkBaseBranchEntry(
 				remotePath: childRemote,
 			}
 			if deps.Branches != nil && shouldAutoAddTemporaryBranch(ctx, deps, task, childID, rules.mediaExts) {
-				relativePath := strings.Join(childRel, "/")
+				// 必须按「净化后的目录段」拼：目录名自带斜杠时（如 abc/def/ghi），
+				// 用原始名字拼会把斜杠当层级，读回来时被拆成多层本地目录。
+				relativePath := dirKey(childRel)
 				expiresAt := time.Now().Add(30 * 24 * time.Hour)
 				branch := &domain.StrmBranch{
 					TaskID:        task.ID,

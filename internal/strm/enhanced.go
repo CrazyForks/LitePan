@@ -341,20 +341,16 @@ func isNotFoundError(err error) bool {
 
 // relDirsOf 把远端完整路径裁掉任务根前缀，得到本地相对目录。
 // 文件直接在任务根下时返回空切片；远端路径不在任务根内时返回 false。
+// relDirsOf 切出 dirPath 相对任务根的子目录段。
+//
+// dirPath 是远端路径字符串（段间用 "/" 分隔），rootSegs 是任务根的目录段。
+// 目录名允许自带斜杠（例：一个名为 abc/def/ghi 的目录），它拼出来的路径和三层目录
+// 完全一样，切法见 segmentsBelowRoot。对不上就返回 false，走“路径不一致”的保护。
 func relDirsOf(dirPath, fileName string, rootSegs []string) ([]string, bool) {
-	segs := splitRemotePath(dirPath)
-	if len(segs) < len(rootSegs) {
-		return nil, false
-	}
-	for i := range rootSegs {
-		if !strings.EqualFold(segs[i], rootSegs[i]) {
-			return nil, false
-		}
-	}
 	if strings.TrimSpace(fileName) == "" {
 		return nil, false
 	}
-	return segs[len(rootSegs):], true
+	return segmentsBelowRoot(splitRemotePath(dirPath), rootSegs)
 }
 
 func splitRemotePath(p string) []string {

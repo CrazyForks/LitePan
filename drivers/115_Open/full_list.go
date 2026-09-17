@@ -147,17 +147,31 @@ func buildDirPath(paths []dirPathEntry, selfName, rootID string) (string, bool) 
 		if id == "0" || !foundRoot {
 			continue
 		}
-		if name := strings.TrimSpace(p.FileName); name != "" {
+		if name := pathSegmentName(p.FileName); name != "" {
 			segs = append(segs, name)
 		}
 	}
 	if !foundRoot {
 		return "", false
 	}
-	if name := strings.TrimSpace(selfName); name != "" {
+	if name := pathSegmentName(selfName); name != "" {
 		segs = append(segs, name)
 	}
 	return strings.Join(segs, "/"), true
+}
+
+// pathSegmentName 把目录名里会被误当成层级的分隔符替换掉。
+//
+// 网盘目录名允许包含 "/"。直接把名字拼进以 "/" 分隔的路径里，上层（STRM 扫描）
+// 就再也分不清「一个名字带斜杠的目录」和「多层目录」，会把本地 strm 建到错误的多层
+// 目录下，并把正确位置的文件当成过期清理掉。段内去掉分隔符即可杜绝伪造层级。
+func pathSegmentName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	name = strings.ReplaceAll(name, "/", "_")
+	return strings.ReplaceAll(name, "\\", "_")
 }
 
 var (

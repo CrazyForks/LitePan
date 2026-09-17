@@ -960,7 +960,7 @@ function closeBranchDialog() {
   resetBranchForm();
 }
 
-async function onBranchFolderPicked(payload: { accountId: number; parentId: string; path: string }) {
+async function onBranchFolderPicked(payload: { accountId: number; parentId: string; path: string; dirs?: string[] }) {
   if (!branchTask.value?.id) return;
   const taskPath = (branchTask.value.path || "/").replace(/\/+$/, "") || "/";
   const picked = (payload.path || "/").replace(/\/+$/, "") || "/";
@@ -976,6 +976,7 @@ async function onBranchFolderPicked(payload: { accountId: number; parentId: stri
       account_id: branchTask.value.account_id,
       parent_id: payload.parentId,
       path: picked,
+      relative_dirs: payload.dirs ?? [],
       branch_type: branchType,
       recursive: branchType === "temporary",
       retention_days: branchType === "temporary" ? 30 : 0,

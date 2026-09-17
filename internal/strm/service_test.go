@@ -446,7 +446,7 @@ func TestUpdateBranchRetentionPreservesPathAndRefreshesExpiry(t *testing.T) {
 		Recursive:     true,
 		RetentionDays: 30,
 		BranchType:    domain.StrmBranchTypeTemporary,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +455,7 @@ func TestUpdateBranchRetentionPreservesPathAndRefreshesExpiry(t *testing.T) {
 	}
 
 	days := 90
-	updated, err := svc.UpdateBranch(ctx, taskID, branch.ID, BranchPatch{RetentionDays: &days})
+	updated, err := svc.UpdateBranch(ctx, taskID, branch.ID, BranchPatch{RetentionDays: &days}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +474,7 @@ func TestUpdateBranchRetentionPreservesPathAndRefreshesExpiry(t *testing.T) {
 	}
 
 	permanent := 0
-	updated, err = svc.UpdateBranch(ctx, taskID, branch.ID, BranchPatch{RetentionDays: &permanent})
+	updated, err = svc.UpdateBranch(ctx, taskID, branch.ID, BranchPatch{RetentionDays: &permanent}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
