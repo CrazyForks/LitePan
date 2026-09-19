@@ -8,8 +8,6 @@ const unreadCount = ref(0);
 const unreadRevision = ref(0);
 
 const STREAM_URL = "/api/admin/notifications/stream";
-// SSE 在线时的兜底巡检（防止长连接静默失效）。
-const ONLINE_POLL_MS = 60_000;
 // SSE 断开后的轮询频率，与改造前保持一致。
 const OFFLINE_POLL_MS = 30_000;
 const RECONNECT_MS = 10_000;
@@ -89,10 +87,10 @@ function connectStream() {
       applyCount(Number(payload.count ?? 0));
       unreadRevision.value += 1;
     } catch {
-      /* 坏帧不处理，兜底轮询会纠正 */
+      void refreshUnread();
     }
   });
-  es.onopen = () => startPolling(ONLINE_POLL_MS);
+  es.onopen = () => stopPolling();
   es.onerror = () => {
     // 自己接管重连，避免 EventSource 默认重连策略不可控。
     disconnectStream();
@@ -124,8 +122,6 @@ export function startNotificationBadge() {
   authDenied = false;
   void refreshUnread();
   connectStream();
-  // 没有 EventSource 的浏览器直接按离线频率轮询；有长连接的走低频兜底巡检。
-  startPolling(typeof EventSource === "undefined" ? OFFLINE_POLL_MS : ONLINE_POLL_MS);
   document.addEventListener("visibilitychange", onVisibilityChange);
 }
 
